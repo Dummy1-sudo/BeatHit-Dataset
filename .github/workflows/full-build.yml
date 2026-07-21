@@ -1,0 +1,114 @@
+name: full-high-accuracy-build
+
+on:
+  workflow_dispatch:
+    inputs:
+      skip_zenodo:
+        description: "Skip the 931 MB ~0.9M Spotify snapshot (lower coverage/accuracy)"
+        required: false
+        default: false
+        type: boolean
+  push:
+    branches: [main]
+    paths:
+      - 'src/**'
+      - 'scripts/**'
+      - 'requirements*.txt'
+      - 'pyproject.toml'
+      - '.github/workflows/full-build.yml'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: beathit-full-build
+  cancel-in-progress: false
+
+jobs:
+  build:
+    # Avoid recursively rebuilding after the bot commits only generated data.
+    if: "!contains(github.event.head_commit.message || '', '[skip full-build]')"
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+
+      - name: Install full builder
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e . -r requirements-full.txt pytest
+
+      - name: Restore large-source cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            data/raw/full_build
+            .cache/full_build
+          key: beathit-sources-v5-${{ runner.os }}
+          restore-keys: |
+            beathit-sources-v5-${{ runner.os }}-
+
+      - name: Build all requested lists
+        env:
+          HOLODEX_API_KEY: ${{ secrets.HOLODEX_API_KEY }}
+          YOUTUBE_API_KEY: ${{ secrets.YOUTUBE_API_KEY }}
+          BEATHIT_SKIP_ZENODO: ${{ github.event_name == 'workflow_dispatch' && inputs.skip_zenodo && '1' || '0' }}
+          BEATHIT_RYD_FALLBACK: '1'
+          BEATHIT_RYD_WORKERS: '20'
+          BEATHIT_YTDLP_FALLBACK: '0'
+          BEATHIT_VOCADB_SCAN_LIMIT: ${{ vars.BEATHIT_VOCADB_SCAN_LIMIT || '25000' }}
+          BEATHIT_COUNTRY_WORKERS: ${{ vars.BEATHIT_COUNTRY_WORKERS || '4' }}
+        run: |
+          python scripts/build_full_dataset.py
+          python -m music_megalist validate
+          python scripts/verify_targets.py > data/target_report.json
+          # A strict completion check is recorded but does not fabricate/pad a finite corpus.
+          if python -m music_megalist validate --complete > data/complete_validation.txt 2>&1; then
+            echo "Strict fixed-target validation passed" >> data/complete_validation.txt
+          else
+            echo "Strict fixed-target validation did not pass; see source-backed shortfalls above." >> data/complete_validation.txt
+          fi
+          pytest -q
+
+      - name: Update checksums
+        run: python scripts/update_manifest.py
+
+      - name: Commit generated datasets
+        run: |
+          git config user.name "BeatHit Dataset Builder"
+          git config user.email "actions@users.noreply.github.com"
+          git add -A data STATUS.json
+          if git diff --cached --quiet; then
+            echo "No generated-data changes"
+          else
+            git commit -m "Build source-backed BeatHit datasets [skip full-build]"
+            git push
+          fi
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: beathit-full-build-output
+          path: |
+            data/BUILD_REPORT.json
+            data/coverage_report.csv
+            data/target_report.json
+            data/complete_validation.txt
+            data/anime/*.csv
+            data/vocaloid/*.csv
+            data/worldwide/*.csv
+            data/classical/*.csv
+            data/vtuber_original/*.csv
+            data/vtuber_non_original/*.csv
+            data/emerging/*.csv
+            data/genres/*.csv
+            data/screen_soundtracks/*.csv
+            data/countries/*
+            data/megalist/*

@@ -1,0 +1,6 @@
+{
+  "state": "not_run_in_packaging_sandbox",
+  "reason": "Full build requires multi-gigabyte public downloads and live APIs unavailable in the packaging sandbox.",
+  "next_step": "Push repository to GitHub; the full-high-accuracy-build workflow runs automatically, or run python scripts/build_full_dataset.py in a network-enabled environment.",
+  "fabricated_rows": 0
+}

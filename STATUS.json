@@ -1,0 +1,94 @@
+{
+  "schema_version": 6,
+  "requested_at": "2026-07-20",
+  "delivery_mode": "github_ready_manual_push_with_network_backed_full_build",
+  "packaging_environment_state": "The packaging sandbox cannot fetch/process the required multi-gigabyte public corpora and live APIs. No quota files were fabricated. The included GitHub Actions/local full builder performs the network-backed materialization after manual push.",
+  "accuracy_policy": "No fabricated songs, artists, listen/view counts, media associations, or quota padding. Exact cumulative counters, chart-window aggregates, scores, and proxies are explicitly distinguished and sourced.",
+  "completion_summary": {
+    "all_fixed_size_targets_complete": false,
+    "vocaloid_conditional_corpus_marked_complete": false,
+    "all_requested_lists_complete": false,
+    "spotify_country_lists_complete": false
+  },
+  "materialized_bootstrap": {
+    "worldwide_historical_spotify_chart_snapshot_rows": 10000,
+    "vocaloid_verified_seed_rows": 5,
+    "megalist_bootstrap_rows": 9980
+  },
+  "full_build_targets": {
+    "anime": 10000,
+    "vocaloid": "all verified >=10,000,000 cumulative Spotify streams found in defensible source coverage; cap 10,000",
+    "worldwide": 51000,
+    "classical": 10000,
+    "vtuber_original": 10000,
+    "emerging": 10000,
+    "genres": 10000,
+    "screen_soundtracks": 10000,
+    "vtuber_non_original": 10000,
+    "megalist": "deduplicated union of all requested lists",
+    "countries": "top 1,000 unique songs for every dynamically detected Spotify regional country/territory chart"
+  },
+  "prebuild_dataset_state": {
+    "anime": {
+      "materialized_rows": 0,
+      "complete": false
+    },
+    "vocaloid": {
+      "materialized_rows": 0,
+      "complete": false
+    },
+    "worldwide": {
+      "materialized_rows": 0,
+      "complete": false
+    },
+    "classical": {
+      "materialized_rows": 0,
+      "complete": false
+    },
+    "vtuber_original": {
+      "materialized_rows": 0,
+      "complete": false
+    },
+    "emerging": {
+      "materialized_rows": 0,
+      "complete": false
+    },
+    "genres": {
+      "materialized_rows": 0,
+      "complete": false
+    },
+    "screen_soundtracks": {
+      "materialized_rows": 0,
+      "complete": false
+    },
+    "vtuber_non_original": {
+      "materialized_rows": 0,
+      "complete": false
+    },
+    "megalist": {
+      "materialized_rows": 0,
+      "complete": false
+    },
+    "countries": {
+      "materialized_rows": 0,
+      "complete": false
+    }
+  },
+  "automatic_build": ".github/workflows/full-build.yml",
+  "full_builder": "src/music_megalist/fullbuild.py",
+  "verification": [
+    "python -m music_megalist validate",
+    "python -m music_megalist validate --complete",
+    "python scripts/verify_targets.py"
+  ],
+  "completion_rule": "Do not treat the repository as fully complete until post-build STATUS.json says completion_summary.all_requested_lists_complete=true, including spotify_country_lists_complete=true, and validation/target reports agree. Conditional/finite corpora and country shortfalls are never padded.",
+  "notes": [
+    "Fixed-size categories are only marked complete when the requested row count is actually materialized.",
+    "Vocaloid qualification uses a stricter cumulative Spotify count channel: verified seeds plus Zenodo Spotify-API-derived snapshot and/or live Kworb overlay; chart-history totals and noisy cross-platform snapshot outliers cannot qualify a song by themselves.",
+    "VocaDB scanning is rate-paced and bounded by default to respect public API usage guidance; corpus completeness is never falsely asserted from a partial scan.",
+    "VTuber corpora are never padded with non-VTuber or unverified songs if verified source coverage is smaller than the requested cap.",
+    "The initial push triggers the full-high-accuracy-build workflow, which downloads public sources/APIs, builds, validates, writes reports, and commits generated datasets when workflow write permission is enabled.",
+    "Country lists are discovered dynamically from the Spotify regional chart index and require exactly 1,000 source-backed unique songs per detected market; country chart totals exclude streams earned while a song is outside the daily Top 200.",
+    "All country lists are included in the final megalist after country-level evidence is collapsed per song; distinct country chart totals are preserved in extra.country_chart_appearances and never mislabeled as lifetime Spotify streams."
+  ]
+}

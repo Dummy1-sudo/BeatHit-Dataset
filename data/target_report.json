@@ -1,0 +1,124 @@
+{
+  "fixed_targets": {
+    "anime/anime_songs.csv": {
+      "target": 10000,
+      "rows": 0,
+      "complete": false
+    },
+    "worldwide/worldwide_51000.csv": {
+      "target": 51000,
+      "rows": 0,
+      "complete": false
+    },
+    "classical/classical_10000.csv": {
+      "target": 10000,
+      "rows": 0,
+      "complete": false
+    },
+    "vtuber_original/vtuber_original_10000.csv": {
+      "target": 10000,
+      "rows": 0,
+      "complete": false
+    },
+    "emerging/emerging_10000.csv": {
+      "target": 10000,
+      "rows": 0,
+      "complete": false
+    },
+    "genres/genres_10000.csv": {
+      "target": 10000,
+      "rows": 0,
+      "complete": false
+    },
+    "screen_soundtracks/screen_soundtracks_10000.csv": {
+      "target": 10000,
+      "rows": 0,
+      "complete": false
+    },
+    "vtuber_non_original/vtuber_non_original_10000.csv": {
+      "target": 10000,
+      "rows": 0,
+      "complete": false
+    }
+  },
+  "semantic_checks": {
+    "worldwide_buckets": {
+      "current": {
+        "target": 10000,
+        "rows": 0,
+        "complete": false
+      },
+      "2020s": {
+        "target": 10000,
+        "rows": 0,
+        "complete": false
+      },
+      "2010s": {
+        "target": 10000,
+        "rows": 0,
+        "complete": false
+      },
+      "2000s": {
+        "target": 10000,
+        "rows": 0,
+        "complete": false
+      },
+      "1990s": {
+        "target": 5000,
+        "rows": 0,
+        "complete": false
+      },
+      "1980s": {
+        "target": 3000,
+        "rows": 0,
+        "complete": false
+      },
+      "1970s": {
+        "target": 2000,
+        "rows": 0,
+        "complete": false
+      },
+      "1960s": {
+        "target": 1000,
+        "rows": 0,
+        "complete": false
+      }
+    },
+    "genre_diversity": {
+      "required_genres": 50,
+      "observed_genres": 0,
+      "complete": false
+    },
+    "spotify_country_top1000": {
+      "detected_markets": 0,
+      "complete_markets": 0,
+      "total_rows": 0,
+      "target_per_country": 1000,
+      "complete": false
+    },
+    "vocaloid_threshold": {
+      "target": "all verified cumulative Spotify-stream songs >=10,000,000; cap 10,000",
+      "rows": 0,
+      "invalid_rows": [],
+      "threshold_valid": true,
+      "corpus_completeness": "Read STATUS.json datasets.vocaloid.complete; threshold validity does not prove exhaustive source coverage."
+    },
+    "vtuber_original_classification": {
+      "rows": 0,
+      "invalid_rows": [],
+      "complete": true
+    },
+    "vtuber_cover_classification": {
+      "rows": 0,
+      "invalid_rows": [],
+      "complete": true
+    },
+    "megalist_deduplication": {
+      "rows": 0,
+      "duplicate_title_main_artist_keys": 0,
+      "complete": true
+    }
+  },
+  "overall_complete": false,
+  "status_claims_all_requested_complete": false
+}

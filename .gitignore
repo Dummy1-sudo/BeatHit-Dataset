@@ -1,0 +1,6 @@
+.cache/
+__pycache__/
+*.pyc
+.venv/
+data/raw/full_build/
+*.part

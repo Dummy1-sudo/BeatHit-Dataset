@@ -1,0 +1,60 @@
+{
+  "schema_version": 2,
+  "files": [
+    {
+      "path": "data/BUILD_REPORT.json",
+      "bytes": 370,
+      "sha256": "0ed6232824d250d9bd5368ad9b0e8b20c8c26ed5862cd22623051b00d05a34c9"
+    },
+    {
+      "path": "data/README.md",
+      "bytes": 1880,
+      "sha256": "267e14c99d2ade054fe286cc1e3c2061ae256f1d39849f277f44211dea78b31d"
+    },
+    {
+      "path": "data/bootstrap/megalist_bootstrap.csv",
+      "bytes": 4213082,
+      "sha256": "d3cc07af0bb72c03186ce03fd22437682baf1e86bf8bf97ea6a3a5c876d7db47"
+    },
+    {
+      "path": "data/complete_validation.txt",
+      "bytes": 367,
+      "sha256": "68207f2b777ba97c30fb7d283b9bf6cbfa83d6a47d3de0552e9cf3380d00833a"
+    },
+    {
+      "path": "data/countries/README.md",
+      "bytes": 840,
+      "sha256": "2ea517b975aa0fb91dc2ec255e772027483482035ee6f75c319662a49a70d692"
+    },
+    {
+      "path": "data/raw/spotify_top10000_streamed_songs_2023.csv",
+      "bytes": 648194,
+      "sha256": "8ac24df17b5d0d7d58540844fac9fd0deec02338828c9dafe9fea8904ecad67e"
+    },
+    {
+      "path": "data/seeds/screen_association_seed.csv",
+      "bytes": 619,
+      "sha256": "4603330d1830962a15a73c4a07e64caafeb312d3c5086df828b4127deae22225"
+    },
+    {
+      "path": "data/seeds/vocaloid_verified_seed.csv",
+      "bytes": 1976,
+      "sha256": "0eeb293668a19569753f552d365d59d39d93e6d753ed9635e00fe2f9d34d0edb"
+    },
+    {
+      "path": "data/seeds/worldwide_listenbrainz_alltime_seed.csv",
+      "bytes": 3314,
+      "sha256": "5725b72bd1936c186f2b0143508e30058c4936715e2c1b9613feaf369d152044"
+    },
+    {
+      "path": "data/target_report.json",
+      "bytes": 2821,
+      "sha256": "7853e3783a5a86b7446131d96e859020d0fa54ce2be12042f1079ee7aacfc717"
+    },
+    {
+      "path": "data/worldwide/worldwide_spotify_top10000_snapshot.csv",
+      "bytes": 4978769,
+      "sha256": "c6791adf6fd764ff84e8856cf1a2960460f48e19c2c00ae031e7cfed502abaf9"
+    }
+  ]
+}
