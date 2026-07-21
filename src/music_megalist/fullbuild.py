@@ -629,10 +629,149 @@ def build_catalog(sources: dict[str, Path], status: BuildStatus) -> Path:
         status.warnings.append(f"duckdb catalog aggregation unavailable; pandas fallback used: {exc}")
         frames = [pd.read_parquet(p) for p in sorted(parts_dir.glob("*.parquet"))]
         df = pd.concat(frames, ignore_index=True)
-        # Prefer rows with actual stream counts, then higher popularity.
-        df["_has_streams"] = df.streams.notna().astype(int)
-        df = df.sort_values(["_key", "_has_streams", "streams", "popularity"], ascending=[True, False, False, False])
-        df = df.drop_duplicates("_key", keep="first").drop(columns=["_has_streams"])
+
+        # Pandas fallback must preserve *independent metric channels* across duplicate
+        # source rows.  A higher, less-trusted snapshot may legitimately win the general
+        # ``streams`` channel while a lower value from a trusted cumulative source must
+        # remain available in ``trusted_cumulative_streams``.  Simply keeping one whole
+        # representative row (the old behavior) silently discarded that trusted value.
+        #
+        # Match the DuckDB path above: choose one representative metadata row, then
+        # aggregate each metric/provenance pair independently at song-key level.
+        df["_has_cumulative_streams"] = (
+            df["streams"].notna() & df["streams_is_cumulative"].fillna(False).astype(bool)
+        )
+        df["_zenodo_preferred"] = (df["source_dataset"] == "spotify_zenodo_0_9m").astype(int)
+        reps = (
+            df.sort_values(
+                ["_key", "_has_cumulative_streams", "streams", "_zenodo_preferred", "popularity"],
+                ascending=[True, False, False, False, False],
+                na_position="last",
+            )
+            .drop_duplicates("_key", keep="first")
+            .copy()
+        )
+
+        keys_with_cumulative = set(df.loc[df["_has_cumulative_streams"], "_key"].astype(str))
+        eligible_streams = df[
+            df["_has_cumulative_streams"] | ~df["_key"].astype(str).isin(keys_with_cumulative)
+        ]
+        best_streams = (
+            eligible_streams.dropna(subset=["streams"])
+            .sort_values(["_key", "streams"], ascending=[True, False], na_position="last")
+            .drop_duplicates("_key", keep="first")
+            .set_index("_key")
+        )
+        best_trusted = (
+            df.dropna(subset=["trusted_cumulative_streams"])
+            .sort_values(["_key", "trusted_cumulative_streams"], ascending=[True, False], na_position="last")
+            .drop_duplicates("_key", keep="first")
+            .set_index("_key")
+        )
+
+        def _metric_best(value_col: str, *, ascending: bool = False) -> pd.DataFrame:
+            if value_col not in df.columns:
+                return pd.DataFrame()
+            return (
+                df.dropna(subset=[value_col])
+                .sort_values(["_key", value_col], ascending=[True, ascending], na_position="last")
+                .drop_duplicates("_key", keep="first")
+                .set_index("_key")
+            )
+
+        metric_specs = [
+            ("daily_streams", "daily_streams_source_url", False),
+            ("popularity", "popularity_source_url", False),
+            ("artist_popularity", None, False),
+            ("artist_followers", None, False),
+            ("track_score", "track_score_source_url", False),
+            ("youtube_views", "youtube_views_source_url", False),
+            ("tiktok_views", None, False),
+            ("all_time_rank", "all_time_rank_source_url", True),
+        ]
+        metric_best = {col: _metric_best(col, ascending=asc) for col, _, asc in metric_specs}
+
+        reps = reps.set_index("_key", drop=False)
+        for key, row in best_streams.iterrows():
+            if key not in reps.index:
+                continue
+            for col in [
+                "streams", "streams_metric_name", "streams_is_cumulative",
+                "streams_snapshot_date", "streams_source_url",
+            ]:
+                if col in row.index:
+                    reps.at[key, col] = row[col]
+
+        for key, row in best_trusted.iterrows():
+            if key not in reps.index:
+                continue
+            for col in [
+                "trusted_cumulative_streams", "trusted_streams_source_url",
+                "trusted_streams_snapshot_date",
+            ]:
+                if col in row.index:
+                    reps.at[key, col] = row[col]
+
+        for value_col, source_col, _ in metric_specs:
+            best = metric_best[value_col]
+            if best.empty:
+                continue
+            for key, row in best.iterrows():
+                if key not in reps.index:
+                    continue
+                reps.at[key, value_col] = row[value_col]
+                if source_col and source_col in row.index:
+                    reps.at[key, source_col] = row[source_col]
+
+        # Preserve stable IDs, merged genres/source membership, and the earliest plausible
+        # release year instead of inheriting them solely from the representative row.
+        def _first_nonempty(series: pd.Series) -> str | None:
+            for value in series:
+                if value is None:
+                    continue
+                text = str(value).strip()
+                if text and text.casefold() not in {"nan", "none", "null", "<na>"}:
+                    return text
+            return None
+
+        def _join_unique(series: pd.Series, sep: str = "|") -> str:
+            vals: list[str] = []
+            seen: set[str] = set()
+            for value in series:
+                if value is None:
+                    continue
+                for part in str(value).split("|"):
+                    part = part.strip()
+                    if not part or part.casefold() in {"nan", "none", "null"}:
+                        continue
+                    if part not in seen:
+                        seen.add(part); vals.append(part)
+            return sep.join(vals)
+
+        grouped = df.groupby("_key", sort=False)
+        any_track_id = grouped["track_id"].agg(_first_nonempty)
+        any_isrc = grouped["isrc"].agg(_first_nonempty)
+        all_genres = grouped["genres"].agg(_join_unique)
+        source_datasets = grouped["source_dataset"].agg(_join_unique)
+        release_year_num = pd.to_numeric(df["release_year"], errors="coerce")
+        plausible_year = release_year_num.where(release_year_num.between(1800, 2100))
+        earliest_year = plausible_year.groupby(df["_key"]).min()
+
+        for key in reps.index:
+            if key in any_track_id.index and any_track_id.loc[key]:
+                reps.at[key, "track_id"] = any_track_id.loc[key]
+            if key in any_isrc.index and any_isrc.loc[key]:
+                reps.at[key, "isrc"] = any_isrc.loc[key]
+            if key in all_genres.index and all_genres.loc[key]:
+                reps.at[key, "genres"] = all_genres.loc[key]
+            if key in source_datasets.index:
+                reps.at[key, "source_datasets"] = source_datasets.loc[key]
+            if key in earliest_year.index and pd.notna(earliest_year.loc[key]):
+                reps.at[key, "release_year"] = int(earliest_year.loc[key])
+
+        df = reps.reset_index(drop=True).drop(
+            columns=["_has_cumulative_streams", "_zenodo_preferred"], errors="ignore"
+        )
         df.to_parquet(out_path, index=False)
         n = len(df)
     status.sources["normalized_catalog"] = {"path": str(out_path.relative_to(ROOT)), "rows": int(n), "input_rows": int(total), "ok": True}
