@@ -1,0 +1,370 @@
+diff --git a/src/music_megalist/fullbuild.py b/src/music_megalist/fullbuild.py
+index 59ef6f1..e9a77fa 100644
+--- a/src/music_megalist/fullbuild.py
++++ b/src/music_megalist/fullbuild.py
+@@ -254,6 +254,37 @@ def _identity(title: str, artist: str, track_id: str | None = None) -> str:
+     return f"spotify:{tid}" if tid else f"text:{nt}:{na}"
+ 
+ 
++def _selection_aliases(r: pd.Series) -> tuple[str, ...]:
++    """Return every identity alias that must be unique inside one ranked song list.
++
++    Catalog aggregation is song-level by normalized title + main artist, but imperfect
++    upstream metadata can leave the same Spotify recording ID attached to two different
++    text labels. Selection must therefore guard both the song text identity and stable
++    recording identifiers. Otherwise a fixed-size list can contain duplicate Spotify IDs
++    even though its text keys are unique.
++    """
++    aliases: list[str] = []
++    text = _identity(str(r.get("title") or ""), str(r.get("main_artist") or ""))
++    if text not in {"text::", "text:"}:
++        aliases.append(text)
++    tid = _clean_track_id(r.get("track_id"))
++    if tid:
++        aliases.append(f"spotify:{tid}")
++    isrc = _clean_track_id(r.get("isrc"))
++    if isrc:
++        aliases.append(f"isrc:{isrc.upper()}")
++    return tuple(dict.fromkeys(aliases))
++
++
++def _claim_selection(r: pd.Series, used_aliases: set[str]) -> bool:
++    """Atomically reserve a catalog row for a list, rejecting any alias collision."""
++    aliases = _selection_aliases(r)
++    if not aliases or any(alias in used_aliases for alias in aliases):
++        return False
++    used_aliases.update(aliases)
++    return True
++
++
+ def _md5(path: Path, chunk: int = 8 * 1024 * 1024) -> str:
+     h = hashlib.md5()
+     with path.open("rb") as f:
+@@ -538,7 +569,7 @@ def build_catalog(sources: dict[str, Path], status: BuildStatus) -> Path:
+         con.execute("DROP TABLE IF EXISTS tracks")
+         con.execute(f"""
+             CREATE TABLE tracks AS
+-            WITH x AS (SELECT * FROM read_parquet('{glob}')),
++            WITH x AS (SELECT * FROM read_parquet('{glob}', union_by_name=true)),
+             ranked AS (
+               SELECT *,
+                 ROW_NUMBER() OVER (
+@@ -1047,10 +1078,8 @@ def build_worldwide(catalog: pd.DataFrame, status: BuildStatus) -> list[SongRow]
+             ranked = _rank_frame(catalog[(years >= lo) & (years <= hi)].copy())
+         bucket_rows: list[SongRow] = []
+         for _, r in ranked.iterrows():
+-            k = _identity(str(r.title), str(r.main_artist), _clean_track_id(r.track_id))
+-            if k in used:
++            if not _claim_selection(r, used):
+                 continue
+-            used.add(k)
+             era_rank=len(bucket_rows)+1
+             row=_catalog_row_to_song(r, rank=era_rank, extra={"era_bucket": label, "era_rank": era_rank})
+             bucket_rows.append(row)
+@@ -1118,18 +1147,16 @@ def build_genres(catalog: pd.DataFrame, status: BuildStatus) -> list[SongRow]:
+         while genre_counts[g] < target_each and cursors[g] < len(pools[g]):
+             idx = pools[g][cursors[g]]; cursors[g] += 1
+             r = catalog.loc[idx]
+-            k = _identity(str(r.title), str(r.main_artist), _clean_track_id(r.track_id))
+-            if k in used: continue
+-            used.add(k); genre_counts[g] += 1
++            if not _claim_selection(r, used): continue
++            genre_counts[g] += 1
+             selected.append(_catalog_row_to_song(r, extra={"selection_genre": g}))
+     # Redistribute any shortfall across the same >=50 genre pool without duplicates.
+     for g in chosen_genres:
+         while len(selected) < 10_000 and cursors[g] < len(pools[g]):
+             idx = pools[g][cursors[g]]; cursors[g] += 1
+             r = catalog.loc[idx]
+-            k = _identity(str(r.title), str(r.main_artist), _clean_track_id(r.track_id))
+-            if k in used: continue
+-            used.add(k); genre_counts[g] += 1
++            if not _claim_selection(r, used): continue
++            genre_counts[g] += 1
+             selected.append(_catalog_row_to_song(r, extra={"selection_genre": g, "redistributed": True}))
+     selected = _sort_and_rank(selected)[:10_000]
+     write_rows(selected, DATA / "genres" / "genres_10000.csv")
+@@ -1155,9 +1182,7 @@ def build_classical(catalog: pd.DataFrame, status: BuildStatus) -> list[SongRow]
+     selected: list[SongRow] = []
+     used = set()
+     for _, r in cand.iterrows():
+-        k = _identity(str(r.title), str(r.main_artist), _clean_track_id(r.track_id))
+-        if k in used: continue
+-        used.add(k)
++        if not _claim_selection(r, used): continue
+         row = _catalog_row_to_song(r, extra={"classical_filter": "genre_metadata"})
+         # In classical metadata the performer is preserved as main_artist; composer is left null
+         # unless a source explicitly provides it. We never guess composer from title strings.
+@@ -1199,9 +1224,10 @@ def _listenbrainz_classical(limit: int, used: set[str], status: BuildStatus) ->
+             mbid = x.get("identifier") or x.get("recording_mbid")
+             if isinstance(mbid, list): mbid = mbid[0] if mbid else None
+             if isinstance(mbid, str) and "/" in mbid: mbid = mbid.rsplit("/",1)[-1]
+-            k = f"mbid:{mbid}" if mbid else _identity(title, artist)
+-            if k in used: continue
+-            used.add(k)
++            aliases=[_identity(title, artist)]
++            if mbid: aliases.append(f"mbid:{mbid}")
++            if any(alias in used for alias in aliases): continue
++            used.update(aliases)
+             out.append(SongRow(title=title, main_artist=artist, genres=[tag], metric_name="listenbrainz_tag_radio_rank",
+                 metric_value=float(max(1,1001-pos)), metric_unit="rank_score", musicbrainz_recording_mbid=mbid,
+                 source_url="https://listenbrainz.org/", retrieved_at=TODAY,
+@@ -1240,9 +1266,8 @@ def build_emerging(catalog: pd.DataFrame, status: BuildStatus) -> list[SongRow]:
+     for _, r in eligible.iterrows():
+         artist_key = norm(str(r.main_artist))
+         if per_artist[artist_key] >= 3: continue
+-        k = _identity(str(r.title), str(r.main_artist), _clean_track_id(r.track_id))
+-        if k in used: continue
+-        used.add(k); per_artist[artist_key]+=1
++        if not _claim_selection(r, used): continue
++        per_artist[artist_key]+=1
+         selected.append(_catalog_row_to_song(r, extra={
+             "emerging_score": float(r._emerging_score),
+             "heuristic": "recent_release + track_momentum - established_artist_penalty; max_3_tracks_per_artist",
+@@ -1278,9 +1303,7 @@ def build_screen_soundtracks(catalog: pd.DataFrame, status: BuildStatus) -> list
+                 if not title or not artist: continue
+                 matched,method=_match_song(title,[artist],catalog,title_map,exact)
+                 if matched is None: continue
+-                k=_identity(str(matched.title),str(matched.main_artist),_clean_track_id(matched.track_id))
+-                if k in used: continue
+-                used.add(k)
++                if not _claim_selection(matched, used): continue
+                 row=_catalog_row_to_song(matched,extra={
+                     'association_method':'curated_verified_seed',
+                     'association_source_url':seed.get('association_source_url'),
+@@ -1298,9 +1321,7 @@ def build_screen_soundtracks(catalog: pd.DataFrame, status: BuildStatus) -> list
+     mask = album.str.contains(SOUNDTRACK_RE, na=False) | genre.str.contains(r"soundtrack|film score|movie", case=False, regex=True, na=False)
+     cand = _rank_frame(catalog[mask].copy())
+     for _, r in cand.iterrows():
+-        k=_identity(str(r.title),str(r.main_artist),_clean_track_id(r.track_id))
+-        if k in used: continue
+-        used.add(k)
++        if not _claim_selection(r, used): continue
+         row=_catalog_row_to_song(r, extra={"association_method":"album_or_genre_soundtrack_metadata"})
+         row.screen_work=_screen_work_from_album(str(r.album_name or ""))
+         selected.append(row)
+@@ -1325,11 +1346,26 @@ ANILIST_QUERY = r'''query ($page:Int!, $perPage:Int!) {
+ 
+ def _http_json(client: httpx.Client, method: str, url: str, **kwargs: Any) -> Any:
+     last=None
+-    for attempt in range(5):
++    for attempt in range(8):
+         try:
+-            r=client.request(method,url,**kwargs); r.raise_for_status(); return r.json()
++            r=client.request(method,url,**kwargs)
++            if r.status_code == 429:
++                retry_after=r.headers.get("Retry-After")
++                try: wait=float(retry_after) if retry_after is not None else float(min(60,2**attempt))
++                except ValueError: wait=float(min(60,2**attempt))
++                last=RuntimeError(f"429 Too Many Requests for {url}; retry after {wait:g}s")
++                time.sleep(max(1.0,min(wait,120.0)))
++                continue
++            r.raise_for_status(); return r.json()
++        except httpx.HTTPStatusError as exc:
++            last=exc
++            # Authentication/permission/not-found errors are not transient. Retrying them only
++            # wastes build time and can aggravate source-side rate controls.
++            if 400 <= exc.response.status_code < 500:
++                break
++            time.sleep(min(60,2**attempt))
+         except Exception as exc:
+-            last=exc; time.sleep(min(20,2**attempt))
++            last=exc; time.sleep(min(60,2**attempt))
+     raise RuntimeError(f"{method} {url} failed: {last}")
+ 
+ 
+@@ -1340,7 +1376,10 @@ def fetch_anilist_top(limit:int=10_000) -> list[dict[str,Any]]:
+             d=_http_json(c,"POST",ANILIST_API,json={"query":ANILIST_QUERY,"variables":{"page":page,"perPage":50}})
+             block=d["data"]["Page"]; out.extend(block["media"])
+             if not block["pageInfo"]["hasNextPage"]: break
+-            page+=1; time.sleep(.7)
++            page+=1
++            # AniList currently operates under a reduced anonymous rate limit. Stay below it
++            # instead of relying on repeated 429 retries from shared GitHub-hosted runner IPs.
++            time.sleep(2.1)
+     return out[:limit]
+ 
+ 
+diff --git a/src/music_megalist/validate.py b/src/music_megalist/validate.py
+index 595e861..f78c9f0 100644
+--- a/src/music_megalist/validate.py
++++ b/src/music_megalist/validate.py
+@@ -34,6 +34,9 @@ def _generic_csv_errors(path: Path) -> list[str]:
+     # The 51k worldwide file intentionally allows one song to appear once in current and once
+     # in its decade bucket. Uniqueness is therefore scoped to era_bucket for that one file.
+     bucketed = path.name == 'worldwide_51000.csv'
++    # Anime rows represent anime titles, not a globally unique song catalog. The same theme can
++    # legitimately be reused by multiple seasons/entries, so uniqueness is scoped to the anime.
++    anime_scoped = path.name == 'anime_songs.csv'
+     seen_spotify=set(); seen_mbid=set(); seen_isrc=set(); seen_text=set()
+     for i,r in enumerate(rows,1):
+         rank=(r.get('rank') or '').strip()
+@@ -61,7 +64,17 @@ def _generic_csv_errors(path: Path) -> list[str]:
+                     if int(float(vc)) != int(mv): errors.append(f"VIEW_MISMATCH {path} row {i}")
+                 except Exception: errors.append(f"VIEW_INVALID {path} row {i}")
+         bucket=_worldwide_bucket(r) if bucketed else ''
+-        scope=(bucket,) if bucketed else ()
++        if bucketed:
++            scope=(bucket,)
++        elif anime_scoped:
++            try:
++                anime_extra=json.loads(r.get('extra') or '{}')
++            except Exception:
++                anime_extra={}
++            anime_key=str(r.get('anime_title') or anime_extra.get('anilist_id') or '').strip()
++            scope=(anime_key,) if anime_key else ()
++        else:
++            scope=()
+         sid=(r.get('spotify_track_id') or '').strip()
+         if sid:
+             key=scope+(sid,)
+@@ -88,6 +101,8 @@ def validate(data_dir: str|Path='data', *, require_complete: bool=False) -> list
+     data=Path(data_dir); errors=[]
+     for p in data.rglob('*.csv'):
+         if '/raw/' in p.as_posix(): continue
++        # Reports/inputs are not canonical song-list CSVs and use intentionally different schemas.
++        if p.name in {'coverage_report.csv'}: continue
+         # bootstrap files are provenance examples, not final canonical categories.
+         if '/bootstrap/' in p.as_posix() or '/seeds/' in p.as_posix() or p.name.endswith('_snapshot.csv'): continue
+         errors.extend(_generic_csv_errors(p))
+@@ -125,22 +140,46 @@ def validate(data_dir: str|Path='data', *, require_complete: bool=False) -> list
+             markets=ci.get('markets') or []
+             detected=int(ci.get('detected_country_markets') or 0)
+             failures=ci.get('failures') or []
+-            codes=set()
++            codes=set(); materialized_rows=0
+             for m in markets:
+                 code=str(m.get('country_code') or '').upper()
+                 if not code: errors.append('COUNTRY_INDEX blank country code'); continue
+                 if code in codes: errors.append(f'COUNTRY_INDEX duplicate code {code}')
+                 codes.add(code)
+                 rows=int(m.get('unique_songs') or 0)
+-                if rows != 1000: errors.append(f'COUNTRY_COUNT {code}: {rows} != 1000')
++                materialized_rows += rows
++                if rows < 0 or rows > 1000:
++                    errors.append(f'COUNTRY_COUNT_INVALID {code}: {rows}')
+                 fn=str(m.get('file') or '')
+-                if not fn or not (data/'countries'/fn).exists(): errors.append(f'COUNTRY_FILE {code}: missing {fn}')
++                fp=data/'countries'/fn if fn else None
++                if not fn or fp is None or not fp.exists():
++                    errors.append(f'COUNTRY_FILE {code}: missing {fn}')
++                elif fp is not None:
++                    with fp.open(encoding='utf-8',newline='') as f:
++                        actual=max(0,sum(1 for _ in csv.reader(f))-1)
++                    if actual != rows:
++                        errors.append(f'COUNTRY_INDEX_COUNT_MISMATCH {code}: index={rows} file={actual}')
++                if require_complete and rows != 1000:
++                    errors.append(f'COUNTRY_COUNT {code}: {rows} != 1000')
+             if detected <= 0: errors.append('COUNTRY_INDEX no detected markets')
+-            if len(markets) != detected: errors.append(f'COUNTRY_MARKETS built {len(markets)} != detected {detected}')
+-            if failures: errors.append(f'COUNTRY_FAILURES {len(failures)}')
+-            expected_rows=detected*1000
+-            if int(ci.get('total_materialized_rows') or 0) != expected_rows:
+-                errors.append(f'COUNTRY_TOTAL_ROWS {ci.get("total_materialized_rows")} != {expected_rows}')
++            if len(markets) > detected:
++                errors.append(f'COUNTRY_MARKETS built {len(markets)} > detected {detected}')
++            recorded_success=int(ci.get('successfully_built_markets') or len(markets))
++            if recorded_success != len(markets):
++                errors.append(f'COUNTRY_SUCCESS_COUNT {recorded_success} != {len(markets)}')
++            recorded_rows=int(ci.get('total_materialized_rows') or 0)
++            if recorded_rows != materialized_rows:
++                errors.append(f'COUNTRY_TOTAL_ROWS {recorded_rows} != materialized {materialized_rows}')
++            # Source-backed shortfalls (a market with <1000 historical entries or an unavailable
++            # totals endpoint) are completeness issues, not structural corruption. Normal
++            # validation must allow them so the workflow can commit honest partial results; the
++            # strict completion check below still fails until every detected market is complete.
++            if require_complete:
++                if len(markets) != detected: errors.append(f'COUNTRY_MARKETS built {len(markets)} != detected {detected}')
++                if failures: errors.append(f'COUNTRY_FAILURES {len(failures)}')
++                expected_rows=detected*1000
++                if recorded_rows != expected_rows:
++                    errors.append(f'COUNTRY_TOTAL_ROWS {recorded_rows} != {expected_rows}')
+         except Exception as exc:
+             errors.append(f'COUNTRY_INDEX_INVALID {exc}')
+     elif require_complete:
+diff --git a/tests/test_fullbuild.py b/tests/test_fullbuild.py
+index b0c1e6c..97a7f9b 100644
+--- a/tests/test_fullbuild.py
++++ b/tests/test_fullbuild.py
+@@ -94,3 +94,37 @@ def test_catalog_retains_trusted_stream_channel_across_higher_untrusted_snapshot
+     assert int(r['streams'])==99_000_000
+     assert int(r['trusted_cumulative_streams'])==20_000_000
+     assert 'zenodo' in str(r['trusted_streams_source_url'])
++
++
++def test_selection_claim_rejects_same_spotify_id_with_different_text_labels():
++    from music_megalist.fullbuild import _claim_selection
++    used=set()
++    a=pd.Series({'title':'Song A','main_artist':'Artist','track_id':'SAME123','isrc':None})
++    b=pd.Series({'title':'Alternate Metadata Title','main_artist':'Different Credit','track_id':'SAME123','isrc':None})
++    assert _claim_selection(a,used) is True
++    assert _claim_selection(b,used) is False
++
++
++def test_selection_claim_rejects_same_text_with_different_spotify_ids():
++    from music_megalist.fullbuild import _claim_selection
++    used=set()
++    a=pd.Series({'title':'Same Song','main_artist':'Artist','track_id':'AAA','isrc':None})
++    b=pd.Series({'title':'Same Song','main_artist':'Artist','track_id':'BBB','isrc':None})
++    assert _claim_selection(a,used) is True
++    assert _claim_selection(b,used) is False
++
++
++def test_http_json_honors_429_retry_after(monkeypatch):
++    import httpx
++    import music_megalist.fullbuild as fb
++    calls={'n':0}; sleeps=[]
++    def handler(request):
++        calls['n']+=1
++        if calls['n']==1:
++            return httpx.Response(429,headers={'Retry-After':'3'},request=request,json={'error':'rate'})
++        return httpx.Response(200,request=request,json={'ok':True})
++    monkeypatch.setattr(fb.time,'sleep',lambda seconds:sleeps.append(seconds))
++    with httpx.Client(transport=httpx.MockTransport(handler)) as client:
++        assert fb._http_json(client,'GET','https://example.test') == {'ok':True}
++    assert calls['n']==2
++    assert sleeps==[3.0]
+diff --git a/tests/test_validate.py b/tests/test_validate.py
+new file mode 100644
+index 0000000..f583a54
+--- /dev/null
++++ b/tests/test_validate.py
+@@ -0,0 +1,38 @@
++import csv
++import json
++from pathlib import Path
++
++from music_megalist.validate import validate
++
++
++def test_validate_ignores_coverage_report_schema(tmp_path: Path):
++    data=tmp_path/'data'; data.mkdir()
++    (data/'coverage_report.csv').write_text(
++        'dataset,target,rows,complete,metric_coverage,notes\nworldwide,51000,51000,True,{},ok\n',
++        encoding='utf-8',
++    )
++    assert validate(data)==[]
++
++
++def test_country_shortfall_is_non_strict_but_strictly_incomplete(tmp_path: Path):
++    data=tmp_path/'data'; countries=data/'countries'; countries.mkdir(parents=True)
++    fn='xx_example_top1000.csv'
++    fields=['rank','title','main_artist','metric_name','metric_value','metric_unit','listen_count','source_url','retrieved_at']
++    with (countries/fn).open('w',encoding='utf-8',newline='') as f:
++        w=csv.DictWriter(f,fieldnames=fields); w.writeheader()
++        for i in range(1,3):
++            w.writerow({'rank':i,'title':f'Song {i}','main_artist':'Artist','metric_name':'spotify_country_chart_streams','metric_value':100-i,'metric_unit':'streams','listen_count':100-i,'source_url':'https://example.test','retrieved_at':'2026-07-21'})
++    index={
++        'detected_country_markets':2,
++        'successfully_built_markets':1,
++        'complete_markets':0,
++        'total_materialized_rows':2,
++        'markets':[{'country_code':'XX','unique_songs':2,'file':fn}],
++        'failures':[{'country_code':'YY','error':'404'}],
++    }
++    (countries/'index.json').write_text(json.dumps(index),encoding='utf-8')
++    assert validate(data,require_complete=False)==[]
++    strict=validate(data,require_complete=True)
++    assert any('COUNTRY_COUNT XX: 2 != 1000' in e for e in strict)
++    assert any('COUNTRY_MARKETS built 1 != detected 2' in e for e in strict)
++    assert any('COUNTRY_FAILURES 1' in e for e in strict)

@@ -34,6 +34,9 @@ def _generic_csv_errors(path: Path) -> list[str]:
     # The 51k worldwide file intentionally allows one song to appear once in current and once
     # in its decade bucket. Uniqueness is therefore scoped to era_bucket for that one file.
     bucketed = path.name == 'worldwide_51000.csv'
+    # Anime rows represent anime titles, not a globally unique song catalog. The same theme can
+    # legitimately be reused by multiple seasons/entries, so uniqueness is scoped to the anime.
+    anime_scoped = path.name == 'anime_songs.csv'
     seen_spotify=set(); seen_mbid=set(); seen_isrc=set(); seen_text=set()
     for i,r in enumerate(rows,1):
         rank=(r.get('rank') or '').strip()
@@ -61,7 +64,17 @@ def _generic_csv_errors(path: Path) -> list[str]:
                     if int(float(vc)) != int(mv): errors.append(f"VIEW_MISMATCH {path} row {i}")
                 except Exception: errors.append(f"VIEW_INVALID {path} row {i}")
         bucket=_worldwide_bucket(r) if bucketed else ''
-        scope=(bucket,) if bucketed else ()
+        if bucketed:
+            scope=(bucket,)
+        elif anime_scoped:
+            try:
+                anime_extra=json.loads(r.get('extra') or '{}')
+            except Exception:
+                anime_extra={}
+            anime_key=str(r.get('anime_title') or anime_extra.get('anilist_id') or '').strip()
+            scope=(anime_key,) if anime_key else ()
+        else:
+            scope=()
         sid=(r.get('spotify_track_id') or '').strip()
         if sid:
             key=scope+(sid,)
@@ -88,6 +101,8 @@ def validate(data_dir: str|Path='data', *, require_complete: bool=False) -> list
     data=Path(data_dir); errors=[]
     for p in data.rglob('*.csv'):
         if '/raw/' in p.as_posix(): continue
+        # Reports/inputs are not canonical song-list CSVs and use intentionally different schemas.
+        if p.name in {'coverage_report.csv'}: continue
         # bootstrap files are provenance examples, not final canonical categories.
         if '/bootstrap/' in p.as_posix() or '/seeds/' in p.as_posix() or p.name.endswith('_snapshot.csv'): continue
         errors.extend(_generic_csv_errors(p))
@@ -125,22 +140,46 @@ def validate(data_dir: str|Path='data', *, require_complete: bool=False) -> list
             markets=ci.get('markets') or []
             detected=int(ci.get('detected_country_markets') or 0)
             failures=ci.get('failures') or []
-            codes=set()
+            codes=set(); materialized_rows=0
             for m in markets:
                 code=str(m.get('country_code') or '').upper()
                 if not code: errors.append('COUNTRY_INDEX blank country code'); continue
                 if code in codes: errors.append(f'COUNTRY_INDEX duplicate code {code}')
                 codes.add(code)
                 rows=int(m.get('unique_songs') or 0)
-                if rows != 1000: errors.append(f'COUNTRY_COUNT {code}: {rows} != 1000')
+                materialized_rows += rows
+                if rows < 0 or rows > 1000:
+                    errors.append(f'COUNTRY_COUNT_INVALID {code}: {rows}')
                 fn=str(m.get('file') or '')
-                if not fn or not (data/'countries'/fn).exists(): errors.append(f'COUNTRY_FILE {code}: missing {fn}')
+                fp=data/'countries'/fn if fn else None
+                if not fn or fp is None or not fp.exists():
+                    errors.append(f'COUNTRY_FILE {code}: missing {fn}')
+                elif fp is not None:
+                    with fp.open(encoding='utf-8',newline='') as f:
+                        actual=max(0,sum(1 for _ in csv.reader(f))-1)
+                    if actual != rows:
+                        errors.append(f'COUNTRY_INDEX_COUNT_MISMATCH {code}: index={rows} file={actual}')
+                if require_complete and rows != 1000:
+                    errors.append(f'COUNTRY_COUNT {code}: {rows} != 1000')
             if detected <= 0: errors.append('COUNTRY_INDEX no detected markets')
-            if len(markets) != detected: errors.append(f'COUNTRY_MARKETS built {len(markets)} != detected {detected}')
-            if failures: errors.append(f'COUNTRY_FAILURES {len(failures)}')
-            expected_rows=detected*1000
-            if int(ci.get('total_materialized_rows') or 0) != expected_rows:
-                errors.append(f'COUNTRY_TOTAL_ROWS {ci.get("total_materialized_rows")} != {expected_rows}')
+            if len(markets) > detected:
+                errors.append(f'COUNTRY_MARKETS built {len(markets)} > detected {detected}')
+            recorded_success=int(ci.get('successfully_built_markets') or len(markets))
+            if recorded_success != len(markets):
+                errors.append(f'COUNTRY_SUCCESS_COUNT {recorded_success} != {len(markets)}')
+            recorded_rows=int(ci.get('total_materialized_rows') or 0)
+            if recorded_rows != materialized_rows:
+                errors.append(f'COUNTRY_TOTAL_ROWS {recorded_rows} != materialized {materialized_rows}')
+            # Source-backed shortfalls (a market with <1000 historical entries or an unavailable
+            # totals endpoint) are completeness issues, not structural corruption. Normal
+            # validation must allow them so the workflow can commit honest partial results; the
+            # strict completion check below still fails until every detected market is complete.
+            if require_complete:
+                if len(markets) != detected: errors.append(f'COUNTRY_MARKETS built {len(markets)} != detected {detected}')
+                if failures: errors.append(f'COUNTRY_FAILURES {len(failures)}')
+                expected_rows=detected*1000
+                if recorded_rows != expected_rows:
+                    errors.append(f'COUNTRY_TOTAL_ROWS {recorded_rows} != {expected_rows}')
         except Exception as exc:
             errors.append(f'COUNTRY_INDEX_INVALID {exc}')
     elif require_complete:

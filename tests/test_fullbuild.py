@@ -94,3 +94,37 @@ def test_catalog_retains_trusted_stream_channel_across_higher_untrusted_snapshot
     assert int(r['streams'])==99_000_000
     assert int(r['trusted_cumulative_streams'])==20_000_000
     assert 'zenodo' in str(r['trusted_streams_source_url'])
+
+
+def test_selection_claim_rejects_same_spotify_id_with_different_text_labels():
+    from music_megalist.fullbuild import _claim_selection
+    used=set()
+    a=pd.Series({'title':'Song A','main_artist':'Artist','track_id':'SAME123','isrc':None})
+    b=pd.Series({'title':'Alternate Metadata Title','main_artist':'Different Credit','track_id':'SAME123','isrc':None})
+    assert _claim_selection(a,used) is True
+    assert _claim_selection(b,used) is False
+
+
+def test_selection_claim_rejects_same_text_with_different_spotify_ids():
+    from music_megalist.fullbuild import _claim_selection
+    used=set()
+    a=pd.Series({'title':'Same Song','main_artist':'Artist','track_id':'AAA','isrc':None})
+    b=pd.Series({'title':'Same Song','main_artist':'Artist','track_id':'BBB','isrc':None})
+    assert _claim_selection(a,used) is True
+    assert _claim_selection(b,used) is False
+
+
+def test_http_json_honors_429_retry_after(monkeypatch):
+    import httpx
+    import music_megalist.fullbuild as fb
+    calls={'n':0}; sleeps=[]
+    def handler(request):
+        calls['n']+=1
+        if calls['n']==1:
+            return httpx.Response(429,headers={'Retry-After':'3'},request=request,json={'error':'rate'})
+        return httpx.Response(200,request=request,json={'ok':True})
+    monkeypatch.setattr(fb.time,'sleep',lambda seconds:sleeps.append(seconds))
+    with httpx.Client(transport=httpx.MockTransport(handler)) as client:
+        assert fb._http_json(client,'GET','https://example.test') == {'ok':True}
+    assert calls['n']==2
+    assert sleeps==[3.0]

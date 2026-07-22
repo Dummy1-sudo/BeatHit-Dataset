@@ -254,6 +254,37 @@ def _identity(title: str, artist: str, track_id: str | None = None) -> str:
     return f"spotify:{tid}" if tid else f"text:{nt}:{na}"
 
 
+def _selection_aliases(r: pd.Series) -> tuple[str, ...]:
+    """Return every identity alias that must be unique inside one ranked song list.
+
+    Catalog aggregation is song-level by normalized title + main artist, but imperfect
+    upstream metadata can leave the same Spotify recording ID attached to two different
+    text labels. Selection must therefore guard both the song text identity and stable
+    recording identifiers. Otherwise a fixed-size list can contain duplicate Spotify IDs
+    even though its text keys are unique.
+    """
+    aliases: list[str] = []
+    text = _identity(str(r.get("title") or ""), str(r.get("main_artist") or ""))
+    if text not in {"text::", "text:"}:
+        aliases.append(text)
+    tid = _clean_track_id(r.get("track_id"))
+    if tid:
+        aliases.append(f"spotify:{tid}")
+    isrc = _clean_track_id(r.get("isrc"))
+    if isrc:
+        aliases.append(f"isrc:{isrc.upper()}")
+    return tuple(dict.fromkeys(aliases))
+
+
+def _claim_selection(r: pd.Series, used_aliases: set[str]) -> bool:
+    """Atomically reserve a catalog row for a list, rejecting any alias collision."""
+    aliases = _selection_aliases(r)
+    if not aliases or any(alias in used_aliases for alias in aliases):
+        return False
+    used_aliases.update(aliases)
+    return True
+
+
 def _md5(path: Path, chunk: int = 8 * 1024 * 1024) -> str:
     h = hashlib.md5()
     with path.open("rb") as f:
@@ -538,7 +569,7 @@ def build_catalog(sources: dict[str, Path], status: BuildStatus) -> Path:
         con.execute("DROP TABLE IF EXISTS tracks")
         con.execute(f"""
             CREATE TABLE tracks AS
-            WITH x AS (SELECT * FROM read_parquet('{glob}')),
+            WITH x AS (SELECT * FROM read_parquet('{glob}', union_by_name=true)),
             ranked AS (
               SELECT *,
                 ROW_NUMBER() OVER (
@@ -1047,10 +1078,8 @@ def build_worldwide(catalog: pd.DataFrame, status: BuildStatus) -> list[SongRow]
             ranked = _rank_frame(catalog[(years >= lo) & (years <= hi)].copy())
         bucket_rows: list[SongRow] = []
         for _, r in ranked.iterrows():
-            k = _identity(str(r.title), str(r.main_artist), _clean_track_id(r.track_id))
-            if k in used:
+            if not _claim_selection(r, used):
                 continue
-            used.add(k)
             era_rank=len(bucket_rows)+1
             row=_catalog_row_to_song(r, rank=era_rank, extra={"era_bucket": label, "era_rank": era_rank})
             bucket_rows.append(row)
@@ -1118,18 +1147,16 @@ def build_genres(catalog: pd.DataFrame, status: BuildStatus) -> list[SongRow]:
         while genre_counts[g] < target_each and cursors[g] < len(pools[g]):
             idx = pools[g][cursors[g]]; cursors[g] += 1
             r = catalog.loc[idx]
-            k = _identity(str(r.title), str(r.main_artist), _clean_track_id(r.track_id))
-            if k in used: continue
-            used.add(k); genre_counts[g] += 1
+            if not _claim_selection(r, used): continue
+            genre_counts[g] += 1
             selected.append(_catalog_row_to_song(r, extra={"selection_genre": g}))
     # Redistribute any shortfall across the same >=50 genre pool without duplicates.
     for g in chosen_genres:
         while len(selected) < 10_000 and cursors[g] < len(pools[g]):
             idx = pools[g][cursors[g]]; cursors[g] += 1
             r = catalog.loc[idx]
-            k = _identity(str(r.title), str(r.main_artist), _clean_track_id(r.track_id))
-            if k in used: continue
-            used.add(k); genre_counts[g] += 1
+            if not _claim_selection(r, used): continue
+            genre_counts[g] += 1
             selected.append(_catalog_row_to_song(r, extra={"selection_genre": g, "redistributed": True}))
     selected = _sort_and_rank(selected)[:10_000]
     write_rows(selected, DATA / "genres" / "genres_10000.csv")
@@ -1155,9 +1182,7 @@ def build_classical(catalog: pd.DataFrame, status: BuildStatus) -> list[SongRow]
     selected: list[SongRow] = []
     used = set()
     for _, r in cand.iterrows():
-        k = _identity(str(r.title), str(r.main_artist), _clean_track_id(r.track_id))
-        if k in used: continue
-        used.add(k)
+        if not _claim_selection(r, used): continue
         row = _catalog_row_to_song(r, extra={"classical_filter": "genre_metadata"})
         # In classical metadata the performer is preserved as main_artist; composer is left null
         # unless a source explicitly provides it. We never guess composer from title strings.
@@ -1199,9 +1224,10 @@ def _listenbrainz_classical(limit: int, used: set[str], status: BuildStatus) -> 
             mbid = x.get("identifier") or x.get("recording_mbid")
             if isinstance(mbid, list): mbid = mbid[0] if mbid else None
             if isinstance(mbid, str) and "/" in mbid: mbid = mbid.rsplit("/",1)[-1]
-            k = f"mbid:{mbid}" if mbid else _identity(title, artist)
-            if k in used: continue
-            used.add(k)
+            aliases=[_identity(title, artist)]
+            if mbid: aliases.append(f"mbid:{mbid}")
+            if any(alias in used for alias in aliases): continue
+            used.update(aliases)
             out.append(SongRow(title=title, main_artist=artist, genres=[tag], metric_name="listenbrainz_tag_radio_rank",
                 metric_value=float(max(1,1001-pos)), metric_unit="rank_score", musicbrainz_recording_mbid=mbid,
                 source_url="https://listenbrainz.org/", retrieved_at=TODAY,
@@ -1240,9 +1266,8 @@ def build_emerging(catalog: pd.DataFrame, status: BuildStatus) -> list[SongRow]:
     for _, r in eligible.iterrows():
         artist_key = norm(str(r.main_artist))
         if per_artist[artist_key] >= 3: continue
-        k = _identity(str(r.title), str(r.main_artist), _clean_track_id(r.track_id))
-        if k in used: continue
-        used.add(k); per_artist[artist_key]+=1
+        if not _claim_selection(r, used): continue
+        per_artist[artist_key]+=1
         selected.append(_catalog_row_to_song(r, extra={
             "emerging_score": float(r._emerging_score),
             "heuristic": "recent_release + track_momentum - established_artist_penalty; max_3_tracks_per_artist",
@@ -1278,9 +1303,7 @@ def build_screen_soundtracks(catalog: pd.DataFrame, status: BuildStatus) -> list
                 if not title or not artist: continue
                 matched,method=_match_song(title,[artist],catalog,title_map,exact)
                 if matched is None: continue
-                k=_identity(str(matched.title),str(matched.main_artist),_clean_track_id(matched.track_id))
-                if k in used: continue
-                used.add(k)
+                if not _claim_selection(matched, used): continue
                 row=_catalog_row_to_song(matched,extra={
                     'association_method':'curated_verified_seed',
                     'association_source_url':seed.get('association_source_url'),
@@ -1298,9 +1321,7 @@ def build_screen_soundtracks(catalog: pd.DataFrame, status: BuildStatus) -> list
     mask = album.str.contains(SOUNDTRACK_RE, na=False) | genre.str.contains(r"soundtrack|film score|movie", case=False, regex=True, na=False)
     cand = _rank_frame(catalog[mask].copy())
     for _, r in cand.iterrows():
-        k=_identity(str(r.title),str(r.main_artist),_clean_track_id(r.track_id))
-        if k in used: continue
-        used.add(k)
+        if not _claim_selection(r, used): continue
         row=_catalog_row_to_song(r, extra={"association_method":"album_or_genre_soundtrack_metadata"})
         row.screen_work=_screen_work_from_album(str(r.album_name or ""))
         selected.append(row)
@@ -1325,11 +1346,26 @@ ANILIST_QUERY = r'''query ($page:Int!, $perPage:Int!) {
 
 def _http_json(client: httpx.Client, method: str, url: str, **kwargs: Any) -> Any:
     last=None
-    for attempt in range(5):
+    for attempt in range(8):
         try:
-            r=client.request(method,url,**kwargs); r.raise_for_status(); return r.json()
+            r=client.request(method,url,**kwargs)
+            if r.status_code == 429:
+                retry_after=r.headers.get("Retry-After")
+                try: wait=float(retry_after) if retry_after is not None else float(min(60,2**attempt))
+                except ValueError: wait=float(min(60,2**attempt))
+                last=RuntimeError(f"429 Too Many Requests for {url}; retry after {wait:g}s")
+                time.sleep(max(1.0,min(wait,120.0)))
+                continue
+            r.raise_for_status(); return r.json()
+        except httpx.HTTPStatusError as exc:
+            last=exc
+            # Authentication/permission/not-found errors are not transient. Retrying them only
+            # wastes build time and can aggravate source-side rate controls.
+            if 400 <= exc.response.status_code < 500:
+                break
+            time.sleep(min(60,2**attempt))
         except Exception as exc:
-            last=exc; time.sleep(min(20,2**attempt))
+            last=exc; time.sleep(min(60,2**attempt))
     raise RuntimeError(f"{method} {url} failed: {last}")
 
 
@@ -1340,7 +1376,10 @@ def fetch_anilist_top(limit:int=10_000) -> list[dict[str,Any]]:
             d=_http_json(c,"POST",ANILIST_API,json={"query":ANILIST_QUERY,"variables":{"page":page,"perPage":50}})
             block=d["data"]["Page"]; out.extend(block["media"])
             if not block["pageInfo"]["hasNextPage"]: break
-            page+=1; time.sleep(.7)
+            page+=1
+            # AniList currently operates under a reduced anonymous rate limit. Stay below it
+            # instead of relying on repeated 429 retries from shared GitHub-hosted runner IPs.
+            time.sleep(2.1)
     return out[:limit]
 
 
