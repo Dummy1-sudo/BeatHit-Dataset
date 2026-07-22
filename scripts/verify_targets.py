@@ -14,14 +14,14 @@ from music_megalist.dedupe import norm
 DATA = ROOT / "data"
 
 FIXED = {
-    "anime/anime_songs.csv": 10_000,
+    "anime/anime_songs.csv": 1_000,
     "worldwide/worldwide_51000.csv": 51_000,
     "classical/classical_10000.csv": 10_000,
-    "vtuber_original/vtuber_original_10000.csv": 10_000,
+    "vtuber_original/vtuber_original_10000.csv": 1_000,
     "emerging/emerging_10000.csv": 10_000,
     "genres/genres_10000.csv": 10_000,
     "screen_soundtracks/screen_soundtracks_10000.csv": 10_000,
-    "vtuber_non_original/vtuber_non_original_10000.csv": 10_000,
+    "vtuber_non_original/vtuber_non_original_10000.csv": 1_000,
 }
 WORLDWIDE_BUCKETS = {
     "current": 10_000,

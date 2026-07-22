@@ -66,7 +66,7 @@ jobs:
           BEATHIT_VOCADB_SCAN_LIMIT: ${{ vars.BEATHIT_VOCADB_SCAN_LIMIT || '25000' }}
           BEATHIT_COUNTRY_WORKERS: ${{ vars.BEATHIT_COUNTRY_WORKERS || '4' }}
         run: |
-          python scripts/build_full_dataset.py
+          python scripts/build_full_dataset.py --only anime vtuber_original vtuber_non_original
           python -m music_megalist validate
           python scripts/verify_targets.py > data/target_report.json
           # A strict completion check is recorded but does not fabricate/pad a finite corpus.

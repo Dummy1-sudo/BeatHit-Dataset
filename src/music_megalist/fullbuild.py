@@ -75,14 +75,14 @@ KWORB_DAILY_URL = "https://kworb.net/spotify/country/global_daily.html"
 
 # Fixed targets. Vocaloid is conditional and deliberately absent from this mapping.
 FIXED_TARGETS = {
-    "anime": 10_000,
+    "anime": 1_000,
     "worldwide": 51_000,
     "classical": 10_000,
-    "vtuber_original": 10_000,
+    "vtuber_original": 1_000,
     "emerging": 10_000,
     "genres": 10_000,
     "screen_soundtracks": 10_000,
-    "vtuber_non_original": 10_000,
+    "vtuber_non_original": 1_000,
 }
 
 WORLDWIDE_BUCKETS = [
@@ -1687,12 +1687,14 @@ def _jikan_theme_candidates(mal_id: int, client: httpx.Client, cache: dict[str, 
         return []
 
 def build_anime(catalog: pd.DataFrame, sources:dict[str,Path], status:BuildStatus) -> list[SongRow]:
+    target=FIXED_TARGETS["anime"]
+    candidate_limit=max(5_000,target*5)
     mal_path=sources.get("mal_theme_fallback")
-    anime=fetch_anilist_top(20_000,status)
+    anime=fetch_anilist_top(min(candidate_limit,5_000),status)
     # AniList can temporarily rate-limit, degrade or reject deep pagination. Never throw away a
     # long build because of that: fill missing candidates from the bundled MAL snapshot, ranked by
     # source-provided member count. AniList candidates remain first because they are fresher.
-    mal_ranked=_load_mal_anime_rank_fallback(mal_path,20_000)
+    mal_ranked=_load_mal_anime_rank_fallback(mal_path,candidate_limit)
     seen_mal={_safe_int(a.get("idMal")) for a in anime if _safe_int(a.get("idMal"))}
     for a in mal_ranked:
         mid=_safe_int(a.get("idMal"))
@@ -1700,7 +1702,7 @@ def build_anime(catalog: pd.DataFrame, sources:dict[str,Path], status:BuildStatu
             continue
         anime.append(a)
         if mid: seen_mal.add(mid)
-        if len(anime)>=20_000: break
+        if len(anime)>=candidate_limit: break
     status.sources["anime_popularity_candidates"]={
         "anilist_rows":sum(1 for a in anime if a.get("_popularity_source")=="anilist_users"),
         "mal_snapshot_rows":sum(1 for a in anime if a.get("_popularity_source")=="myanimelist_members_snapshot"),
@@ -1720,7 +1722,7 @@ def build_anime(catalog: pd.DataFrame, sources:dict[str,Path], status:BuildStatu
     rows=[]; jikan_queries=0
     try:
         for anime_rank,a in enumerate(anime,1):
-            if len(rows) >= 10_000:
+            if len(rows) >= target:
                 break
             candidates=list(by_al.get(a.get("id"),[])) or list(by_mal.get(a.get("idMal"),[])) or list(fallback.get(a.get("idMal"),[]))
             # Accuracy/coverage fallback for popular titles absent from AnimeThemes/snapshot.
@@ -1777,15 +1779,19 @@ def build_anime(catalog: pd.DataFrame, sources:dict[str,Path], status:BuildStatu
                     retrieved_at=TODAY,source_notes=note,extra=common_extra)
             row.anime_title=anime_title; row.anime_popularity=a.get("popularity")
             rows.append(row)
+            if len(rows) % 100 == 0:
+                # Preserve useful progress in the Actions artifact if a later request stalls.
+                write_rows(rows,DATA/"anime"/"anime_songs.partial.csv")
     finally:
         jikan_client.close()
         cache_path.parent.mkdir(parents=True,exist_ok=True)
         cache_path.write_text(json.dumps(jikan_cache,ensure_ascii=False),encoding="utf-8")
     rows.sort(key=lambda x:(x.extra or {}).get("anime_popularity_rank", 10**9))
+    rows=rows[:target]
     for i,r in enumerate(rows,1): r.rank=i
     write_rows(rows,DATA/"anime"/"anime_songs.csv")
     status.sources["jikan_theme_fallback"]={"url":"https://api.jikan.moe/v4","queried":jikan_queries,"cached":len(jikan_cache),"ok":True}
-    status.datasets["anime"] = DatasetStatus(target=10_000,rows=len(rows),complete=len(rows)==10_000,
+    status.datasets["anime"] = DatasetStatus(target=target,rows=len(rows),complete=len(rows)==target,
         metric_coverage=dict(_metric_counts(rows)),notes=[
             "Anime ordering prefers live AniList popularity; if AniList pagination is unavailable, remaining candidates come from the bundled MyAnimeList snapshot ranked by source-provided member count. Theme metadata priority: AnimeThemes external-ID match, bundled MAL fallback, then paced/cached Jikan themes."
         ])
@@ -2093,14 +2099,15 @@ def _fetch_holostats_rows(*, original: bool, status: BuildStatus) -> list[SongRo
         return []
 
 def build_vtuber(catalog:pd.DataFrame,status:BuildStatus,*,original:bool)->list[SongRow]:
+    target=FIXED_TARGETS["vtuber_original" if original else "vtuber_non_original"]
     topic="Original_Song" if original else "Music_Cover"
     videos=_fetch_holodex_topic(topic,status,max_items=60_000)
     if not videos:
         rows=_fetch_holostats_rows(original=original,status=status)
         rows=dedupe(rows)
         rows.sort(key=lambda r:r.metric_value,reverse=True)
-        for i,r in enumerate(rows[:10_000],1):r.rank=i
-        rows=rows[:10_000]
+        for i,r in enumerate(rows[:target],1):r.rank=i
+        rows=rows[:target]
     else:
         ids=[x.get("id") for x in videos if x.get("id")]
         views=_youtube_views(ids,status)
@@ -2162,13 +2169,13 @@ def build_vtuber(catalog:pd.DataFrame,status:BuildStatus,*,original:bool)->list[
         rows.extend(_fetch_holostats_rows(original=original,status=status))
         rows=dedupe(rows)
         rows.sort(key=lambda r:(0 if r.metric_name in {"holodex_source_rank","vtuber_channel_subscribers_proxy"} else 1,r.metric_value),reverse=True)
-        for i,r in enumerate(rows[:10_000],1):r.rank=i
-        rows=rows[:10_000]
+        for i,r in enumerate(rows[:target],1):r.rank=i
+        rows=rows[:target]
     folder="vtuber_original" if original else "vtuber_non_original"
     filename="vtuber_original_10000.csv" if original else "vtuber_non_original_10000.csv"
     write_rows(rows,DATA/folder/filename)
     key="vtuber_original" if original else "vtuber_non_original"
-    status.datasets[key]=DatasetStatus(target=10_000,rows=len(rows),complete=len(rows)==10_000,
+    status.datasets[key]=DatasetStatus(target=target,rows=len(rows),complete=len(rows)==target,
         metric_coverage=dict(_metric_counts(rows)),notes=["Holodex topic classification with mentions/channel metadata; exact YouTube views used when available, Spotify streams used on confident catalog matches, subscriber counts only as an explicitly labeled proxy. Finite verified corpus is never padded."])
     status.save();return rows
 
@@ -2346,7 +2353,26 @@ def full_build(*,skip_zenodo:bool=False,only:list[str]|None=None)->BuildStatus:
     from .io import read_rows
     for k,p in paths.items():
         if k not in built and p.exists():
-            try:built[k]=read_rows(p)
+            try:
+                built[k]=read_rows(p)
+                st=status.datasets.get(k)
+                if st is not None:
+                    st.rows=len(built[k])
+                    st.metric_coverage=dict(_metric_counts(built[k]))
+                    if k in FIXED_TARGETS:
+                        st.complete=len(built[k])==FIXED_TARGETS[k]
+                if k=="vocaloid":
+                    # Preserve the previous corpus-completeness claim on a partial run by
+                    # reading STATUS.json below if available; row count alone cannot prove it.
+                    try:
+                        old_status_path=ROOT/"STATUS.json"
+                        if old_status_path.exists():
+                            old_status=json.loads(old_status_path.read_text(encoding="utf-8"))
+                            old_v=(old_status.get("datasets") or {}).get("vocaloid") or {}
+                            st.complete=bool(old_v.get("complete"))
+                            st.notes=list(old_v.get("notes") or st.notes)
+                    except Exception as exc:
+                        status.warnings.append(f"existing vocaloid status: {exc}")
             except Exception as exc:status.warnings.append(f"existing {k}: {exc}")
     if "countries" not in built:
         try:

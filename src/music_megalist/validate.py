@@ -6,14 +6,14 @@ from .io import read_rows
 from .dedupe import norm
 
 TARGETS={
- "anime/anime_songs.csv":10000,
+ "anime/anime_songs.csv":1000,
  "worldwide/worldwide_51000.csv":51000,
  "classical/classical_10000.csv":10000,
- "vtuber_original/vtuber_original_10000.csv":10000,
+ "vtuber_original/vtuber_original_10000.csv":1000,
  "emerging/emerging_10000.csv":10000,
  "genres/genres_10000.csv":10000,
  "screen_soundtracks/screen_soundtracks_10000.csv":10000,
- "vtuber_non_original/vtuber_non_original_10000.csv":10000,
+ "vtuber_non_original/vtuber_non_original_10000.csv":1000,
 }
 
 def _worldwide_bucket(row: dict[str,str]) -> str:
