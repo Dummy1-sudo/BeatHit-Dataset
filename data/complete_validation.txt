@@ -1,9 +1,10 @@
-MISSING countries/index.json
+COUNTRY_COUNT CY: 15 != 1000
+COUNTRY_COUNT MT: 575 != 1000
+COUNTRY_MARKETS built 75 != detected 76
+COUNTRY_FAILURES 1
+COUNTRY_TOTAL_ROWS 73590 != 76000
 MISSING anime/anime_songs.csv
-MISSING worldwide/worldwide_51000.csv
-MISSING classical/classical_10000.csv
-MISSING vtuber_original/vtuber_original_10000.csv
-MISSING emerging/emerging_10000.csv
-MISSING genres/genres_10000.csv
-MISSING screen_soundtracks/screen_soundtracks_10000.csv
-MISSING vtuber_non_original/vtuber_non_original_10000.csv
+COUNT vtuber_original/vtuber_original_10000.csv: 0 != 10000
+COUNT screen_soundtracks/screen_soundtracks_10000.csv: 5660 != 10000
+COUNT vtuber_non_original/vtuber_non_original_10000.csv: 0 != 10000
+Strict fixed-target validation did not pass; see source-backed shortfalls above.

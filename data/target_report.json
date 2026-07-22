@@ -7,13 +7,13 @@
     },
     "worldwide/worldwide_51000.csv": {
       "target": 51000,
-      "rows": 0,
-      "complete": false
+      "rows": 51000,
+      "complete": true
     },
     "classical/classical_10000.csv": {
       "target": 10000,
-      "rows": 0,
-      "complete": false
+      "rows": 10000,
+      "complete": true
     },
     "vtuber_original/vtuber_original_10000.csv": {
       "target": 10000,
@@ -22,17 +22,17 @@
     },
     "emerging/emerging_10000.csv": {
       "target": 10000,
-      "rows": 0,
-      "complete": false
+      "rows": 10000,
+      "complete": true
     },
     "genres/genres_10000.csv": {
       "target": 10000,
-      "rows": 0,
-      "complete": false
+      "rows": 10000,
+      "complete": true
     },
     "screen_soundtracks/screen_soundtracks_10000.csv": {
       "target": 10000,
-      "rows": 0,
+      "rows": 5660,
       "complete": false
     },
     "vtuber_non_original/vtuber_non_original_10000.csv": {
@@ -45,60 +45,62 @@
     "worldwide_buckets": {
       "current": {
         "target": 10000,
-        "rows": 0,
-        "complete": false
+        "rows": 10000,
+        "complete": true
       },
       "2020s": {
         "target": 10000,
-        "rows": 0,
-        "complete": false
+        "rows": 10000,
+        "complete": true
       },
       "2010s": {
         "target": 10000,
-        "rows": 0,
-        "complete": false
+        "rows": 10000,
+        "complete": true
       },
       "2000s": {
         "target": 10000,
-        "rows": 0,
-        "complete": false
+        "rows": 10000,
+        "complete": true
       },
       "1990s": {
         "target": 5000,
-        "rows": 0,
-        "complete": false
+        "rows": 5000,
+        "complete": true
       },
       "1980s": {
         "target": 3000,
-        "rows": 0,
-        "complete": false
+        "rows": 3000,
+        "complete": true
       },
       "1970s": {
         "target": 2000,
-        "rows": 0,
-        "complete": false
+        "rows": 2000,
+        "complete": true
       },
       "1960s": {
         "target": 1000,
-        "rows": 0,
-        "complete": false
+        "rows": 1000,
+        "complete": true
       }
     },
     "genre_diversity": {
       "required_genres": 50,
-      "observed_genres": 0,
-      "complete": false
+      "observed_genres": 50,
+      "complete": true
     },
     "spotify_country_top1000": {
-      "detected_markets": 0,
-      "complete_markets": 0,
-      "total_rows": 0,
+      "detected_markets": 76,
+      "complete_markets": 73,
+      "total_rows": 73590,
       "target_per_country": 1000,
+      "failures": 1,
+      "files_ok": true,
       "complete": false
     },
     "vocaloid_threshold": {
       "target": "all verified cumulative Spotify-stream songs >=10,000,000; cap 10,000",
-      "rows": 0,
+      "rows": 305,
       "invalid_rows": [],
       "threshold_valid": true,
       "corpus_completeness": "Read STATUS.json datasets.vocaloid.complete; threshold validity does not prove exhaustive source coverage."
@@ -114,7 +116,7 @@
       "complete": true
     },
     "megalist_deduplication": {
-      "rows": 0,
+      "rows": 88798,
       "duplicate_title_main_artist_keys": 0,
       "complete": true
     }

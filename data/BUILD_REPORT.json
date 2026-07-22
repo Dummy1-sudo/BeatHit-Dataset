@@ -1,6 +1,259 @@
 {
-  "state": "not_run_in_packaging_sandbox",
-  "reason": "Full build requires multi-gigabyte public downloads and live APIs unavailable in the packaging sandbox.",
-  "next_step": "Push repository to GitHub; the full-high-accuracy-build workflow runs automatically, or run python scripts/build_full_dataset.py in a network-enabled environment.",
-  "fabricated_rows": 0
+  "started_at": "2026-07-22T02:30:00.469123+00:00",
+  "finished_at": "2026-07-22T03:03:06.664334+00:00",
+  "sources": {
+    "spotify_zenodo_0_9m": {
+      "url": "https://zenodo.org/records/11453410/files/tracks.csv?download=1",
+      "mirrors": [
+        "https://zenodo.org/records/11453410/files/tracks.csv?download=1",
+        "https://zenodo.org/api/records/11453410/files/tracks.csv/content"
+      ],
+      "path": "data/raw/full_build/spotify_zenodo_0_9m.csv",
+      "bytes": 931386809,
+      "ok": true
+    },
+    "spotify_114k": {
+      "url": "https://raw.githubusercontent.com/szewczakjj/Almost-Million-Songs-Dataset-2025-16-Features-/main/dataset.txt",
+      "path": "data/raw/full_build/spotify_114k.csv",
+      "bytes": 20118249,
+      "ok": true
+    },
+    "spotify_2024_crossplatform": {
+      "url": "https://gist.githubusercontent.com/cooneycw/b4021d5d872ee4a07239f0ea25c23cd7/raw/spotify_data.csv",
+      "path": "data/raw/full_build/spotify_2024_crossplatform.csv",
+      "bytes": 1101559,
+      "ok": true
+    },
+    "mal_theme_fallback": {
+      "url": "https://gist.githubusercontent.com/Chepubelja/00ed0aae9bdd4d9be5f4fd1032d0d250/raw/AnimeList.csv",
+      "path": "data/raw/full_build/mal_anime_theme_fallback.csv",
+      "bytes": 10306898,
+      "ok": true
+    },
+    "spotify_600k_historical": {
+      "url": "https://www.kaggle.com/datasets/yamaerenay/spotify-dataset-19212020-600k-tracks",
+      "path": "data/raw/full_build/spotify_600k_historical.csv",
+      "bytes": 111366271,
+      "ok": true
+    },
+    "spotify_2025_0_9m_features": {
+      "url": "https://www.kaggle.com/datasets/anantsinghal786/almost-million-songs-dataset-2025-16-features",
+      "path": "data/raw/full_build/spotify_2025_0_9m_features.csv",
+      "bytes": 136228172,
+      "ok": true
+    },
+    "spotify_top10000_2023": {
+      "path": "data/raw/spotify_top10000_streamed_songs_2023.csv",
+      "bytes": 648194,
+      "url": "bundled historical public snapshot; see docs/SOURCES.md",
+      "ok": true
+    },
+    "normalized_catalog": {
+      "path": ".cache/full_build/catalog.parquet",
+      "rows": 663057,
+      "input_rows": 916153,
+      "ok": true
+    },
+    "kworb_live_spotify": {
+      "url": "https://kworb.net/spotify/songs.html",
+      "rows": 2483,
+      "retrieved_at": "2026-07-22",
+      "ok": true
+    },
+    "kworb_global_daily": {
+      "url": "https://kworb.net/spotify/country/global_daily.html",
+      "rows": 200,
+      "retrieved_at": "2026-07-22",
+      "ok": true
+    },
+    "vocadb_candidate_scan": {
+      "url": "https://vocadb.net/api/songs",
+      "rows": 25000,
+      "requested_limit": 25000,
+      "api_reported_total": 927246,
+      "exhaustive": false,
+      "sort": "RatingScore",
+      "ok": true,
+      "note": "Bounded high-popularity scan to respect VocaDB API usage guidance; qualifying Spotify threshold remains strict."
+    },
+    "holostats_original": {
+      "url": "https://www.holostats.com/songs?type=original&sort=total_views",
+      "ok": false,
+      "error": "HTTP Error 522: <none>"
+    },
+    "holostats_cover": {
+      "url": "https://www.holostats.com/songs?type=cover&sort=total_views",
+      "ok": false,
+      "error": "HTTP Error 522: <none>"
+    },
+    "spotify_country_charts_kworb": {
+      "url": "https://kworb.net/spotify/",
+      "retrieved_at": "2026-07-22",
+      "detected_markets": 76,
+      "built_markets": 75,
+      "complete_markets": 73,
+      "rows": 73590,
+      "ok": false,
+      "failures": [
+        {
+          "country_code": "AD",
+          "country_name": "AD",
+          "error": "Failed to fetch https://kworb.net/spotify/country/ad_daily_totals.html: Client error '404 Not Found' for url 'https://kworb.net/spotify/country/ad_daily_totals.html'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/404"
+        }
+      ]
+    }
+  },
+  "datasets": {
+    "anime": {
+      "target": 10000,
+      "rows": 0,
+      "complete": false,
+      "metric_coverage": {},
+      "notes": [
+        "build failed: RuntimeError: POST https://graphql.anilist.co failed: Client error '400 Bad Request' for url 'https://graphql.anilist.co'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/400"
+      ]
+    },
+    "worldwide": {
+      "target": 51000,
+      "rows": 51000,
+      "complete": true,
+      "metric_coverage": {
+        "cross_platform_track_score": 4,
+        "spotify_chart_streams_snapshot": 5339,
+        "spotify_popularity": 34750,
+        "spotify_streams": 5020,
+        "spotify_streams_snapshot": 5883,
+        "youtube_views": 4
+      },
+      "notes": [
+        "bucket counts: {'current': 10000, '2020s': 10000, '2010s': 10000, '2000s': 10000, '1990s': 5000, '1980s': 3000, '1970s': 2000, '1960s': 1000}",
+        "Combined file globally sorted; extra.era_rank preserves each bucket's internal rank."
+      ]
+    },
+    "classical": {
+      "target": 10000,
+      "rows": 10000,
+      "complete": true,
+      "metric_coverage": {
+        "spotify_chart_streams_snapshot": 5,
+        "spotify_popularity": 9987,
+        "spotify_streams": 6,
+        "spotify_streams_snapshot": 2
+      },
+      "notes": [
+        "Composer is populated only when explicitly supplied by source; performer remains main_artist."
+      ]
+    },
+    "vtuber_original": {
+      "target": 10000,
+      "rows": 0,
+      "complete": false,
+      "metric_coverage": {},
+      "notes": [
+        "Holodex topic classification with mentions/channel metadata; exact YouTube views used when available, Spotify streams used on confident catalog matches, subscriber counts only as an explicitly labeled proxy. Finite verified corpus is never padded."
+      ]
+    },
+    "emerging": {
+      "target": 10000,
+      "rows": 10000,
+      "complete": true,
+      "metric_coverage": {
+        "spotify_chart_streams_snapshot": 84,
+        "spotify_popularity": 7972,
+        "spotify_streams": 190,
+        "spotify_streams_snapshot": 1753,
+        "youtube_views": 1
+      },
+      "notes": [
+        "Emerging/promising is a documented heuristic, not an objective fact; source_anchor_year=2024."
+      ]
+    },
+    "genres": {
+      "target": 10000,
+      "rows": 10000,
+      "complete": true,
+      "metric_coverage": {
+        "cross_platform_track_score": 1,
+        "spotify_chart_streams_snapshot": 924,
+        "spotify_popularity": 7603,
+        "spotify_streams": 1102,
+        "spotify_streams_snapshot": 370
+      },
+      "notes": [
+        "genres=50",
+        "{\"classical\": 200, \"rock\": 200, \"pop\": 200, \"singer-songwriter\": 200, \"rap\": 200, \"edm\": 200, \"classic rock\": 200, \"country\": 200, \"folk\": 200, \"metal\": 200, \"soul\": 200, \"hip hop\": 200, \"trance\": 200, \"album rock\": 200, \"mpb\": 200, \"punk\": 200, \"bluegrass\": 200, \"soft rock\": 200, \"metalcore\": 200, \"alternative metal\": 200, \"hard rock\": 200, \"dance pop\": 200, \"dubstep\": 200, \"pagode\": 200, \"jazz\": 200, \"blues\": 200, \"k-pop\": 200, \"pop dance\": 200, \"funk\": 200, \"house\": 200, \"samba\": 200, \"permanent wave\": 200, \"salsa\": 200, \"mandopop\": 200, \"disco\": 200, \"anime\": 200, \"sertanejo\": 200, \"gospel\": 200, \"ska\": 200, \"mellow gold\": 200, \"modern rock\": 200, \"dub\": 200, \"forro\": 200, \"emo\": 200, \"afrobeat\": 200, \"techno\": 200, \"ambient\": 200, \"comedy\": 200, \"dancehall\": 200, \"grunge\": 200}"
+      ]
+    },
+    "screen_soundtracks": {
+      "target": 10000,
+      "rows": 5660,
+      "complete": false,
+      "metric_coverage": {
+        "spotify_popularity": 5592,
+        "spotify_streams": 34,
+        "spotify_streams_snapshot": 34
+      },
+      "notes": [
+        "Source-declared soundtrack/score metadata plus a narrowly curated, independently sourced association seed for famous needle-drop/theme cases. No fan-only association is accepted without a cited source."
+      ]
+    },
+    "vtuber_non_original": {
+      "target": 10000,
+      "rows": 0,
+      "complete": false,
+      "metric_coverage": {},
+      "notes": [
+        "Holodex topic classification with mentions/channel metadata; exact YouTube views used when available, Spotify streams used on confident catalog matches, subscriber counts only as an explicitly labeled proxy. Finite verified corpus is never padded."
+      ]
+    },
+    "vocaloid": {
+      "target": "all verified >=10,000,000 Spotify streams; cap 10,000",
+      "rows": 305,
+      "complete": false,
+      "metric_coverage": {
+        "spotify_streams": 305
+      },
+      "notes": [
+        "Conditional list: never padded. Completeness requires exhaustive VocaDB enumeration and remains bounded by acquired Spotify stream-snapshot coverage.",
+        "vocadb_exhaustive=False"
+      ]
+    },
+    "countries": {
+      "target": "1,000 per detected Spotify regional market (76 detected this run)",
+      "rows": 73590,
+      "complete": false,
+      "metric_coverage": {
+        "spotify_country_chart_streams": 73590
+      },
+      "notes": [
+        "Detected 76 country/territory Spotify chart markets from the source index; 73 have exactly 1000 ranked unique songs.",
+        "Country chart counts are exact chart-attributed streams, not lifetime Spotify totals; streams outside the daily Top 200 are excluded."
+      ]
+    },
+    "megalist": {
+      "target": "deduplicated union of all requested lists",
+      "rows": 88798,
+      "complete": false,
+      "metric_coverage": {
+        "cross_platform_track_score": 2,
+        "spotify_chart_streams_snapshot": 2812,
+        "spotify_popularity": 52232,
+        "spotify_regional_chart_streams_sum": 27704,
+        "spotify_streams": 2716,
+        "spotify_streams_snapshot": 3328,
+        "youtube_views": 4
+      },
+      "notes": [
+        "Megalist is a deduplicated union of materialized rows; completeness is false because one or more upstream requested lists are incomplete."
+      ]
+    }
+  },
+  "warnings": [
+    "anime build failed: RuntimeError: POST https://graphql.anilist.co failed: Client error '400 Bad Request' for url 'https://graphql.anilist.co'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/400",
+    "Holodex Original_Song: GET https://holodex.net/api/v2/videos failed: Client error '403 Forbidden' for url 'https://holodex.net/api/v2/videos?topic=Original_Song&status=past&limit=50&offset=0&paginated=1&include=channel_stats%2Cmentions'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/403",
+    "HoloStats original: HTTP Error 522: <none>",
+    "Holodex Music_Cover: GET https://holodex.net/api/v2/videos failed: Client error '403 Forbidden' for url 'https://holodex.net/api/v2/videos?topic=Music_Cover&status=past&limit=50&offset=0&paginated=1&include=channel_stats%2Cmentions'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/403",
+    "HoloStats cover: HTTP Error 522: <none>",
+    "Spotify country charts: 1 market fetch/build failures; see data/countries/index.json"
+  ]
 }
