@@ -93,12 +93,17 @@ def main() -> None:
             markets = ci.get("markets") or []
             files_ok = all((DATA / "countries" / str(m.get("file") or "")).exists() for m in markets)
             counts_ok = all(int(m.get("unique_songs") or 0) == 1000 for m in markets)
+            exhausted = [m for m in markets if bool(m.get("source_exhausted_below_target"))]
+            unsupported = ci.get("unsupported_markets") or []
             country_check = {
                 "detected_markets": detected, "complete_markets": complete_markets,
                 "total_rows": total_rows, "target_per_country": 1000,
+                "source_exhausted_markets": len(exhausted),
+                "unsupported_index_links": len(unsupported),
                 "failures": len(failures), "files_ok": files_ok,
                 "complete": detected > 0 and complete_markets == detected and len(markets) == detected
-                            and total_rows == detected * 1000 and not failures and files_ok and counts_ok,
+                            and total_rows == detected * 1000 and not failures and not unsupported
+                            and files_ok and counts_ok,
             }
         except Exception as exc:
             country_check["error"] = str(exc)

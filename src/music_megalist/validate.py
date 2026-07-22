@@ -159,8 +159,16 @@ def validate(data_dir: str|Path='data', *, require_complete: bool=False) -> list
                         actual=max(0,sum(1 for _ in csv.reader(f))-1)
                     if actual != rows:
                         errors.append(f'COUNTRY_INDEX_COUNT_MISMATCH {code}: index={rows} file={actual}')
+                available=int(m.get('available_unique_songs') or rows)
+                expected=int(m.get('expected_rows') or min(1000, available))
+                exhausted=bool(m.get('source_exhausted_below_target'))
+                if expected < 0 or expected > 1000:
+                    errors.append(f'COUNTRY_EXPECTED_INVALID {code}: {expected}')
+                if exhausted and available != expected:
+                    errors.append(f'COUNTRY_EXHAUSTION_MISMATCH {code}: available={available} expected={expected}')
                 if require_complete and rows != 1000:
-                    errors.append(f'COUNTRY_COUNT {code}: {rows} != 1000')
+                    suffix=' (source exhausted)' if exhausted else ''
+                    errors.append(f'COUNTRY_COUNT {code}: {rows} != 1000{suffix}')
             if detected <= 0: errors.append('COUNTRY_INDEX no detected markets')
             if len(markets) > detected:
                 errors.append(f'COUNTRY_MARKETS built {len(markets)} > detected {detected}')
@@ -170,13 +178,14 @@ def validate(data_dir: str|Path='data', *, require_complete: bool=False) -> list
             recorded_rows=int(ci.get('total_materialized_rows') or 0)
             if recorded_rows != materialized_rows:
                 errors.append(f'COUNTRY_TOTAL_ROWS {recorded_rows} != materialized {materialized_rows}')
-            # Source-backed shortfalls (a market with <1000 historical entries or an unavailable
-            # totals endpoint) are completeness issues, not structural corruption. Normal
-            # validation must allow them so the workflow can commit honest partial results; the
-            # strict completion check below still fails until every detected market is complete.
+            # Source-exhausted short markets are valid partial outputs, but they do not satisfy
+            # the user's requested top-1,000 target. Normal validation accepts them; strict
+            # completion remains false without fabricating missing ranks.
             if require_complete:
                 if len(markets) != detected: errors.append(f'COUNTRY_MARKETS built {len(markets)} != detected {detected}')
                 if failures: errors.append(f'COUNTRY_FAILURES {len(failures)}')
+                unsupported=ci.get('unsupported_markets') or []
+                if unsupported: errors.append(f'COUNTRY_UNSUPPORTED {len(unsupported)}')
                 expected_rows=detected*1000
                 if recorded_rows != expected_rows:
                     errors.append(f'COUNTRY_TOTAL_ROWS {recorded_rows} != {expected_rows}')

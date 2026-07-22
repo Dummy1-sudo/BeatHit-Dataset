@@ -61,7 +61,7 @@ Historical buckets emphasize cumulative streams, then transparent popularity evi
 
 ## Anime 10,000
 
-1. Fetch AniList anime in `POPULARITY_DESC` order.
+1. Fetch a stable live AniList `POPULARITY_DESC` window (up to 5,000 entries to avoid fragile deep anonymous pagination). Preserve all successful pages if the API degrades, then fill the remaining popularity candidates from the bundled MyAnimeList snapshot ranked by its source-provided member count.
 2. Join to AnimeThemes via AniList/MAL external IDs.
 3. Generate OP/ED candidates with song/artist credits.
 4. Match candidates to the normalized music catalog.
@@ -122,7 +122,7 @@ The computed `emerging_score` and heuristic description are stored in `extra`.
 
 ## Movie/TV 10,000
 
-Primary selection uses source-declared soundtrack/score metadata: album names and genres containing terms such as soundtrack, original motion picture, original series, television, film score, original score, etc. A tiny curated, independently sourced association seed covers famous needle-drop/theme cases explicitly requested by the user that would otherwise be missed because the Spotify release itself is not a soundtrack album. The association seed never invents a popularity count; song metrics still come from the matched catalog.
+Primary selection uses source-declared soundtrack/score metadata: album names and genres containing terms such as soundtrack, original motion picture, original series, television, film score, original score, etc. A tiny curated, independently sourced association seed covers famous needle-drop/theme cases explicitly requested by the user that would otherwise be missed because the Spotify release itself is not a soundtrack album. If these high-precision sources contain fewer than 10,000 unique songs, the remainder is filled only from screen-specific MusicBrainz/ListenBrainz soundtrack and score tags. Those fallback rows keep a tag-radio rank/provenance rather than inventing Spotify stream counts. The association seed never invents a popularity count; song metrics still come from the matched catalog.
 
 ## Megalist deduplication
 
@@ -147,9 +147,9 @@ The country extension follows the user's earlier preference for **overall popula
 2. Fetch each market's `daily_totals` page, which aggregates Spotify daily chart history.
 3. Extract stable Spotify track IDs where exposed by Kworb's track-history links, plus title, main artist, chart coverage, days on chart, Top-10 days, peak rank, peak daily streams, and cumulative chart-attributed streams.
 4. Deduplicate conservatively at song level within each country. Multiple editions/reissues are not blindly summed; the strongest observed country-chart total is retained and alternate evidence stays as provenance.
-5. Rank unique songs by `spotify_country_chart_streams` descending and keep exactly the top 1,000 when at least 1,000 source-backed songs exist.
-6. Write one CSV per market and a machine-readable `data/countries/index.json` describing every detected market, source URL, coverage dates, row count, and any failure.
-7. Mark the country dataset complete only if every detected market builds successfully with exactly 1,000 unique songs. No market is padded.
+5. Rank unique songs by `spotify_country_chart_streams` descending and keep the top 1,000 when at least 1,000 source-backed songs exist. If the totals page is exhausted below 1,000, retain every available unique song and record that source-exhausted expected size.
+6. Write one CSV per usable market and a machine-readable `data/countries/index.json` describing source-index discoveries, usable totals markets, unsupported/stale links, source URLs, coverage dates, expected row counts, and genuine failures.
+7. Mark the requested country dataset complete only if every market advertised by the source index reaches 1,000 unique songs and no market is unavailable or failed. Source-exhausted short markets remain valid partial outputs but keep requested completeness false. No market is padded.
 
 ### Country metric interpretation
 

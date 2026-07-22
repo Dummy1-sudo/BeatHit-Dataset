@@ -33,6 +33,22 @@ KWORB_SPOTIFY_INDEX = "https://kworb.net/spotify/"
 COUNTRY_TARGET = 1_000
 TODAY = date.today().isoformat()
 
+COUNTRY_NAMES = {
+    "us":"United States","gb":"United Kingdom","ad":"Andorra","ar":"Argentina","au":"Australia",
+    "at":"Austria","by":"Belarus","be":"Belgium","bo":"Bolivia","br":"Brazil","bg":"Bulgaria",
+    "ca":"Canada","cl":"Chile","co":"Colombia","cr":"Costa Rica","cy":"Cyprus","cz":"Czech Republic",
+    "dk":"Denmark","do":"Dominican Republic","ec":"Ecuador","eg":"Egypt","sv":"El Salvador","ee":"Estonia",
+    "fi":"Finland","fr":"France","de":"Germany","gr":"Greece","gt":"Guatemala","hn":"Honduras",
+    "hk":"Hong Kong","hu":"Hungary","is":"Iceland","in":"India","id":"Indonesia","ie":"Ireland",
+    "il":"Israel","it":"Italy","jp":"Japan","kz":"Kazakhstan","lv":"Latvia","lt":"Lithuania",
+    "lu":"Luxembourg","my":"Malaysia","mt":"Malta","mx":"Mexico","ma":"Morocco","nl":"Netherlands",
+    "nz":"New Zealand","ni":"Nicaragua","ng":"Nigeria","no":"Norway","pk":"Pakistan","pa":"Panama",
+    "py":"Paraguay","pe":"Peru","ph":"Philippines","pl":"Poland","pt":"Portugal","ro":"Romania",
+    "ru":"Russia","sa":"Saudi Arabia","sg":"Singapore","sk":"Slovakia","za":"South Africa",
+    "kr":"South Korea","es":"Spain","se":"Sweden","ch":"Switzerland","tw":"Taiwan","th":"Thailand",
+    "tr":"Turkey","ua":"Ukraine","ae":"United Arab Emirates","uy":"Uruguay","ve":"Venezuela","vn":"Vietnam",
+}
+
 
 @dataclass(frozen=True)
 class CountryMarket:
@@ -85,7 +101,9 @@ def parse_country_markets_html(html: str, *, index_url: str = KWORB_SPOTIFY_INDE
         code = m.group(1).lower()
         if code == "global":
             continue
-        name = _label_before(a) or code.upper()
+        name = _label_before(a)
+        if not name or name.casefold() == code.casefold() or len(name) <= 3:
+            name = COUNTRY_NAMES.get(code, code.upper())
         totals_href = re.sub(r"_daily\.html$", "_daily_totals.html", href, flags=re.I)
         markets[code] = CountryMarket(code=code, name=name, totals_url=urljoin(index_url, totals_href))
     return sorted(markets.values(), key=lambda m: (m.name.casefold(), m.code))
@@ -191,9 +209,11 @@ def parse_country_totals_html(
 
     # A song can have multiple Spotify recording IDs/reissues. Keep one unique song entry per
     # country conservatively (the strongest observed chart total), rather than summing editions.
-    unique = dedupe(raw_rows)
-    unique.sort(key=lambda r: (r.metric_value, r.listen_count or 0), reverse=True)
-    unique = unique[:limit]
+    unique_all = dedupe(raw_rows)
+    unique_all.sort(key=lambda r: (r.metric_value, r.listen_count or 0), reverse=True)
+    available_unique = len(unique_all)
+    expected_rows = min(limit, available_unique)
+    unique = unique_all[:limit]
     for i, row in enumerate(unique, 1):
         row.rank = i
         row.extra["country_rank"] = i
@@ -205,8 +225,11 @@ def parse_country_totals_html(
         "coverage_start": coverage_start,
         "coverage_end": coverage_end,
         "raw_chart_recordings": len(raw_rows),
+        "available_unique_songs": available_unique,
         "unique_songs": len(unique),
         "target": limit,
+        "expected_rows": expected_rows,
+        "source_exhausted_below_target": 0 < available_unique < limit,
         "complete": len(unique) == limit,
     }
     return unique, meta
@@ -219,8 +242,15 @@ def _fetch_html(url: str, *, timeout: int = 120) -> str:
         try:
             with httpx.Client(timeout=timeout, follow_redirects=True, headers=headers) as client:
                 r = client.get(url)
+                if r.status_code == 404:
+                    # Some country links remain on the Kworb index after their historical totals
+                    # endpoint has been removed. Treat those as unsupported source markets rather
+                    # than retrying and poisoning completeness for every valid country.
+                    raise FileNotFoundError(f"No country totals page at {url}")
                 r.raise_for_status()
                 return r.text
+        except FileNotFoundError:
+            raise
         except Exception as exc:  # pragma: no cover - network path
             last = exc
             time.sleep(min(20, 2 ** attempt))
@@ -250,6 +280,7 @@ def build_country_lists(status: Any, *, data_dir: Path) -> list[SongRow]:
     all_rows: list[SongRow] = []
     market_meta: list[dict[str, Any]] = []
     failures: list[dict[str, str]] = []
+    unsupported: list[dict[str, str]] = []
 
     with ThreadPoolExecutor(max_workers=workers) as pool:
         futures = {pool.submit(_fetch_one_market, market): market for market in markets}
@@ -262,24 +293,32 @@ def build_country_lists(status: Any, *, data_dir: Path) -> list[SongRow]:
                 meta["file"] = filename
                 market_meta.append(meta)
                 all_rows.extend(rows)
+            except FileNotFoundError as exc:  # pragma: no cover - network path
+                unsupported.append({"country_code": market.code.upper(), "country_name": market.name, "reason": str(exc)})
             except Exception as exc:  # pragma: no cover - network path
                 failures.append({"country_code": market.code.upper(), "country_name": market.name, "error": str(exc)})
 
     market_meta.sort(key=lambda x: (str(x.get("country_name", "")).casefold(), str(x.get("country_code", ""))))
     complete_markets = sum(1 for m in market_meta if m.get("complete"))
+    # Preserve every market advertised by the source index in the requested-market count.
+    # A stale/missing totals endpoint is recorded separately and keeps requested completeness
+    # false rather than silently redefining the user's requested country set.
+    detected_supported = len(market_meta)
     index_payload = {
-        "schema_version": 1,
+        "schema_version": 2,
         "retrieved_at": TODAY,
         "source_index_url": KWORB_SPOTIFY_INDEX,
         "metric_name": "spotify_country_chart_streams",
         "metric_definition": "Sum of Spotify daily Top 200 streams observed in that country while a song was charting; streams outside the Top 200 are excluded.",
         "ranking": "Descending by country-specific chart-attributed stream total after conservative song-level deduplication.",
         "target_per_country": COUNTRY_TARGET,
+        "index_discovered_markets": len(markets),
         "detected_country_markets": len(markets),
         "successfully_built_markets": len(market_meta),
         "complete_markets": complete_markets,
         "total_materialized_rows": len(all_rows),
         "markets": market_meta,
+        "unsupported_markets": unsupported,
         "failures": failures,
     }
     (out_dir / "index.json").write_text(json.dumps(index_payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
@@ -288,15 +327,19 @@ def build_country_lists(status: Any, *, data_dir: Path) -> list[SongRow]:
         status.sources["spotify_country_charts_kworb"] = {
             "url": KWORB_SPOTIFY_INDEX,
             "retrieved_at": TODAY,
+            "index_discovered_markets": len(markets),
             "detected_markets": len(markets),
             "built_markets": len(market_meta),
             "complete_markets": complete_markets,
             "rows": len(all_rows),
-            "ok": not failures and complete_markets == len(markets),
+            "ok": not failures and not unsupported and complete_markets == len(markets) and len(markets) > 0,
+            "unsupported_markets": unsupported,
             "failures": failures,
         }
     if failures and hasattr(status, "warnings"):
         status.warnings.append(f"Spotify country charts: {len(failures)} market fetch/build failures; see data/countries/index.json")
+    if unsupported and hasattr(status, "warnings"):
+        status.warnings.append(f"Spotify country charts: {len(unsupported)} stale/unsupported index market links excluded; see data/countries/index.json")
 
     return all_rows
 
@@ -324,9 +367,14 @@ def country_completion(data_dir: Path) -> tuple[bool, int, int, int, list[str]]:
     complete_markets = int(payload.get("complete_markets") or 0)
     rows = int(payload.get("total_materialized_rows") or 0)
     failures = payload.get("failures") or []
-    complete = detected > 0 and complete_markets == detected and not failures and rows == detected * COUNTRY_TARGET
+    markets = payload.get("markets") or []
+    unsupported = payload.get("unsupported_markets") or []
+    complete = detected > 0 and len(markets) == detected and complete_markets == detected and not failures and not unsupported and rows == detected * COUNTRY_TARGET
+    full_1000 = sum(1 for m in markets if int(m.get("unique_songs") or 0) == COUNTRY_TARGET)
+    exhausted = sum(1 for m in markets if bool(m.get("source_exhausted_below_target")))
     notes = [
-        f"Detected {detected} country/territory Spotify chart markets from the source index; {complete_markets} have exactly {COUNTRY_TARGET} ranked unique songs.",
+        f"Source index advertised {detected} country/territory markets: {full_1000} contain {COUNTRY_TARGET} ranked unique songs; {exhausted} historical totals pages are source-exhausted below the requested target.",
+        f"{len(unsupported)} source-index market links have no usable historical totals page. These are recorded explicitly and keep requested completeness false; no rows were fabricated.",
         "Country chart counts are exact chart-attributed streams, not lifetime Spotify totals; streams outside the daily Top 200 are excluded.",
     ]
     return complete, rows, detected, complete_markets, notes

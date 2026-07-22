@@ -51,3 +51,24 @@ def test_country_rows_collapse_for_megalist_sums_distinct_markets_only():
     assert row.listen_count == 17_000
     assert row.extra['country_chart_market_count'] == 2
     assert {x['country_code'] for x in row.extra['country_chart_appearances']} == {'US','JP'}
+
+
+def test_country_totals_source_exhaustion_is_recorded_without_padding():
+    html = """<table>
+      <tr><td><a href='/spotify/artist/a.html'>A</a> - <a href='/spotify/track/A1.html'>One</a></td><td>10</td><td>2</td><td>1</td><td>1000</td><td>10000</td></tr>
+      <tr><td><a href='/spotify/artist/b.html'>B</a> - <a href='/spotify/track/B1.html'>Two</a></td><td>8</td><td>1</td><td>2</td><td>900</td><td>7000</td></tr>
+    </table>"""
+    rows, meta = parse_country_totals_html(
+        html, market=CountryMarket('xx','Exampleland','https://example/xx'), limit=1000
+    )
+    assert len(rows) == 2
+    assert meta['available_unique_songs'] == 2
+    assert meta['expected_rows'] == 2
+    assert meta['source_exhausted_below_target'] is True
+    assert meta['complete'] is False
+
+
+def test_country_market_name_mapping_fixes_code_only_label():
+    html = "AD <a href='country/ad_daily.html'>Daily</a><br>"
+    markets = parse_country_markets_html(html)
+    assert [(m.code,m.name) for m in markets] == [('ad','Andorra')]

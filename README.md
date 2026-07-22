@@ -45,7 +45,7 @@ The repository contains a full builder that combines:
 - a 114k / 125-genre Spotify fallback corpus;
 - a live Kworb cumulative Spotify-stream overlay for globally prominent tracks, with exact normalized title+artist matching;
 - Kworb aggregates of Spotify regional daily charts to discover every available country/territory chart and build one all-time top-1,000 list per market;
-- AniList current popularity + AnimeThemes theme metadata, with a paced/cached Jikan/MyAnimeList theme fallback for coverage gaps;
+- AniList current popularity (stable live window) + AnimeThemes theme metadata, with a bundled MyAnimeList popularity/theme snapshot and paced/cached Jikan theme fallback when live AniList or theme joins are unavailable;
 - VocaDB for voice-synth classification, using a rate-paced high-popularity candidate scan plus explicit voice-synth credit/genre markers so the API is not abused by a hundreds-of-thousands-row crawl;
 - Holodex for VTuber `Original_Song` and `Music_Cover` classification, with HoloStats as a Hololive-only fallback/augmentation;
 - YouTube Data API when available; otherwise a clearly attributed Return YouTube Dislike cached `viewCount` fallback, then optional capped `yt-dlp` as a last resort;
@@ -80,13 +80,13 @@ The workflow never pads a finite or conditional corpus. If fewer than 10,000 ver
 
 `data/countries/` contains one CSV per country/territory discovered from the Spotify regional chart index exposed by Kworb. The market set is discovered dynamically at build time instead of being hard-coded, so newly added or removed chart markets are reflected in `data/countries/index.json`.
 
-Each country list contains the **1,000 unique songs with the largest cumulative number of streams recorded while those songs were inside that country's Spotify daily Top 200 chart**, ranked from most to least. This matches the project's earlier “overall popularity” preference better than taking only today's Top 200.
+Each country list targets the **top 1,000 unique songs by cumulative streams recorded while those songs were inside that country's Spotify daily Top 200 chart**, ranked from most to least. When a market's entire available historical source contains fewer than 1,000 unique songs, the exhaustive shorter list is kept as-is rather than padded and that requested market remains incomplete. This matches the project's earlier “overall popularity” preference better than taking only today's Top 200.
 
 Important metric boundary: country totals do **not** include streams earned while a song was outside the daily chart. The files therefore use `spotify_country_chart_streams`, not `spotify_streams`. Each row also preserves country code/name, chart coverage dates, days on chart, Top-10 days, peak rank, peak daily streams, Spotify track ID when available, source URL, and retrieval date.
 
 The country lists are all included in the final megalist. Before deduplication, repeated appearances of the same song across countries are collapsed into one evidence record with `extra.country_chart_appearances`. Its country totals are summed only across distinct country markets and labeled `spotify_regional_chart_streams_sum`; this aggregate is never presented as a lifetime Spotify counter.
 
-Completion requires **exactly 1,000 unique songs for every detected country market**. A market with fewer source-backed songs, a failed fetch, or a missing file makes `countries.complete=false`; the builder never pads the shortfall.
+Completion requires **1,000 unique songs for every country/territory advertised by the regional chart index**. Source-exhausted markets with fewer songs and stale index links with no historical totals page are recorded explicitly but keep `countries.complete=false`. Genuine fetch failures also remain incomplete. The builder never pads a shortfall.
 
 ## Worldwide 51,000 allocation
 
@@ -111,9 +111,9 @@ A large output file existing is **not** enough to claim completion. `STATUS.json
 - fixed-size categories are complete only when the exact requested row count is materialized;
 - Vocaloid is complete only when the qualifying source corpus is genuinely exhaustive enough to support the claim; it is never padded below 10M streams;
 - VTuber lists are never padded with non-VTuber/unverified tracks merely to reach 10,000;
-- every detected Spotify country/territory chart must have exactly 1,000 unique rows and no failed market fetches;
+- every Spotify country/territory advertised by the source index must reach the requested 1,000 unique rows; source-exhausted short markets or unavailable historical totals stay explicitly incomplete rather than being padded;
 - `megalist.complete` is true only when all upstream requested lists, including the country lists, are complete;
-- `python scripts/verify_targets.py` checks era allocation, >=50 genre diversity, Vocaloid threshold validity, VTuber original/cover flags, per-country 1,000-row completeness, and megalist deduplication in addition to row counts.
+- `python scripts/verify_targets.py` checks era allocation, >=50 genre diversity, Vocaloid threshold validity, VTuber original/cover flags, per-country source-backed completeness, and megalist deduplication in addition to row counts.
 
 The repository intentionally prefers an honest shortfall over a fabricated “100% complete” status.
 

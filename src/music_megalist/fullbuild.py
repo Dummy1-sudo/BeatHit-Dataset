@@ -1287,6 +1287,84 @@ def _screen_work_from_album(album: str) -> str | None:
     return s or album
 
 
+def _listenbrainz_soundtracks(limit: int, used: set[str], status: BuildStatus) -> list[SongRow]:
+    """Fill soundtrack coverage from MusicBrainz/ListenBrainz soundtrack tags.
+
+    This fallback is only used after explicit soundtrack/score album metadata is exhausted.
+    The tags are deliberately screen-specific; generic mood/instrument tags are not accepted.
+    A release/album title is retained as ``screen_work`` only when the response provides one.
+    """
+    if limit <= 0:
+        return []
+    tags = [
+        "soundtrack", "film soundtrack", "movie soundtrack", "television soundtrack",
+        "tv soundtrack", "original soundtrack", "film score", "movie score",
+        "television score", "tv score", "original score", "film music",
+        "cinema soundtrack", "motion picture soundtrack", "series soundtrack",
+        "anime soundtrack", "anime score", "television music", "movie music",
+        "screen soundtrack",
+    ]
+    out: list[SongRow] = []
+    client = httpx.Client(timeout=60, follow_redirects=True, headers={"User-Agent":"BeatHit-Dataset/1.0"})
+    try:
+        for tag in tags:
+            if len(out) >= limit:
+                break
+            try:
+                r = client.get(
+                    f"{LISTENBRAINZ_API}/lb-radio/tags",
+                    params={"tag":tag,"operator":"OR","count":1000,"pop_begin":0,"pop_end":100},
+                )
+                r.raise_for_status(); data = r.json()
+            except Exception as exc:
+                status.warnings.append(f"ListenBrainz soundtrack tag {tag}: {exc}")
+                continue
+            payload = data.get("payload", data) if isinstance(data, dict) else data
+            tracks = payload.get("jspf", {}).get("playlist", {}).get("track", []) if isinstance(payload, dict) else []
+            if not tracks and isinstance(payload, list):
+                tracks = payload
+            for pos, x in enumerate(tracks, 1):
+                title = x.get("title") or x.get("track_name") or x.get("recording_name")
+                artist = x.get("creator") or x.get("artist_name") or x.get("artist_credit_name")
+                if not title or not artist:
+                    continue
+                mbid = x.get("identifier") or x.get("recording_mbid")
+                if isinstance(mbid, list):
+                    mbid = mbid[0] if mbid else None
+                if isinstance(mbid, str) and "/" in mbid:
+                    mbid = mbid.rsplit("/", 1)[-1]
+                aliases=[_identity(title, artist)]
+                if mbid:
+                    aliases.append(f"mbid:{mbid}")
+                if any(alias in used for alias in aliases):
+                    continue
+                used.update(aliases)
+                album = x.get("album") or x.get("release_name")
+                if isinstance(album, dict):
+                    album = album.get("title") or album.get("name")
+                album = str(album).strip() if album else None
+                row = SongRow(
+                    title=str(title).strip(), main_artist=str(artist).strip(), album=album,
+                    genres=[tag], metric_name="listenbrainz_soundtrack_tag_rank",
+                    metric_value=float(max(1, 1001-pos)), metric_unit="rank_score",
+                    musicbrainz_recording_mbid=str(mbid) if mbid else None,
+                    screen_work=_screen_work_from_album(album or "") if album else None,
+                    source_url="https://listenbrainz.org/", retrieved_at=TODAY,
+                    source_notes=(
+                        "Recording returned by ListenBrainz/MusicBrainz soundtrack-tag radio. "
+                        "The rank is a popularity-oriented tag-radio signal, not a Spotify stream count; "
+                        "screen-work title is only populated when release metadata supplies one."
+                    ),
+                    extra={"association_method":"listenbrainz_screen_soundtrack_tag","tag":tag},
+                )
+                out.append(row)
+                if len(out) >= limit:
+                    break
+    finally:
+        client.close()
+    return out
+
+
 def build_screen_soundtracks(catalog: pd.DataFrame, status: BuildStatus) -> list[SongRow]:
     # Start with a small curated set of high-profile needle-drop/theme associations that
     # soundtrack-album metadata alone can miss (for example Transformers and Money Heist).
@@ -1318,7 +1396,9 @@ def build_screen_soundtracks(catalog: pd.DataFrame, status: BuildStatus) -> list
                 selected.append(row)
     album = catalog["album_name"].fillna("").astype(str)
     genre = catalog["genres"].fillna("").astype(str)
-    mask = album.str.contains(SOUNDTRACK_RE, na=False) | genre.str.contains(r"soundtrack|film score|movie", case=False, regex=True, na=False)
+    mask = album.str.contains(SOUNDTRACK_RE, na=False) | genre.str.contains(
+        r"soundtrack|film score|movie|television score|tv score|cinematic", case=False, regex=True, na=False
+    )
     cand = _rank_frame(catalog[mask].copy())
     for _, r in cand.iterrows():
         if not _claim_selection(r, used): continue
@@ -1326,17 +1406,22 @@ def build_screen_soundtracks(catalog: pd.DataFrame, status: BuildStatus) -> list
         row.screen_work=_screen_work_from_album(str(r.album_name or ""))
         selected.append(row)
         if len(selected)>=10_000: break
+    if len(selected) < 10_000:
+        selected.extend(_listenbrainz_soundtracks(10_000-len(selected), used, status))
     selected=_sort_and_rank(dedupe(selected))[:10_000]
     write_rows(selected, DATA/"screen_soundtracks"/"screen_soundtracks_10000.csv")
     status.datasets["screen_soundtracks"] = DatasetStatus(target=10_000, rows=len(selected), complete=len(selected)==10_000,
-        metric_coverage=dict(_metric_counts(selected)), notes=["Source-declared soundtrack/score metadata plus a narrowly curated, independently sourced association seed for famous needle-drop/theme cases. No fan-only association is accepted without a cited source."])
+        metric_coverage=dict(_metric_counts(selected)), notes=[
+            "Source-declared soundtrack/score metadata and independently sourced curated associations are ranked first; "
+            "when those sources contain fewer than 10,000 unique songs, screen-specific MusicBrainz/ListenBrainz soundtrack tags fill the remaining source-backed rows."
+        ])
     status.save(); return selected
 
 
-ANILIST_QUERY = r'''query ($page:Int!, $perPage:Int!) {
-  Page(page:$page, perPage:$perPage) {
+ANILIST_QUERY = r'''query ($page: Int = 1, $perPage: Int = 50) {
+  Page(page: $page, perPage: $perPage) {
     pageInfo { hasNextPage }
-    media(type:ANIME, sort:POPULARITY_DESC, isAdult:false) {
+    media(type: ANIME, sort: [POPULARITY_DESC], isAdult: false) {
       id idMal popularity averageScore format seasonYear
       title { romaji english native }
     }
@@ -1358,7 +1443,8 @@ def _http_json(client: httpx.Client, method: str, url: str, **kwargs: Any) -> An
                 continue
             r.raise_for_status(); return r.json()
         except httpx.HTTPStatusError as exc:
-            last=exc
+            body=(exc.response.text or "").strip().replace("\n", " ")[:800]
+            last=RuntimeError(f"HTTP {exc.response.status_code}: {body or exc}")
             # Authentication/permission/not-found errors are not transient. Retrying them only
             # wastes build time and can aggravate source-side rate controls.
             if 400 <= exc.response.status_code < 500:
@@ -1369,18 +1455,41 @@ def _http_json(client: httpx.Client, method: str, url: str, **kwargs: Any) -> An
     raise RuntimeError(f"{method} {url} failed: {last}")
 
 
-def fetch_anilist_top(limit:int=10_000) -> list[dict[str,Any]]:
+def fetch_anilist_top(limit:int=10_000, status: BuildStatus | None = None) -> list[dict[str,Any]]:
+    """Fetch a stable live AniList popularity window, preserving partial results on failure.
+
+    Large anonymous Page scans can become unstable/degraded. The build intentionally caps the
+    live window at 5,000 entries, then merges the bundled MAL popularity snapshot for the
+    remaining candidate depth needed by the 10,000-anime output.
+    """
+    live_limit=min(limit,5_000)
     out=[]; page=1
-    with httpx.Client(timeout=60,headers={"User-Agent":"BeatHit-Dataset/1.0"}) as c:
-        while len(out)<limit:
-            d=_http_json(c,"POST",ANILIST_API,json={"query":ANILIST_QUERY,"variables":{"page":page,"perPage":50}})
-            block=d["data"]["Page"]; out.extend(block["media"])
-            if not block["pageInfo"]["hasNextPage"]: break
-            page+=1
-            # AniList currently operates under a reduced anonymous rate limit. Stay below it
-            # instead of relying on repeated 429 retries from shared GitHub-hosted runner IPs.
-            time.sleep(2.1)
-    return out[:limit]
+    headers={"User-Agent":"BeatHit-Dataset/1.0","Accept":"application/json","Content-Type":"application/json"}
+    with httpx.Client(timeout=60,headers=headers) as c:
+        while len(out)<live_limit:
+            try:
+                d=_http_json(c,"POST",ANILIST_API,json={"query":ANILIST_QUERY,"variables":{"page":page,"perPage":50}})
+                if d.get("errors"):
+                    raise RuntimeError(f"AniList GraphQL errors: {d.get('errors')}")
+                block=(d.get("data") or {}).get("Page") or {}
+                media=block.get("media") or []
+                if not media:
+                    break
+                for item in media:
+                    item["_popularity_source"]="anilist_users"
+                    item["_popularity_source_url"]="https://anilist.co/"
+                out.extend(media)
+                if len(out) >= live_limit or not (block.get("pageInfo") or {}).get("hasNextPage"):
+                    break
+                page+=1
+                # AniList currently operates under a reduced anonymous rate limit. Stay below it
+                # instead of relying on repeated 429 retries from shared GitHub-hosted runner IPs.
+                time.sleep(2.1)
+            except Exception as exc:
+                if status is not None:
+                    status.warnings.append(f"AniList popularity page {page}: {exc}; preserving {len(out)} rows and using MAL snapshot fallback for the remainder")
+                break
+    return out[:live_limit]
 
 
 def fetch_animethemes_all(status: BuildStatus) -> tuple[dict[int,list[dict]],dict[int,list[dict]]]:
@@ -1460,6 +1569,67 @@ def _load_mal_theme_fallback(path: Path | None) -> dict[int,list[dict]]:
     return dict(out)
 
 
+def _load_mal_anime_rank_fallback(path: Path | None, limit: int = 20_000) -> list[dict[str,Any]]:
+    """Load a source-backed MAL popularity fallback from the bundled AnimeList snapshot.
+
+    The snapshot contains MAL ``members`` counts, titles and IDs alongside opening/ending
+    theme metadata. It is older than live AniList, so it is only used to fill candidates that
+    could not be retrieved from AniList during the current build.
+    """
+    if not path or not path.exists() or limit <= 0:
+        return []
+    try:
+        df=pd.read_csv(path,low_memory=False,encoding_errors="replace")
+    except Exception:
+        return []
+    cols={str(c).casefold():c for c in df.columns}
+    idcol=cols.get("anime_id") or cols.get("mal_id")
+    titlecol=cols.get("title")
+    if not idcol or not titlecol:
+        return []
+    engcol=cols.get("title_english"); jpcol=cols.get("title_japanese")
+    memberscol=cols.get("members"); popcol=cols.get("popularity"); scorecol=cols.get("score")
+    typecol=cols.get("type"); premieredcol=cols.get("premiered")
+    work=df.copy()
+    work["_members_num"]=pd.to_numeric(work[memberscol],errors="coerce").fillna(0) if memberscol else 0
+    work["_pop_rank_num"]=pd.to_numeric(work[popcol],errors="coerce").fillna(10**9) if popcol else 10**9
+    work=work.sort_values(["_members_num","_pop_rank_num"],ascending=[False,True],na_position="last")
+    def clean_text(value: Any) -> str | None:
+        if value is None or (isinstance(value,float) and pd.isna(value)):
+            return None
+        text=str(value).strip()
+        return None if not text or text.casefold() in {"nan","none","null","<na>"} else text
+
+    out=[]
+    for _,r in work.iterrows():
+        mid=_safe_int(r.get(idcol))
+        title=clean_text(r.get(titlecol))
+        if not mid or not title:
+            continue
+        members=_safe_int(r.get(memberscol)) if memberscol else None
+        score=_safe_float(r.get(scorecol)) if scorecol else None
+        premiered=clean_text(r.get(premieredcol)) if premieredcol else None
+        ym=re.search(r"\b(19|20)\d{2}\b",premiered or "")
+        out.append({
+            "id":None,
+            "idMal":mid,
+            "popularity":members or 0,
+            "averageScore":int(round(score*10)) if score is not None and score <= 10 else (_safe_int(score) if score is not None else None),
+            "format":clean_text(r.get(typecol)) if typecol else None,
+            "seasonYear":int(ym.group(0)) if ym else None,
+            "title":{
+                "romaji":title,
+                "english":clean_text(r.get(engcol)) if engcol else None,
+                "native":clean_text(r.get(jpcol)) if jpcol else None,
+            },
+            "_popularity_source":"myanimelist_members_snapshot",
+            "_popularity_source_url":MAL_THEME_FALLBACK_SOURCE,
+        })
+        if len(out)>=limit:
+            break
+    return out
+
+
 def _catalog_match_index(catalog: pd.DataFrame) -> tuple[dict[str,list[int]],dict[tuple[str,str],list[int]]]:
     title_map=defaultdict(list); exact=defaultdict(list)
     for i,r in catalog.iterrows():
@@ -1517,9 +1687,28 @@ def _jikan_theme_candidates(mal_id: int, client: httpx.Client, cache: dict[str, 
         return []
 
 def build_anime(catalog: pd.DataFrame, sources:dict[str,Path], status:BuildStatus) -> list[SongRow]:
-    anime=fetch_anilist_top(20_000)
+    mal_path=sources.get("mal_theme_fallback")
+    anime=fetch_anilist_top(20_000,status)
+    # AniList can temporarily rate-limit, degrade or reject deep pagination. Never throw away a
+    # long build because of that: fill missing candidates from the bundled MAL snapshot, ranked by
+    # source-provided member count. AniList candidates remain first because they are fresher.
+    mal_ranked=_load_mal_anime_rank_fallback(mal_path,20_000)
+    seen_mal={_safe_int(a.get("idMal")) for a in anime if _safe_int(a.get("idMal"))}
+    for a in mal_ranked:
+        mid=_safe_int(a.get("idMal"))
+        if mid and mid in seen_mal:
+            continue
+        anime.append(a)
+        if mid: seen_mal.add(mid)
+        if len(anime)>=20_000: break
+    status.sources["anime_popularity_candidates"]={
+        "anilist_rows":sum(1 for a in anime if a.get("_popularity_source")=="anilist_users"),
+        "mal_snapshot_rows":sum(1 for a in anime if a.get("_popularity_source")=="myanimelist_members_snapshot"),
+        "total_candidates":len(anime),
+        "ok":bool(anime),
+    }
     by_al,by_mal=fetch_animethemes_all(status)
-    fallback=_load_mal_theme_fallback(sources.get("mal_theme_fallback"))
+    fallback=_load_mal_theme_fallback(mal_path)
     title_map,exact=_catalog_match_index(catalog)
     cache_path=CACHE/"jikan_themes.json"
     try:
@@ -1534,8 +1723,7 @@ def build_anime(catalog: pd.DataFrame, sources:dict[str,Path], status:BuildStatu
             if len(rows) >= 10_000:
                 break
             candidates=list(by_al.get(a.get("id"),[])) or list(by_mal.get(a.get("idMal"),[])) or list(fallback.get(a.get("idMal"),[]))
-            # Accuracy/coverage fallback for popular titles absent from AnimeThemes. Jikan exposes
-            # MyAnimeList opening/ending strings; no invented song is created when it has none.
+            # Accuracy/coverage fallback for popular titles absent from AnimeThemes/snapshot.
             mid=_safe_int(a.get("idMal"))
             if not candidates and mid:
                 before=len(jikan_cache)
@@ -1563,28 +1751,44 @@ def build_anime(catalog: pd.DataFrame, sources:dict[str,Path], status:BuildStatu
                 continue
             scored.sort(key=lambda x:(x[0],x[1],x[2]),reverse=True)
             _,_,_,c,match,method=scored[0]
-            anime_title=(a.get("title",{}).get("english") or a.get("title",{}).get("romaji") or a.get("title",{}).get("native") or str(a.get("id")))
+            title_obj=a.get("title") or {}
+            anime_title=(title_obj.get("english") or title_obj.get("romaji") or title_obj.get("native") or str(a.get("idMal") or a.get("id")))
+            pop_source=str(a.get("_popularity_source") or "anilist_users")
+            pop_source_url=str(a.get("_popularity_source_url") or "https://anilist.co/")
+            common_extra={
+                "theme_type":c.get("type"),"theme_sequence":c.get("sequence"),"selection_method":method,
+                "anilist_id":a.get("id"),"mal_id":a.get("idMal"),"anime_popularity_rank":anime_rank,
+                "anime_popularity_source":pop_source,
+                "theme_metadata_url":c.get("animethemes_url"),
+            }
             if match is not None:
-                row=_catalog_row_to_song(match,rank=len(rows)+1,extra={"theme_type":c.get("type"),"theme_sequence":c.get("sequence"),"selection_method":method,"anilist_id":a.get("id"),"mal_id":a.get("idMal"),"anilist_popularity_rank":anime_rank})
+                row=_catalog_row_to_song(match,rank=len(rows)+1,extra=common_extra)
             else:
                 artists=c.get("artists") or ["Unknown verified theme artist"]
+                if pop_source=="myanimelist_members_snapshot":
+                    metric_name="myanimelist_members_snapshot"; metric_unit="users"
+                    note="No trustworthy song-level listen/view count found; MyAnimeList member count from the bundled snapshot is explicitly an anime-popularity proxy, not song listens."
+                else:
+                    metric_name="anime_popularity_proxy"; metric_unit="anilist_users"
+                    note="No trustworthy song-level listen/view count found; AniList anime popularity is explicitly a proxy, not song listens."
                 row=SongRow(rank=len(rows)+1,title=c["title"],main_artist=artists[0],featured_artists=artists[1:],
-                    anime_title=anime_title,anime_popularity=a.get("popularity"),metric_name="anime_popularity_proxy",
-                    metric_value=float(a.get("popularity") or 0),metric_unit="anilist_users",source_url=c.get("animethemes_url") or "https://animethemes.moe/",
-                    retrieved_at=TODAY,source_notes="No trustworthy song-level listen/view count found; AniList anime popularity is explicitly a proxy, not song listens.",
-                    extra={"theme_type":c.get("type"),"theme_sequence":c.get("sequence"),"selection_method":method,"anilist_id":a.get("id"),"mal_id":a.get("idMal"),"anilist_popularity_rank":anime_rank})
+                    anime_title=anime_title,anime_popularity=a.get("popularity"),metric_name=metric_name,
+                    metric_value=float(a.get("popularity") or 0),metric_unit=metric_unit,source_url=pop_source_url,
+                    retrieved_at=TODAY,source_notes=note,extra=common_extra)
             row.anime_title=anime_title; row.anime_popularity=a.get("popularity")
             rows.append(row)
     finally:
         jikan_client.close()
         cache_path.parent.mkdir(parents=True,exist_ok=True)
         cache_path.write_text(json.dumps(jikan_cache,ensure_ascii=False),encoding="utf-8")
-    rows.sort(key=lambda x:(x.extra or {}).get("anilist_popularity_rank", 10**9))
+    rows.sort(key=lambda x:(x.extra or {}).get("anime_popularity_rank", 10**9))
     for i,r in enumerate(rows,1): r.rank=i
     write_rows(rows,DATA/"anime"/"anime_songs.csv")
     status.sources["jikan_theme_fallback"]={"url":"https://api.jikan.moe/v4","queried":jikan_queries,"cached":len(jikan_cache),"ok":True}
     status.datasets["anime"] = DatasetStatus(target=10_000,rows=len(rows),complete=len(rows)==10_000,
-        metric_coverage=dict(_metric_counts(rows)),notes=["Anime ordering uses AniList popularity over up to 20,000 candidates. Theme metadata priority: AnimeThemes external-ID match, bundled MAL fallback, then paced/cached Jikan MyAnimeList themes. Theme choice uses strongest matched song metric; otherwise OP1/ED1 fallback."])
+        metric_coverage=dict(_metric_counts(rows)),notes=[
+            "Anime ordering prefers live AniList popularity; if AniList pagination is unavailable, remaining candidates come from the bundled MyAnimeList snapshot ranked by source-provided member count. Theme metadata priority: AnimeThemes external-ID match, bundled MAL fallback, then paced/cached Jikan themes."
+        ])
     status.save();return rows
 
 

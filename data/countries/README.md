@@ -6,8 +6,8 @@ For every country/territory dynamically discovered from the Spotify regional dai
 
 `<country-code>_<country-name>_top1000.csv`
 
-Each file ranks up to exactly 1,000 unique songs by `spotify_country_chart_streams`: the sum of Spotify daily Top 200 streams observed while that song was charting in that market. This count excludes streams earned outside the Top 200 and therefore is **not** a lifetime Spotify stream total.
+Each file ranks up to 1,000 unique songs by `spotify_country_chart_streams`: the sum of Spotify daily Top 200 streams observed while that song was charting in that market. If the source's complete historical totals page contains fewer than 1,000 unique songs, the file contains every available song and `index.json` marks the market `source_exhausted_below_target=true`; no rows are fabricated, and that market remains incomplete relative to the requested 1,000-song target. This count excludes streams earned outside the Top 200 and therefore is **not** a lifetime Spotify stream total.
 
-`index.json` records the detected market set, coverage dates, per-market row counts, source URLs, failures, and completeness state.
+`index.json` records the usable market set, source-exhausted short markets, stale/unsupported index links, coverage dates, per-market row counts, source URLs, genuine failures, and completeness state.
 
 All country lists are incorporated into the deduplicated megalist. Country appearances are preserved in `extra.country_chart_appearances` after cross-country collapse.

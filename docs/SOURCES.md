@@ -51,7 +51,7 @@ The builder deliberately combines multiple sources because no single public data
 
 - `https://graphql.anilist.co`
 - Popularity meaning used by the build: number of users with an anime on their list.
-- Purpose: rank the 10,000 anime by current source popularity.
+- Purpose: primary live popularity ranking for the anime list. The build uses a stable live window of up to 5,000 entries, preserves successful pages if pagination fails, then uses the MAL snapshot for remaining candidate depth.
 
 ### AnimeThemes
 
@@ -67,11 +67,11 @@ The builder deliberately combines multiple sources because no single public data
 - Requests are lazy, rate-paced and cached; only verified opening/ending strings are used.
 - Jikan is read-only and unofficial with respect to MyAnimeList, so AnimeThemes remains the preferred source.
 
-### MAL theme fallback snapshot
+### MAL anime/theme fallback snapshot
 
 - `https://gist.github.com/Chepubelja/00ed0aae9bdd4d9be5f4fd1032d0d250`
-- Used only when an AniList title cannot be joined to AnimeThemes and an older MAL theme string is available.
-- The anime popularity itself still comes from the current AniList query.
+- Supplies older MAL IDs/titles, member-count popularity, and opening/ending strings.
+- Theme strings fill AnimeThemes gaps. If live AniList is unavailable or deep pagination fails, snapshot member counts also fill the missing popularity candidates; those rows are explicitly labeled `myanimelist_members_snapshot` rather than being presented as current AniList counts.
 
 ## Vocaloid / voice-synth
 
@@ -132,7 +132,7 @@ The raw metric name, unit, retrieval date, and URL are retained so users can dis
 
 ## Screen soundtrack association seed
 
-The builder primarily uses source-declared soundtrack/score album and genre metadata. A very small curated seed ensures famous needle-drop/theme cases explicitly requested by the user are not lost when the Spotify album itself is not a soundtrack release. Each seed carries an independent association URL. Current examples include *Way Back then* / *Squid Game*, *Bella Ciao* / *Money Heist*, and *What I've Done* / *Transformers (2007)*. The seed establishes only the screen-work association; the popularity metric still comes from the matched song catalog.
+The builder primarily uses source-declared soundtrack/score album and genre metadata. A very small curated seed ensures famous needle-drop/theme cases explicitly requested by the user are not lost when the Spotify album itself is not a soundtrack release. Each seed carries an independent association URL. Current examples include *Way Back then* / *Squid Game*, *Bella Ciao* / *Money Heist*, and *What I've Done* / *Transformers (2007)*. If these sources do not reach 10,000 unique recordings, screen-specific ListenBrainz/MusicBrainz soundtrack/score tags provide source-backed fallback rows with an explicitly labeled tag-radio rank. The seed establishes only the screen-work association; the popularity metric still comes from the matched song catalog.
 
 ## Spotify regional country charts — Kworb aggregates of Spotify Charts
 
@@ -140,7 +140,7 @@ The builder primarily uses source-declared soundtrack/score album and genre meta
 - Per-market pattern: `https://kworb.net/spotify/country/<code>_daily_totals.html`
 - Upstream provenance: Kworb states that these pages are aggregates of daily and weekly charts provided by Spotify.
 - Fields used: artist, title, Spotify track ID embedded in the track-history URL, days on chart, Top-10 days, peak rank, peak daily streams, cumulative country-chart stream total, and chart coverage dates.
-- Output: one `data/countries/*_top1000.csv` per dynamically detected country/territory market, plus `data/countries/index.json`.
+- Output: one `data/countries/*_top1000.csv` per usable historical country/territory totals market, plus `data/countries/index.json`. A market normally contributes 1,000 rows; genuinely source-exhausted historical pages contribute all available rows but remain incomplete relative to the requested target. Stale index links without a totals page are recorded as unsupported, not silently fabricated.
 
 Accuracy boundary: the `Total` on a country daily-totals page is the sum of streams recorded **while the song was inside that country's Spotify daily chart**. The source itself warns that totals do not include time spent outside the daily chart. BeatHit therefore labels this metric `spotify_country_chart_streams`; it is not represented as a lifetime Spotify play count.
 

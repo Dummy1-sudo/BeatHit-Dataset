@@ -128,3 +128,20 @@ def test_http_json_honors_429_retry_after(monkeypatch):
         assert fb._http_json(client,'GET','https://example.test') == {'ok':True}
     assert calls['n']==2
     assert sleeps==[3.0]
+
+
+def test_mal_anime_rank_fallback_orders_by_members_and_cleans_nan(tmp_path):
+    import music_megalist.fullbuild as fb
+    p=tmp_path/'anime.csv'
+    p.write_text(
+        'anime_id,title,title_english,title_japanese,type,score,popularity,members,premiered,opening_theme,ending_theme\n'
+        '1,Lower,,下,TV,8.0,2,100,Spring 2020,"1: \"OP1\" by A",[]\n'
+        '2,Higher,English High,上,Movie,9.1,1,500,Fall 2021,"1: \"OP2\" by B",[]\n',
+        encoding='utf-8'
+    )
+    rows=fb._load_mal_anime_rank_fallback(p,limit=10)
+    assert [r['idMal'] for r in rows] == [2,1]
+    assert rows[0]['title']['english'] == 'English High'
+    assert rows[1]['title']['english'] is None
+    assert rows[0]['popularity'] == 500
+    assert rows[0]['seasonYear'] == 2021
