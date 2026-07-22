@@ -33,7 +33,7 @@ import pandas as pd
 from rapidfuzz import fuzz
 
 from .dedupe import dedupe, norm
-from .io import write_rows
+from .io import append_row, write_rows
 from .models import SongRow
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -158,6 +158,10 @@ class BuildStatus:
 
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+def _progress(message: str) -> None:
+    print(f"[{_now()}] {message}", flush=True)
 
 
 def _safe_int(v: Any) -> int | None:
@@ -1439,7 +1443,9 @@ def _http_json(client: httpx.Client, method: str, url: str, **kwargs: Any) -> An
                 try: wait=float(retry_after) if retry_after is not None else float(min(60,2**attempt))
                 except ValueError: wait=float(min(60,2**attempt))
                 last=RuntimeError(f"429 Too Many Requests for {url}; retry after {wait:g}s")
-                time.sleep(max(1.0,min(wait,120.0)))
+                actual_wait=max(1.0,min(wait,120.0))
+                _progress(f"HTTP 429 {method} {url} attempt={attempt+1}/8 wait={actual_wait:g}s")
+                time.sleep(actual_wait)
                 continue
             r.raise_for_status(); return r.json()
         except httpx.HTTPStatusError as exc:
@@ -1447,11 +1453,17 @@ def _http_json(client: httpx.Client, method: str, url: str, **kwargs: Any) -> An
             last=RuntimeError(f"HTTP {exc.response.status_code}: {body or exc}")
             # Authentication/permission/not-found errors are not transient. Retrying them only
             # wastes build time and can aggravate source-side rate controls.
+            _progress(f"HTTP error {method} {url} status={exc.response.status_code} attempt={attempt+1}/8")
             if 400 <= exc.response.status_code < 500:
                 break
-            time.sleep(min(60,2**attempt))
+            wait=min(60,2**attempt)
+            _progress(f"HTTP retry {method} {url} wait={wait}s")
+            time.sleep(wait)
         except Exception as exc:
-            last=exc; time.sleep(min(60,2**attempt))
+            last=exc
+            wait=min(60,2**attempt)
+            _progress(f"HTTP exception {method} {url} attempt={attempt+1}/8 {type(exc).__name__}: {exc}; wait={wait}s")
+            time.sleep(wait)
     raise RuntimeError(f"{method} {url} failed: {last}")
 
 
@@ -1464,6 +1476,7 @@ def fetch_anilist_top(limit:int=10_000, status: BuildStatus | None = None) -> li
     """
     live_limit=min(limit,5_000)
     out=[]; page=1
+    _progress(f"AniList START target_candidates={live_limit}")
     headers={"User-Agent":"BeatHit-Dataset/1.0","Accept":"application/json","Content-Type":"application/json"}
     with httpx.Client(timeout=60,headers=headers) as c:
         while len(out)<live_limit:
@@ -1479,6 +1492,7 @@ def fetch_anilist_top(limit:int=10_000, status: BuildStatus | None = None) -> li
                     item["_popularity_source"]="anilist_users"
                     item["_popularity_source_url"]="https://anilist.co/"
                 out.extend(media)
+                _progress(f"AniList page={page} received={len(media)} total={min(len(out),live_limit)}/{live_limit}")
                 if len(out) >= live_limit or not (block.get("pageInfo") or {}).get("hasNextPage"):
                     break
                 page+=1
@@ -1489,6 +1503,7 @@ def fetch_anilist_top(limit:int=10_000, status: BuildStatus | None = None) -> li
                 if status is not None:
                     status.warnings.append(f"AniList popularity page {page}: {exc}; preserving {len(out)} rows and using MAL snapshot fallback for the remainder")
                 break
+    _progress(f"AniList DONE candidates={len(out[:live_limit])}")
     return out[:live_limit]
 
 
@@ -1500,6 +1515,7 @@ def fetch_animethemes_all(status: BuildStatus) -> tuple[dict[int,list[dict]],dic
     a source-backed theme string for many older titles.
     """
     by_anilist=defaultdict(list); by_mal=defaultdict(list); page=1
+    _progress("AnimeThemes START full index fetch")
     with httpx.Client(timeout=90,follow_redirects=True,headers={"User-Agent":"BeatHit-Dataset/1.0"}) as c:
         while True:
             params={"include":"animethemes.song.artists,resources","page[size]":"100","page[number]":str(page)}
@@ -1526,6 +1542,7 @@ def fetch_animethemes_all(status: BuildStatus) -> tuple[dict[int,list[dict]],dic
                     if not ext: continue
                     if "anilist" in site: by_anilist[ext].extend(candidates)
                     if "myanimelist" in site or site=="mal": by_mal[ext].extend(candidates)
+            _progress(f"AnimeThemes page={page} anime={len(items)} mapped_anilist={len(by_anilist)} mapped_mal={len(by_mal)}")
             links=d.get("links") or {}; meta=d.get("meta") or {}
             if links.get("next"):
                 page+=1
@@ -1536,6 +1553,7 @@ def fetch_animethemes_all(status: BuildStatus) -> tuple[dict[int,list[dict]],dic
             else: break
             if page>1000: break
             time.sleep(.15)
+    _progress(f"AnimeThemes DONE mapped_anilist={len(by_anilist)} mapped_mal={len(by_mal)}")
     return dict(by_anilist),dict(by_mal)
 
 
@@ -1664,8 +1682,10 @@ def _jikan_theme_candidates(mal_id: int, client: httpx.Client, cache: dict[str, 
     """
     key=str(mal_id)
     if key in cache:
+        _progress(f"Jikan MAL={mal_id} cache_hit themes={len(cache[key])}")
         return cache[key]
     try:
+        _progress(f"Jikan MAL={mal_id} REQUEST")
         d=_http_json(client,"GET",f"{JIKAN_API}/anime/{mal_id}/themes")
         data=d.get("data") or {}
         out=[]
@@ -1676,6 +1696,7 @@ def _jikan_theme_candidates(mal_id: int, client: httpx.Client, cache: dict[str, 
                     out.append({"title":parsed[0],"artists":[parsed[1]],"type":typ,"sequence":seq,
                                 "animethemes_url":f"https://myanimelist.net/anime/{mal_id}"})
         cache[key]=out
+        _progress(f"Jikan MAL={mal_id} DONE themes={len(out)}")
         # Public Jikan guidance asks clients to use the API responsibly; keep below common
         # anonymous burst limits during this large one-time backfill.
         time.sleep(.36)
@@ -1689,6 +1710,10 @@ def _jikan_theme_candidates(mal_id: int, client: httpx.Client, cache: dict[str, 
 def build_anime(catalog: pd.DataFrame, sources:dict[str,Path], status:BuildStatus) -> list[SongRow]:
     target=FIXED_TARGETS["anime"]
     candidate_limit=max(5_000,target*5)
+    output_path=DATA/"anime"/"anime_songs.csv"
+    output_path.parent.mkdir(parents=True,exist_ok=True)
+    output_path.unlink(missing_ok=True)
+    _progress(f"Anime START target={target} candidate_limit={candidate_limit} output={output_path}")
     mal_path=sources.get("mal_theme_fallback")
     anime=fetch_anilist_top(min(candidate_limit,5_000),status)
     # AniList can temporarily rate-limit, degrade or reject deep pagination. Never throw away a
@@ -1779,9 +1804,8 @@ def build_anime(catalog: pd.DataFrame, sources:dict[str,Path], status:BuildStatu
                     retrieved_at=TODAY,source_notes=note,extra=common_extra)
             row.anime_title=anime_title; row.anime_popularity=a.get("popularity")
             rows.append(row)
-            if len(rows) % 100 == 0:
-                # Preserve useful progress in the Actions artifact if a later request stalls.
-                write_rows(rows,DATA/"anime"/"anime_songs.partial.csv")
+            append_row(row,output_path)
+            _progress(f"Anime WRITE {len(rows)}/{target} anime_rank={anime_rank} title={row.title!r} artist={row.main_artist!r} anime={anime_title!r} source={method} jikan_queries={jikan_queries}")
     finally:
         jikan_client.close()
         cache_path.parent.mkdir(parents=True,exist_ok=True)
@@ -1789,7 +1813,8 @@ def build_anime(catalog: pd.DataFrame, sources:dict[str,Path], status:BuildStatu
     rows.sort(key=lambda x:(x.extra or {}).get("anime_popularity_rank", 10**9))
     rows=rows[:target]
     for i,r in enumerate(rows,1): r.rank=i
-    write_rows(rows,DATA/"anime"/"anime_songs.csv")
+    write_rows(rows,output_path)
+    _progress(f"Anime DONE rows={len(rows)}/{target}")
     status.sources["jikan_theme_fallback"]={"url":"https://api.jikan.moe/v4","queried":jikan_queries,"cached":len(jikan_cache),"ok":True}
     status.datasets["anime"] = DatasetStatus(target=target,rows=len(rows),complete=len(rows)==target,
         metric_coverage=dict(_metric_counts(rows)),notes=[
@@ -1973,6 +1998,7 @@ def _holodex_headers()->dict[str,str]:
 
 def _fetch_holodex_topic(topic:str,status:BuildStatus,max_items:int=50_000)->list[dict]:
     out=[];offset=0;limit=50
+    _progress(f"Holodex {topic} START max_items={max_items}")
     with httpx.Client(timeout=90,follow_redirects=True,headers=_holodex_headers()) as c:
         while len(out)<max_items:
             params={"topic":topic,"status":"past","limit":limit,"offset":offset,"paginated":"1","include":"channel_stats,mentions"}
@@ -1983,9 +2009,11 @@ def _fetch_holodex_topic(topic:str,status:BuildStatus,max_items:int=50_000)->lis
             if not items:break
             out.extend(items);offset+=len(items)
             total=_safe_int(d.get("total")) if isinstance(d,dict) else None
+            _progress(f"Holodex {topic} batch={len(items)} loaded={len(out)} api_total={total}")
             if total is not None and offset>=total:break
             if len(items)<limit:break
             time.sleep(.15)
+    _progress(f"Holodex {topic} DONE loaded={len(out[:max_items])}")
     return out[:max_items]
 
 
@@ -1998,6 +2026,7 @@ def _youtube_views(ids:list[str],status:BuildStatus)->dict[str,int]:
     """
     ids=list(dict.fromkeys(x for x in ids if x))
     key=os.getenv("YOUTUBE_API_KEY","").strip();out={}
+    _progress(f"YouTube views START ids={len(ids)} official_api={'yes' if key else 'no'}")
     if key:
         with httpx.Client(timeout=60) as c:
             for i in range(0,len(ids),50):
@@ -2006,8 +2035,12 @@ def _youtube_views(ids:list[str],status:BuildStatus)->dict[str,int]:
                     for x in d.get("items",[]):
                         v=_safe_int((x.get("statistics") or {}).get("viewCount"))
                         if v is not None:out[x["id"]]=v
-                except Exception as exc:status.warnings.append(f"YouTube API batch {i}: {exc}")
+                    _progress(f"YouTube views batch_start={i} batch_size={len(ids[i:i+50])} resolved={len(out)}/{len(ids)}")
+                except Exception as exc:
+                    status.warnings.append(f"YouTube API batch {i}: {exc}")
+                    _progress(f"YouTube views batch_start={i} ERROR {type(exc).__name__}: {exc}")
         status.sources["youtube_view_counts"]={"source":"YouTube Data API v3","requested":len(ids),"resolved":len(out),"ok":bool(out)}
+        _progress(f"YouTube views DONE resolved={len(out)}/{len(ids)}")
         return out
 
     # High-throughput no-key fallback. RYD returns a cached viewCount field obtained for the
@@ -2101,9 +2134,19 @@ def _fetch_holostats_rows(*, original: bool, status: BuildStatus) -> list[SongRo
 def build_vtuber(catalog:pd.DataFrame,status:BuildStatus,*,original:bool)->list[SongRow]:
     target=FIXED_TARGETS["vtuber_original" if original else "vtuber_non_original"]
     topic="Original_Song" if original else "Music_Cover"
+    folder="vtuber_original" if original else "vtuber_non_original"
+    filename="vtuber_original_10000.csv" if original else "vtuber_non_original_10000.csv"
+    partial_path=DATA/folder/(Path(filename).stem+".partial.csv")
+    partial_path.parent.mkdir(parents=True,exist_ok=True)
+    partial_path.unlink(missing_ok=True)
+    _progress(f"VTuber {topic} START target={target} partial={partial_path}")
     videos=_fetch_holodex_topic(topic,status,max_items=60_000)
+    _progress(f"VTuber {topic} candidates={len(videos)}")
     if not videos:
         rows=_fetch_holostats_rows(original=original,status=status)
+        for pos,row in enumerate(rows,1):
+            append_row(row,partial_path)
+            _progress(f"VTuber {topic} WRITE fallback={pos} title={row.title!r} artist={row.main_artist!r}")
         rows=dedupe(rows)
         rows.sort(key=lambda r:r.metric_value,reverse=True)
         for i,r in enumerate(rows[:target],1):r.rank=i
@@ -2165,15 +2208,23 @@ def build_vtuber(catalog:pd.DataFrame,status:BuildStatus,*,original:bool)->list[
                     extra={"holodex_video_id":v.get("id"),"holodex_topic":topic,"mentions":mention_names})
             row.vtuber=artist;row.is_original=original
             rows.append(row)
+            append_row(row,partial_path)
+            if pos == 1 or pos % 25 == 0:
+                _progress(f"VTuber {topic} WRITE candidate={pos}/{len(videos)} title={row.title!r} artist={row.main_artist!r} metric={row.metric_name}:{row.metric_value}")
         # Augment with HoloStats where available; dedupe keeps the stronger row by metric.
-        rows.extend(_fetch_holostats_rows(original=original,status=status))
+        holostats_rows=_fetch_holostats_rows(original=original,status=status)
+        for row in holostats_rows:
+            append_row(row,partial_path)
+        if holostats_rows:
+            _progress(f"VTuber {topic} appended_holostats={len(holostats_rows)}")
+        rows.extend(holostats_rows)
         rows=dedupe(rows)
         rows.sort(key=lambda r:(0 if r.metric_name in {"holodex_source_rank","vtuber_channel_subscribers_proxy"} else 1,r.metric_value),reverse=True)
         for i,r in enumerate(rows[:target],1):r.rank=i
         rows=rows[:target]
-    folder="vtuber_original" if original else "vtuber_non_original"
-    filename="vtuber_original_10000.csv" if original else "vtuber_non_original_10000.csv"
     write_rows(rows,DATA/folder/filename)
+    partial_path.unlink(missing_ok=True)
+    _progress(f"VTuber {topic} DONE canonical_rows={len(rows)}/{target}")
     key="vtuber_original" if original else "vtuber_non_original"
     status.datasets[key]=DatasetStatus(target=target,rows=len(rows),complete=len(rows)==target,
         metric_coverage=dict(_metric_counts(rows)),notes=["Holodex topic classification with mentions/channel metadata; exact YouTube views used when available, Spotify streams used on confident catalog matches, subscriber counts only as an explicitly labeled proxy. Finite verified corpus is never padded."])
@@ -2295,25 +2346,40 @@ def write_status_json(status: BuildStatus) -> None:
 
 def full_build(*,skip_zenodo:bool=False,only:list[str]|None=None)->BuildStatus:
     status=BuildStatus(started_at=_now())
+    _progress(f"FULL BUILD START only={only or 'ALL'} skip_zenodo={skip_zenodo}")
     for name,target in FIXED_TARGETS.items():status.datasets[name]=DatasetStatus(target=target)
     status.datasets["vocaloid"]=DatasetStatus(target="all verified >=10,000,000 Spotify streams; cap 10,000")
     status.datasets["countries"]=DatasetStatus(target="top 1,000 unique songs for every detected Spotify regional country/territory chart")
     status.save()
+    _progress("PHASE acquire_sources START")
     sources=acquire_sources(status,skip_zenodo=skip_zenodo)
+    _progress(f"PHASE acquire_sources DONE sources={list(sources)}")
+    _progress("PHASE build_catalog START")
     catalog_path=build_catalog(sources,status)
+    _progress(f"PHASE build_catalog DONE path={catalog_path}")
     catalog=load_catalog(catalog_path)
+    _progress(f"PHASE load_catalog DONE rows={len(catalog)}")
     # Overlay current cumulative Spotify counts from Kworb where exact title+artist matches exist.
     # This materially improves 2026 freshness for globally popular tracks without pretending the
     # entire historical catalog has live counters.
+    _progress("PHASE Kworb overlays START")
     catalog=apply_kworb_overlay(catalog,fetch_kworb_global(status))
     catalog=apply_kworb_overlay(catalog,fetch_kworb_daily(status))
+    _progress(f"PHASE Kworb overlays DONE catalog_rows={len(catalog)}")
     wanted=set(only or ["worldwide","genres","classical","emerging","screen_soundtracks","anime","vocaloid","vtuber_original","vtuber_non_original","countries"])
+    _progress(f"Selected builders={sorted(wanted)}")
     built:dict[str,list[SongRow]]={}
     def run(name:str, fn):
-        if name not in wanted: return
+        if name not in wanted:
+            _progress(f"SKIP builder={name}")
+            return
+        _progress(f"START builder={name}")
+        started=time.monotonic()
         try:
             built[name]=fn()
+            _progress(f"DONE builder={name} rows={len(built[name])} elapsed={time.monotonic()-started:.1f}s")
         except Exception as exc:
+            _progress(f"FAIL builder={name} elapsed={time.monotonic()-started:.1f}s {type(exc).__name__}: {exc}")
             status.warnings.append(f"{name} build failed: {type(exc).__name__}: {exc}")
             st=status.datasets.get(name)
             if st: st.notes.append(f"build failed: {type(exc).__name__}: {exc}")
@@ -2387,8 +2453,11 @@ def full_build(*,skip_zenodo:bool=False,only:list[str]|None=None)->BuildStatus:
                 )
         except Exception as exc:
             status.warnings.append(f"existing countries: {exc}")
-    build_megalist(built,status)
+    _progress("PHASE megalist START inputs=" + repr({k:len(v) for k,v in built.items()}))
+    mega=build_megalist(built,status)
+    _progress(f"PHASE megalist DONE unique_rows={len(mega)}")
     status.finished_at=_now();write_coverage(status);status.save();write_status_json(status)
+    _progress(f"FULL BUILD DONE finished_at={status.finished_at}")
     return status
 
 

@@ -6,6 +6,30 @@ from .models import SongRow
 
 FIELDS = list(SongRow.model_fields)
 
+
+def append_row(row: SongRow, path: str | Path) -> int:
+    """Append one row immediately and flush it to disk."""
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    if path.suffix == ".jsonl":
+        with path.open("a", encoding="utf-8") as f:
+            f.write(row.model_dump_json() + "\n")
+            f.flush()
+        return 1
+    needs_header = not path.exists() or path.stat().st_size == 0
+    d = row.model_dump()
+    for k, v in d.items():
+        if isinstance(v, (list, dict)):
+            d[k] = json.dumps(v, ensure_ascii=False, separators=(",", ":"))
+    with path.open("a", encoding="utf-8", newline="") as f:
+        w = csv.DictWriter(f, fieldnames=FIELDS)
+        if needs_header:
+            w.writeheader()
+        w.writerow(d)
+        f.flush()
+    return 1
+
+
 def write_rows(rows: Iterable[SongRow], path: str | Path) -> int:
     path = Path(path); path.parent.mkdir(parents=True, exist_ok=True)
     rows = list(rows)

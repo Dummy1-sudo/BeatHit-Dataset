@@ -59,6 +59,7 @@ jobs:
         env:
           HOLODEX_API_KEY: ${{ secrets.HOLODEX_API_KEY }}
           YOUTUBE_API_KEY: ${{ secrets.YOUTUBE_API_KEY }}
+          PYTHONUNBUFFERED: '1'
           BEATHIT_SKIP_ZENODO: ${{ github.event_name == 'workflow_dispatch' && inputs.skip_zenodo && '1' || '0' }}
           BEATHIT_RYD_FALLBACK: '1'
           BEATHIT_RYD_WORKERS: '20'
