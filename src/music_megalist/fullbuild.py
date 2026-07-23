@@ -12,6 +12,7 @@ fabricating records.
 import ast
 import csv
 import hashlib
+import html
 import json
 import math
 import os
@@ -1454,13 +1455,15 @@ def _http_json(client: httpx.Client, method: str, url: str, **kwargs: Any) -> An
             # Authentication/permission/not-found errors are not transient. Retrying them only
             # wastes build time and can aggravate source-side rate controls.
             _progress(f"HTTP error {method} {url} status={exc.response.status_code} attempt={attempt+1}/8")
-            if 400 <= exc.response.status_code < 500:
+            if 400 <= exc.response.status_code < 500 or attempt >= 7:
                 break
             wait=min(60,2**attempt)
             _progress(f"HTTP retry {method} {url} wait={wait}s")
             time.sleep(wait)
         except Exception as exc:
             last=exc
+            if attempt >= 7:
+                break
             wait=min(60,2**attempt)
             _progress(f"HTTP exception {method} {url} attempt={attempt+1}/8 {type(exc).__name__}: {exc}; wait={wait}s")
             time.sleep(wait)
@@ -1557,35 +1560,81 @@ def fetch_animethemes_all(status: BuildStatus) -> tuple[dict[int,list[dict]],dic
     return dict(by_anilist),dict(by_mal)
 
 
+
+def _clean_theme_component(value: Any) -> str:
+    text=html.unescape(str(value or "")).strip()
+    for prefix in ("['", '["'):
+        if text.startswith(prefix):
+            text=text[2:].lstrip()
+    for suffix in ("']", '"]', "')", '")'):
+        if text.endswith(suffix):
+            text=text[:-2].rstrip()
+    return text.strip(" \t\r\n\"'")
+
+
+def _parse_theme_entries(raw: Any) -> list[tuple[str,str]]:
+    text=html.unescape(str(raw or "")).strip()
+    if not text or text.casefold() in {"[]","nan","none","null","<na>"}:
+        return []
+
+    items=[text]
+    if text.startswith("[") and text.endswith("]"):
+        try:
+            obj=ast.literal_eval(text)
+            if isinstance(obj,(list,tuple)):
+                items=[str(x) for x in obj if str(x).strip()]
+        except Exception:
+            pass
+
+    out=[]
+    for item in items:
+        item=html.unescape(item).strip()
+        m=re.search(r'["“](.+?)["”]\s+by\s+(.+?)(?:\s*\(|$)',item)
+        if not m:
+            m=re.search(r"(?:^|\d+:\s*)(.+?)\s+by\s+(.+?)(?:\s*\(|$)",item)
+        if not m:
+            continue
+        title=_clean_theme_component(m.group(1))
+        artist=_clean_theme_component(m.group(2))
+        if title and artist:
+            out.append((title,artist))
+    return out
+
+
 def _parse_theme_string(raw: str) -> tuple[str,str] | None:
-    # MAL exports often use: '1: "Song" by Artist (eps...)'.
-    if not raw or raw in {"[]","nan"}: return None
-    m=re.search(r'["“](.+?)["”]\s+by\s+(.+?)(?:\s*\(|$)',raw)
-    if m: return m.group(1).strip(),m.group(2).strip()
-    m=re.search(r"(?:^|\d+:\s*)(.+?)\s+by\s+(.+?)(?:\s*\(|$)",raw)
-    if m: return m.group(1).strip(" '\""),m.group(2).strip(" '\"")
-    return None
+    entries=_parse_theme_entries(raw)
+    return entries[0] if entries else None
 
 
 def _load_mal_theme_fallback(path: Path | None) -> dict[int,list[dict]]:
     out=defaultdict(list)
-    if not path or not path.exists(): return {}
+    if not path or not path.exists():
+        return {}
     try:
         for chunk in pd.read_csv(path,chunksize=20_000,low_memory=False,encoding_errors="replace"):
             idcol=next((c for c in chunk.columns if c.casefold() in {"anime_id","mal_id"}),None)
             opcol=next((c for c in chunk.columns if "opening" in c.casefold()),None)
             edcol=next((c for c in chunk.columns if "ending" in c.casefold()),None)
-            if not idcol: continue
+            if not idcol:
+                continue
             for _,r in chunk.iterrows():
-                mid=_safe_int(r.get(idcol));
-                if not mid: continue
+                mid=_safe_int(r.get(idcol))
+                if not mid:
+                    continue
                 for typ,col in (("OP",opcol),("ED",edcol)):
-                    if not col: continue
-                    parsed=_parse_theme_string(str(r.get(col,"")))
-                    if parsed: out[mid].append({"title":parsed[0],"artists":[parsed[1]],"type":typ,"sequence":1,"animethemes_url":MAL_THEME_FALLBACK_SOURCE})
-    except Exception: pass
+                    if not col:
+                        continue
+                    for seq,(title,artist) in enumerate(_parse_theme_entries(r.get(col,"")),1):
+                        out[mid].append({
+                            "title":title,
+                            "artists":[artist],
+                            "type":typ,
+                            "sequence":seq,
+                            "animethemes_url":MAL_THEME_FALLBACK_SOURCE,
+                        })
+    except Exception as exc:
+        _progress(f"MAL theme fallback parse warning: {type(exc).__name__}: {exc}")
     return dict(out)
-
 
 def _load_mal_anime_rank_fallback(path: Path | None, limit: int = 20_000) -> list[dict[str,Any]]:
     """Load a source-backed MAL popularity fallback from the bundled AnimeList snapshot.
@@ -1657,68 +1706,242 @@ def _catalog_match_index(catalog: pd.DataFrame) -> tuple[dict[str,list[int]],dic
     return dict(title_map),dict(exact)
 
 
+
 def _match_song(title:str, artists:list[str], catalog:pd.DataFrame, title_map:dict[str,list[int]], exact:dict[tuple[str,str],list[int]]) -> tuple[pd.Series|None,str]:
-    nt=norm(title); artist=artists[0] if artists else ""; na=norm(artist)
+    nt=norm(_clean_theme_component(title))
+    artist=_clean_theme_component(artists[0]) if artists else ""
+    na=norm(artist)
     ids=exact.get((nt,na),[])
     if ids:
-        cand=_rank_frame(catalog.loc[ids]); return cand.iloc[0],"exact_title_artist"
+        cand=_rank_frame(catalog.loc[ids])
+        return cand.iloc[0],"exact_title_artist"
+
     ids=title_map.get(nt,[])
-    if not ids: return None,"unmatched"
-    best=None;bestscore=-1
-    for i in ids[:100]:
-        r=catalog.loc[i]; s=fuzz.ratio(na,norm(str(r.main_artist))) if na else 0
-        if s>bestscore: bestscore=s;best=r
-    if best is not None and (bestscore>=65 or len(ids)==1): return best,f"exact_title_artist_fuzzy_{bestscore}"
-    return None,"unmatched"
+    if not ids:
+        return None,"unmatched"
+
+    if na:
+        best=None
+        bestscore=-1.0
+        for i in ids[:100]:
+            r=catalog.loc[i]
+            score=float(fuzz.ratio(na,norm(str(r.main_artist))))
+            if score>bestscore:
+                bestscore=score
+                best=r
+        if best is not None and bestscore>=65:
+            return best,f"exact_title_artist_fuzzy_{bestscore}"
+        return None,f"title_match_artist_rejected_{bestscore}"
+
+    if len(ids)==1:
+        return catalog.loc[ids[0]],"unique_title_no_artist"
+    return None,"ambiguous_title_no_artist"
 
 
+def _anime_row_from_candidates(
+    *,
+    anime_item: dict[str,Any],
+    anime_rank: int,
+    candidates: list[dict],
+    catalog: pd.DataFrame,
+    title_map: dict[str,list[int]],
+    exact: dict[tuple[str,str],list[int]],
+) -> SongRow | None:
+    seen=set()
+    uniq=[]
+    for source_candidate in candidates:
+        title=_clean_theme_component(source_candidate.get("title"))
+        artists=[_clean_theme_component(x) for x in (source_candidate.get("artists") or [])]
+        artists=[x for x in artists if x]
+        if not title:
+            continue
+        key=(norm(title),norm(artists[0] if artists else ""))
+        if key in seen:
+            continue
+        seen.add(key)
+        c=dict(source_candidate)
+        c["title"]=title
+        c["artists"]=artists
+        uniq.append(c)
 
-def _jikan_theme_candidates(mal_id: int, client: httpx.Client, cache: dict[str, list[dict]], status: BuildStatus) -> list[dict]:
-    """Fallback theme metadata from Jikan/MyAnimeList for AnimeThemes gaps.
+    scored=[]
+    for c in uniq:
+        match,method=_match_song(c["title"],c.get("artists") or [],catalog,title_map,exact)
+        if match is not None:
+            scored.append((
+                _score(match),
+                1 if c.get("type")=="OP" else 0,
+                -(c.get("sequence") or 1),
+                c,match,method,
+            ))
+        else:
+            scored.append((
+                -1,
+                1 if c.get("type")=="OP" else 0,
+                -(c.get("sequence") or 1),
+                c,None,"theme_order_fallback",
+            ))
+    if not scored:
+        return None
 
-    This is intentionally lazy and cached: only popular AniList candidates that have no
-    AnimeThemes/fallback theme are queried, and the build stops once 10,000 verified-theme
-    anime have been collected. Jikan is read-only and rate-limited, so requests are paced.
-    """
+    scored.sort(key=lambda x:(x[0],x[1],x[2]),reverse=True)
+    _,_,_,c,match,method=scored[0]
+
+    title_obj=anime_item.get("title") or {}
+    anime_title=html.unescape(
+        str(
+            title_obj.get("english")
+            or title_obj.get("romaji")
+            or title_obj.get("native")
+            or anime_item.get("idMal")
+            or anime_item.get("id")
+        )
+    )
+    pop_source=str(anime_item.get("_popularity_source") or "anilist_users")
+    pop_source_url=str(anime_item.get("_popularity_source_url") or "https://anilist.co/")
+    common_extra={
+        "theme_type":c.get("type"),
+        "theme_sequence":c.get("sequence"),
+        "selection_method":method,
+        "anilist_id":anime_item.get("id"),
+        "mal_id":anime_item.get("idMal"),
+        "anime_popularity_rank":anime_rank,
+        "anime_popularity_source":pop_source,
+        "theme_metadata_url":c.get("animethemes_url"),
+    }
+
+    if match is not None:
+        row=_catalog_row_to_song(match,rank=anime_rank,extra=common_extra)
+    else:
+        artists=c.get("artists") or ["Unknown verified theme artist"]
+        if pop_source=="myanimelist_members_snapshot":
+            metric_name="myanimelist_members_snapshot"
+            metric_unit="users"
+            note=(
+                "No trustworthy song-level listen/view count found; MyAnimeList member count "
+                "from the bundled snapshot is explicitly an anime-popularity proxy, not song listens."
+            )
+        else:
+            metric_name="anime_popularity_proxy"
+            metric_unit="anilist_users"
+            note=(
+                "No trustworthy song-level listen/view count found; AniList anime popularity "
+                "is explicitly a proxy, not song listens."
+            )
+        row=SongRow(
+            rank=anime_rank,
+            title=c["title"],
+            main_artist=artists[0],
+            featured_artists=artists[1:],
+            anime_title=anime_title,
+            anime_popularity=anime_item.get("popularity"),
+            metric_name=metric_name,
+            metric_value=float(anime_item.get("popularity") or 0),
+            metric_unit=metric_unit,
+            source_url=pop_source_url,
+            retrieved_at=TODAY,
+            source_notes=note,
+            extra=common_extra,
+        )
+    row.title=html.unescape(row.title)
+    row.main_artist=_clean_theme_component(row.main_artist)
+    row.anime_title=anime_title
+    row.anime_popularity=anime_item.get("popularity")
+    return row
+
+
+def _jikan_theme_candidates(
+    mal_id: int,
+    client: httpx.Client,
+    cache: dict[str,list[dict]],
+    status: BuildStatus,
+) -> tuple[list[dict],bool,bool]:
     key=str(mal_id)
     if key in cache:
         _progress(f"Jikan MAL={mal_id} cache_hit themes={len(cache[key])}")
-        return cache[key]
-    try:
-        _progress(f"Jikan MAL={mal_id} REQUEST")
-        d=_http_json(client,"GET",f"{JIKAN_API}/anime/{mal_id}/themes")
-        data=d.get("data") or {}
-        out=[]
-        for typ,field in (("OP","openings"),("ED","endings")):
-            for seq,raw in enumerate(data.get(field,[]) or [],1):
-                parsed=_parse_theme_string(str(raw))
-                if parsed:
-                    out.append({"title":parsed[0],"artists":[parsed[1]],"type":typ,"sequence":seq,
-                                "animethemes_url":f"https://myanimelist.net/anime/{mal_id}"})
-        cache[key]=out
-        _progress(f"Jikan MAL={mal_id} DONE themes={len(out)}")
-        # Public Jikan guidance asks clients to use the API responsibly; keep below common
-        # anonymous burst limits during this large one-time backfill.
-        time.sleep(.36)
-        return out
-    except Exception as exc:
-        status.warnings.append(f"Jikan themes MAL {mal_id}: {exc}")
-        cache[key]=[]
-        time.sleep(.5)
-        return []
+        return cache[key],True,False
+
+    url=f"{JIKAN_API}/anime/{mal_id}/themes"
+    for attempt in (1,2):
+        try:
+            _progress(f"Jikan MAL={mal_id} REQUEST attempt={attempt}/2")
+            r=client.get(url)
+
+            if r.status_code==429:
+                status.warnings.append(
+                    f"Jikan themes MAL {mal_id}: HTTP 429 rate limited; skipping optional fallback"
+                )
+                _progress(f"Jikan MAL={mal_id} RATE_LIMITED; no retry in this build")
+                cache[key]=[]
+                return [],False,True
+
+            if 500 <= r.status_code < 600:
+                _progress(f"Jikan MAL={mal_id} HTTP {r.status_code} attempt={attempt}/2")
+                if attempt==1:
+                    time.sleep(1.0)
+                    continue
+                cache[key]=[]
+                status.warnings.append(f"Jikan themes MAL {mal_id}: HTTP {r.status_code} after 2 attempts")
+                return [],False,True
+
+            r.raise_for_status()
+            d=r.json()
+            data=d.get("data") or {}
+            out=[]
+            for typ,field in (("OP","openings"),("ED","endings")):
+                for seq,raw in enumerate(data.get(field,[]) or [],1):
+                    parsed=_parse_theme_entries(raw)
+                    for sub_seq,(title,artist) in enumerate(parsed,1):
+                        out.append({
+                            "title":title,
+                            "artists":[artist],
+                            "type":typ,
+                            "sequence":seq if len(parsed)==1 else (seq*100+sub_seq),
+                            "animethemes_url":f"https://myanimelist.net/anime/{mal_id}",
+                        })
+            cache[key]=out
+            _progress(f"Jikan MAL={mal_id} DONE themes={len(out)}")
+            time.sleep(1.05)
+            return out,True,True
+        except httpx.HTTPStatusError as exc:
+            cache[key]=[]
+            status.warnings.append(
+                f"Jikan themes MAL {mal_id}: HTTP {exc.response.status_code}; no further retry"
+            )
+            _progress(f"Jikan MAL={mal_id} HTTP {exc.response.status_code}; GIVE_UP")
+            return [],False,True
+        except Exception as exc:
+            _progress(f"Jikan MAL={mal_id} {type(exc).__name__}: {exc} attempt={attempt}/2")
+            if attempt==1:
+                time.sleep(1.0)
+                continue
+            cache[key]=[]
+            status.warnings.append(f"Jikan themes MAL {mal_id}: {type(exc).__name__}: {exc}")
+            return [],False,True
+
+    cache[key]=[]
+    return [],False,True
+
 
 def build_anime(catalog: pd.DataFrame, sources:dict[str,Path], status:BuildStatus) -> list[SongRow]:
     target=FIXED_TARGETS["anime"]
     candidate_limit=max(5_000,target*5)
+    live_anilist_limit=min(candidate_limit,max(2_500,target*2))
+
     output_path=DATA/"anime"/"anime_songs.csv"
+    partial_path=DATA/"anime"/"anime_songs.partial.csv"
     output_path.parent.mkdir(parents=True,exist_ok=True)
     output_path.unlink(missing_ok=True)
-    _progress(f"Anime START target={target} candidate_limit={candidate_limit} output={output_path}")
+    partial_path.unlink(missing_ok=True)
+
+    _progress(
+        f"Anime START target={target} total_candidate_limit={candidate_limit} "
+        f"live_anilist_limit={live_anilist_limit}"
+    )
+
     mal_path=sources.get("mal_theme_fallback")
-    anime=fetch_anilist_top(min(candidate_limit,5_000),status)
-    # AniList can temporarily rate-limit, degrade or reject deep pagination. Never throw away a
-    # long build because of that: fill missing candidates from the bundled MAL snapshot, ranked by
-    # source-provided member count. AniList candidates remain first because they are fresher.
+    anime=fetch_anilist_top(live_anilist_limit,status)
+
     mal_ranked=_load_mal_anime_rank_fallback(mal_path,candidate_limit)
     seen_mal={_safe_int(a.get("idMal")) for a in anime if _safe_int(a.get("idMal"))}
     for a in mal_ranked:
@@ -1726,102 +1949,225 @@ def build_anime(catalog: pd.DataFrame, sources:dict[str,Path], status:BuildStatu
         if mid and mid in seen_mal:
             continue
         anime.append(a)
-        if mid: seen_mal.add(mid)
-        if len(anime)>=candidate_limit: break
+        if mid:
+            seen_mal.add(mid)
+        if len(anime)>=candidate_limit:
+            break
+
     status.sources["anime_popularity_candidates"]={
         "anilist_rows":sum(1 for a in anime if a.get("_popularity_source")=="anilist_users"),
         "mal_snapshot_rows":sum(1 for a in anime if a.get("_popularity_source")=="myanimelist_members_snapshot"),
         "total_candidates":len(anime),
         "ok":bool(anime),
     }
+    _progress(
+        "Anime candidate pool ready "
+        f"anilist={status.sources['anime_popularity_candidates']['anilist_rows']} "
+        f"mal_snapshot={status.sources['anime_popularity_candidates']['mal_snapshot_rows']} "
+        f"total={len(anime)}"
+    )
+
+    _progress("Anime LOCAL PASS loading AnimeThemes bulk index")
     by_al,by_mal=fetch_animethemes_all(status)
+    _progress("Anime LOCAL PASS loading MAL theme snapshot")
     fallback=_load_mal_theme_fallback(mal_path)
     title_map,exact=_catalog_match_index(catalog)
+
+    rows=[]
+    unresolved=[]
+    scanned=0
+
+    def persist(row:SongRow, phase:str) -> None:
+        rows.append(row)
+        append_row(row,partial_path)
+        n=len(rows)
+        _progress(
+            f"Anime {phase} WRITE accepted={n} anime_rank={(row.extra or {}).get('anime_popularity_rank')} "
+            f"title={row.title!r} artist={row.main_artist!r} anime={row.anime_title!r}"
+        )
+        if n==1 or n%25==0 or n==target:
+            snapshot=sorted(
+                rows,
+                key=lambda x:(x.extra or {}).get("anime_popularity_rank",10**9),
+            )[:target]
+            for i,r in enumerate(snapshot,1):
+                r.rank=i
+            write_rows(snapshot,output_path)
+            _progress(f"Anime SNAPSHOT canonical_rows={len(snapshot)} partial_rows={n}")
+
+    # PASS 1: no per-anime network calls.
+    for anime_rank,a in enumerate(anime,1):
+        scanned=anime_rank
+        aid=_safe_int(a.get("id"))
+        mid=_safe_int(a.get("idMal"))
+        candidates=(
+            list(by_al.get(aid,[]))
+            or list(by_mal.get(mid,[]))
+            or list(fallback.get(mid,[]))
+        )
+        if not candidates:
+            unresolved.append((anime_rank,a))
+        else:
+            row=_anime_row_from_candidates(
+                anime_item=a,
+                anime_rank=anime_rank,
+                candidates=candidates,
+                catalog=catalog,
+                title_map=title_map,
+                exact=exact,
+            )
+            if row is not None:
+                persist(row,"LOCAL")
+
+        if anime_rank==1 or anime_rank%100==0:
+            _progress(
+                f"Anime LOCAL PASS progress scanned={anime_rank} accepted={len(rows)}/{target} "
+                f"unresolved={len(unresolved)}"
+            )
+
+        if len(rows)>=target:
+            _progress(
+                f"Anime LOCAL PASS reached target at anime_rank={anime_rank}; "
+                "stopping lower-ranked scan"
+            )
+            break
+
+    local_rows=len(rows)
+    local_cutoff_rank=max(
+        ((r.extra or {}).get("anime_popularity_rank",0) for r in rows),
+        default=0,
+    )
+    _progress(
+        f"Anime LOCAL PASS DONE scanned={scanned} accepted={local_rows}/{target} "
+        f"unresolved_before_cutoff={len(unresolved)} cutoff_rank={local_cutoff_rank}"
+    )
+
     cache_path=CACHE/"jikan_themes.json"
     try:
         jikan_cache=json.loads(cache_path.read_text(encoding="utf-8")) if cache_path.exists() else {}
-        if not isinstance(jikan_cache,dict): jikan_cache={}
+        if not isinstance(jikan_cache,dict):
+            jikan_cache={}
     except Exception:
         jikan_cache={}
-    jikan_client=httpx.Client(timeout=60,follow_redirects=True,headers={"User-Agent":"BeatHit-Dataset/1.0"})
-    rows=[]; jikan_queries=0
-    try:
-        for anime_rank,a in enumerate(anime,1):
-            if len(rows) >= target:
-                break
-            candidates=list(by_al.get(a.get("id"),[])) or list(by_mal.get(a.get("idMal"),[])) or list(fallback.get(a.get("idMal"),[]))
-            # Accuracy/coverage fallback for popular titles absent from AnimeThemes/snapshot.
-            mid=_safe_int(a.get("idMal"))
-            if not candidates and mid:
-                before=len(jikan_cache)
-                candidates=_jikan_theme_candidates(mid,jikan_client,jikan_cache,status)
-                if len(jikan_cache)>before: jikan_queries+=1
-                if jikan_queries and jikan_queries % 250 == 0:
-                    cache_path.parent.mkdir(parents=True,exist_ok=True)
-                    cache_path.write_text(json.dumps(jikan_cache,ensure_ascii=False),encoding="utf-8")
-            # Deduplicate theme candidates while preserving OP/ED sequence.
-            seen=set(); uniq=[]
-            for c in candidates:
-                if not c.get("title"): continue
-                k=(norm(c["title"]),norm((c.get("artists") or [""])[0]))
-                if k in seen: continue
-                seen.add(k); uniq.append(c)
-            scored=[]
-            for c in uniq:
-                match,method=_match_song(c["title"],c.get("artists") or [],catalog,title_map,exact)
-                if match is not None:
-                    scored.append((_score(match), 1 if c.get("type")=="OP" else 0, -(c.get("sequence") or 1), c, match, method))
-                else:
-                    # If no song popularity observation exists, OP1 is the recognizability fallback.
-                    scored.append((-1,1 if c.get("type")=="OP" else 0,-(c.get("sequence") or 1),c,None,"theme_order_fallback"))
-            if not scored:
-                continue
-            scored.sort(key=lambda x:(x[0],x[1],x[2]),reverse=True)
-            _,_,_,c,match,method=scored[0]
-            title_obj=a.get("title") or {}
-            anime_title=(title_obj.get("english") or title_obj.get("romaji") or title_obj.get("native") or str(a.get("idMal") or a.get("id")))
-            pop_source=str(a.get("_popularity_source") or "anilist_users")
-            pop_source_url=str(a.get("_popularity_source_url") or "https://anilist.co/")
-            common_extra={
-                "theme_type":c.get("type"),"theme_sequence":c.get("sequence"),"selection_method":method,
-                "anilist_id":a.get("id"),"mal_id":a.get("idMal"),"anime_popularity_rank":anime_rank,
-                "anime_popularity_source":pop_source,
-                "theme_metadata_url":c.get("animethemes_url"),
-            }
-            if match is not None:
-                row=_catalog_row_to_song(match,rank=len(rows)+1,extra=common_extra)
-            else:
-                artists=c.get("artists") or ["Unknown verified theme artist"]
-                if pop_source=="myanimelist_members_snapshot":
-                    metric_name="myanimelist_members_snapshot"; metric_unit="users"
-                    note="No trustworthy song-level listen/view count found; MyAnimeList member count from the bundled snapshot is explicitly an anime-popularity proxy, not song listens."
-                else:
-                    metric_name="anime_popularity_proxy"; metric_unit="anilist_users"
-                    note="No trustworthy song-level listen/view count found; AniList anime popularity is explicitly a proxy, not song listens."
-                row=SongRow(rank=len(rows)+1,title=c["title"],main_artist=artists[0],featured_artists=artists[1:],
-                    anime_title=anime_title,anime_popularity=a.get("popularity"),metric_name=metric_name,
-                    metric_value=float(a.get("popularity") or 0),metric_unit=metric_unit,source_url=pop_source_url,
-                    retrieved_at=TODAY,source_notes=note,extra=common_extra)
-            row.anime_title=anime_title; row.anime_popularity=a.get("popularity")
-            rows.append(row)
-            append_row(row,output_path)
-            _progress(f"Anime WRITE {len(rows)}/{target} anime_rank={anime_rank} title={row.title!r} artist={row.main_artist!r} anime={anime_title!r} source={method} jikan_queries={jikan_queries}")
-    finally:
-        jikan_client.close()
-        cache_path.parent.mkdir(parents=True,exist_ok=True)
-        cache_path.write_text(json.dumps(jikan_cache,ensure_ascii=False),encoding="utf-8")
-    rows.sort(key=lambda x:(x.extra or {}).get("anime_popularity_rank", 10**9))
-    rows=rows[:target]
-    for i,r in enumerate(rows,1): r.rank=i
-    write_rows(rows,output_path)
-    _progress(f"Anime DONE rows={len(rows)}/{target}")
-    status.sources["jikan_theme_fallback"]={"url":"https://api.jikan.moe/v4","queried":jikan_queries,"cached":len(jikan_cache),"ok":True}
-    status.datasets["anime"] = DatasetStatus(target=target,rows=len(rows),complete=len(rows)==target,
-        metric_coverage=dict(_metric_counts(rows)),notes=[
-            "Anime ordering prefers live AniList popularity; if AniList pagination is unavailable, remaining candidates come from the bundled MyAnimeList snapshot ranked by source-provided member count. Theme metadata priority: AnimeThemes external-ID match, bundled MAL fallback, then paced/cached Jikan themes."
-        ])
-    status.save();return rows
 
+    jikan_query_budget=max(0,_safe_int(os.getenv("BEATHIT_JIKAN_MAX_QUERIES")) or 50)
+    jikan_time_budget=max(0,_safe_int(os.getenv("BEATHIT_JIKAN_MAX_SECONDS")) or 120)
+    jikan_failure_breaker=max(1,_safe_int(os.getenv("BEATHIT_JIKAN_FAILURE_BREAKER")) or 4)
+
+    jikan_queries=0
+    jikan_successful_requests=0
+    consecutive_failures=0
+    jikan_stop_reason=None
+    deadline=time.monotonic()+jikan_time_budget
+
+    _progress(
+        f"Anime JIKAN PASS START unresolved={len(unresolved)} "
+        f"query_budget={jikan_query_budget} time_budget={jikan_time_budget}s "
+        f"failure_breaker={jikan_failure_breaker}"
+    )
+
+    with httpx.Client(
+        timeout=httpx.Timeout(10.0,connect=5.0),
+        follow_redirects=True,
+        headers={"User-Agent":"BeatHit-Dataset/1.0"},
+    ) as jikan_client:
+        for anime_rank,a in unresolved:
+            if jikan_queries>=jikan_query_budget:
+                jikan_stop_reason="query_budget_exhausted"
+                break
+            if time.monotonic()>=deadline:
+                jikan_stop_reason="time_budget_exhausted"
+                break
+            if consecutive_failures>=jikan_failure_breaker:
+                jikan_stop_reason=f"circuit_breaker_after_{consecutive_failures}_consecutive_failures"
+                break
+
+            mid=_safe_int(a.get("idMal"))
+            if not mid:
+                continue
+
+            was_cached=str(mid) in jikan_cache
+            candidates,request_ok,network_made=_jikan_theme_candidates(
+                mid,jikan_client,jikan_cache,status
+            )
+            if network_made and not was_cached:
+                jikan_queries+=1
+
+            if not request_ok:
+                consecutive_failures+=1
+                _progress(
+                    f"Anime JIKAN PASS failure_streak={consecutive_failures}/"
+                    f"{jikan_failure_breaker} queries={jikan_queries}"
+                )
+                continue
+
+            consecutive_failures=0
+            if network_made:
+                jikan_successful_requests+=1
+
+            if candidates:
+                row=_anime_row_from_candidates(
+                    anime_item=a,
+                    anime_rank=anime_rank,
+                    candidates=candidates,
+                    catalog=catalog,
+                    title_map=title_map,
+                    exact=exact,
+                )
+                if row is not None:
+                    persist(row,"JIKAN")
+
+            if local_rows<target and len(rows)>=target:
+                jikan_stop_reason="target_reached"
+                break
+
+    cache_path.parent.mkdir(parents=True,exist_ok=True)
+    cache_path.write_text(json.dumps(jikan_cache,ensure_ascii=False),encoding="utf-8")
+
+    if jikan_stop_reason is None:
+        jikan_stop_reason="unresolved_candidates_exhausted"
+
+    rows.sort(key=lambda x:(x.extra or {}).get("anime_popularity_rank",10**9))
+    final_rows=rows[:target]
+    for i,r in enumerate(final_rows,1):
+        r.rank=i
+    write_rows(final_rows,output_path)
+
+    if len(final_rows)>=target:
+        partial_path.unlink(missing_ok=True)
+
+    _progress(
+        f"Anime DONE rows={len(final_rows)}/{target} local_rows={local_rows} "
+        f"jikan_queries={jikan_queries} jikan_successful_requests={jikan_successful_requests} "
+        f"jikan_stop_reason={jikan_stop_reason}"
+    )
+
+    status.sources["jikan_theme_fallback"]={
+        "url":"https://api.jikan.moe/v4",
+        "mode":"bounded_post_pass_only",
+        "queried":jikan_queries,
+        "successful_requests":jikan_successful_requests,
+        "cached":len(jikan_cache),
+        "query_budget":jikan_query_budget,
+        "time_budget_seconds":jikan_time_budget,
+        "failure_breaker":jikan_failure_breaker,
+        "stop_reason":jikan_stop_reason,
+        "ok":jikan_successful_requests>0 or jikan_queries==0,
+    }
+    status.datasets["anime"]=DatasetStatus(
+        target=target,
+        rows=len(final_rows),
+        complete=len(final_rows)==target,
+        metric_coverage=dict(_metric_counts(final_rows)),
+        notes=[
+            "Local-first two-pass pipeline: bulk AnimeThemes + bundled MAL theme data are scanned "
+            "without per-anime network calls; Jikan is used only as a bounded post-pass for "
+            "higher-ranked unresolved anime.",
+            f"local_rows_before_jikan={local_rows}; jikan_stop_reason={jikan_stop_reason}",
+        ],
+    )
+    status.save()
+    return final_rows
 
 def _vocadb_all(status:BuildStatus,max_songs:int|None=None)->tuple[list[dict],bool]:
     """Fetch a high-recall VocaDB candidate window without abusive full-site crawling.
