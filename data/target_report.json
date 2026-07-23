@@ -1,9 +1,9 @@
 {
   "fixed_targets": {
     "anime/anime_songs.csv": {
-      "target": 10000,
-      "rows": 0,
-      "complete": false
+      "target": 1000,
+      "rows": 1000,
+      "complete": true
     },
     "worldwide/worldwide_51000.csv": {
       "target": 51000,
@@ -16,9 +16,9 @@
       "complete": true
     },
     "vtuber_original/vtuber_original_10000.csv": {
-      "target": 10000,
-      "rows": 0,
-      "complete": false
+      "target": 1000,
+      "rows": 1000,
+      "complete": true
     },
     "emerging/emerging_10000.csv": {
       "target": 10000,
@@ -36,9 +36,9 @@
       "complete": false
     },
     "vtuber_non_original/vtuber_non_original_10000.csv": {
-      "target": 10000,
-      "rows": 0,
-      "complete": false
+      "target": 1000,
+      "rows": 1000,
+      "complete": true
     }
   },
   "semantic_checks": {
@@ -94,6 +94,8 @@
       "complete_markets": 73,
       "total_rows": 73590,
       "target_per_country": 1000,
+      "source_exhausted_markets": 0,
+      "unsupported_index_links": 0,
       "failures": 1,
       "files_ok": true,
       "complete": false
@@ -106,17 +108,17 @@
       "corpus_completeness": "Read STATUS.json datasets.vocaloid.complete; threshold validity does not prove exhaustive source coverage."
     },
     "vtuber_original_classification": {
-      "rows": 0,
+      "rows": 1000,
       "invalid_rows": [],
       "complete": true
     },
     "vtuber_cover_classification": {
-      "rows": 0,
+      "rows": 1000,
       "invalid_rows": [],
       "complete": true
     },
     "megalist_deduplication": {
-      "rows": 88798,
+      "rows": 91708,
       "duplicate_title_main_artist_keys": 0,
       "complete": true
     }

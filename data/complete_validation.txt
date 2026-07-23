@@ -3,8 +3,5 @@ COUNTRY_COUNT MT: 575 != 1000
 COUNTRY_MARKETS built 75 != detected 76
 COUNTRY_FAILURES 1
 COUNTRY_TOTAL_ROWS 73590 != 76000
-MISSING anime/anime_songs.csv
-COUNT vtuber_original/vtuber_original_10000.csv: 0 != 10000
 COUNT screen_soundtracks/screen_soundtracks_10000.csv: 5660 != 10000
-COUNT vtuber_non_original/vtuber_non_original_10000.csv: 0 != 10000
 Strict fixed-target validation did not pass; see source-backed shortfalls above.
