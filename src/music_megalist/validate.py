@@ -14,6 +14,14 @@ TARGETS={
  "genres/genres_10000.csv":10000,
  "screen_soundtracks/screen_soundtracks_10000.csv":10000,
  "vtuber_non_original/vtuber_non_original_10000.csv":1000,
+ "video_games/video_game_music_1000.csv":1000,
+ "internet_native/internet_native_1000.csv":1000,
+ "electronic_subcultures/electronic_subcultures_1000.csv":1000,
+ "alternative_extreme/alternative_extreme_1000.csv":1000,
+ "jazz_depth/jazz_depth_1000.csv":1000,
+ "children_childhood/children_childhood_100.csv":100,
+ "unserious/unserious_1000.csv":1000,
+ "special_required/special_required.csv":4,
 }
 
 def _worldwide_bucket(row: dict[str,str]) -> str:
@@ -46,6 +54,15 @@ def _generic_csv_errors(path: Path) -> list[str]:
             except Exception: errors.append(f'RANK_INVALID {path} row {i}: {rank}')
         for k in required:
             if not str(r.get(k,'')).strip(): errors.append(f"BLANK {path} row {i} field {k}")
+        # New canonical outputs include languages as a JSON list. Legacy/minimal fixtures
+        # without this newer optional column remain valid and readable.
+        if 'languages' in r:
+            try:
+                languages=json.loads(r.get('languages') or '[]')
+                if not isinstance(languages,list) or not languages or any(not str(x).strip() for x in languages):
+                    errors.append(f"LANGUAGES {path} row {i}: expected non-empty JSON list")
+            except Exception:
+                errors.append(f"LANGUAGES_INVALID {path} row {i}")
         try: mv=float(r.get('metric_value',''))
         except Exception: errors.append(f"METRIC {path} row {i}"); continue
         unit=r.get('metric_unit','')
@@ -106,13 +123,32 @@ def validate(data_dir: str|Path='data', *, require_complete: bool=False) -> list
         # bootstrap files are provenance examples, not final canonical categories.
         if '/bootstrap/' in p.as_posix() or '/seeds/' in p.as_posix() or p.name.endswith('_snapshot.csv'): continue
         errors.extend(_generic_csv_errors(p))
-    vp=data/'vocaloid'/'vocaloid_spotify_10m.csv'
+    vp=data/'vocaloid'/'vocaloid_youtube_100m.csv'
     if vp.exists():
         rows=read_rows(vp)
         if len(rows)>10000: errors.append('COUNT vocaloid > 10000')
         for i,r in enumerate(rows,1):
-            if r.metric_name not in {'spotify_streams','spotify_streams_snapshot'} or r.metric_value<10_000_000:
+            ex=r.extra or {}
+            if r.metric_name!='youtube_views' or r.metric_unit!='views' or r.metric_value<100_000_000:
                 errors.append(f'VOCALOID_THRESHOLD row {i}')
+            if r.view_count is None or int(r.view_count)!=int(r.metric_value):
+                errors.append(f'VOCALOID_VIEW_COUNT row {i}')
+            if str(ex.get('vocadb_song_type') or '').casefold()!='original':
+                errors.append(f'VOCALOID_SONG_TYPE row {i}')
+            if str(ex.get('youtube_pv_type') or '').casefold()!='original':
+                errors.append(f'VOCALOID_PV_TYPE row {i}')
+            if str(ex.get('youtube_pv_service') or '').casefold()!='youtube':
+                errors.append(f'VOCALOID_PV_SERVICE row {i}')
+            if not str(ex.get('youtube_video_id') or '').strip():
+                errors.append(f'VOCALOID_VIDEO_ID row {i}')
+    kp=data/'kpop'/'kpop_youtube_over_100m.csv'
+    if kp.exists():
+        rows=read_rows(kp)
+        for i,r in enumerate(rows,1):
+            if r.metric_name!='youtube_views' or r.metric_unit!='views' or r.metric_value<=100_000_000:
+                errors.append(f'KPOP_THRESHOLD row {i}')
+            if r.view_count is None or int(r.view_count)!=int(r.metric_value):
+                errors.append(f'KPOP_VIEW_COUNT row {i}')
     wp=data/'worldwide'/'worldwide_51000.csv'
     if wp.exists():
         with wp.open(encoding='utf-8',newline='') as f: wr=list(csv.DictReader(f))

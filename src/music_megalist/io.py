@@ -60,6 +60,11 @@ def read_rows(path: str | Path) -> list[SongRow]:
         for d in csv.DictReader(f):
             for k in ("featured_artists", "genres"):
                 d[k] = json.loads(d[k] or "[]")
+            # Backward compatibility for materialized CSVs created before languages existed.
+            if "languages" in d:
+                d["languages"] = json.loads(d.get("languages") or '["und"]')
+            else:
+                d["languages"] = ["und"]
             d["extra"] = json.loads(d.get("extra") or "{}")
             for k in ("rank", "release_year", "anime_popularity", "listen_count", "view_count"):
                 d[k] = int(d[k]) if d.get(k) else None

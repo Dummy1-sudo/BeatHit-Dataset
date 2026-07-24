@@ -22,6 +22,14 @@ FIXED = {
     "genres/genres_10000.csv": 10_000,
     "screen_soundtracks/screen_soundtracks_10000.csv": 10_000,
     "vtuber_non_original/vtuber_non_original_10000.csv": 1_000,
+    "video_games/video_game_music_1000.csv": 1_000,
+    "internet_native/internet_native_1000.csv": 1_000,
+    "electronic_subcultures/electronic_subcultures_1000.csv": 1_000,
+    "alternative_extreme/alternative_extreme_1000.csv": 1_000,
+    "jazz_depth/jazz_depth_1000.csv": 1_000,
+    "children_childhood/children_childhood_100.csv": 100,
+    "unserious/unserious_1000.csv": 1_000,
+    "special_required/special_required.csv": 4,
 }
 WORLDWIDE_BUCKETS = {
     "current": 10_000,
@@ -109,21 +117,72 @@ def main() -> None:
             country_check["error"] = str(exc)
     report["semantic_checks"]["spotify_country_top1000"] = country_check
 
-    vocaloid = read_csv("vocaloid/vocaloid_spotify_10m.csv")
+    vocaloid = read_csv("vocaloid/vocaloid_youtube_100m.csv")
     invalid_vocaloid = []
     for i, r in enumerate(vocaloid, 1):
         try:
             value = float(r.get("metric_value") or 0)
+            view_count = int(float(r.get("view_count") or 0))
         except Exception:
             value = 0
-        if r.get("metric_name") not in {"spotify_streams", "spotify_streams_snapshot"} or value < 10_000_000:
+            view_count = 0
+        e = extra(r)
+        valid = (
+            r.get("metric_name") == "youtube_views"
+            and r.get("metric_unit") == "views"
+            and value >= 100_000_000
+            and view_count == int(value)
+            and str(e.get("vocadb_song_type") or "").casefold() == "original"
+            and str(e.get("youtube_pv_type") or "").casefold() == "original"
+            and str(e.get("youtube_pv_service") or "").casefold() == "youtube"
+            and bool(str(e.get("youtube_video_id") or "").strip())
+        )
+        if not valid:
             invalid_vocaloid.append(i)
     report["semantic_checks"]["vocaloid_threshold"] = {
-        "target": "all verified cumulative Spotify-stream songs >=10,000,000; cap 10,000",
+        "target": "VocaDB Original voice-synth songs with one official Original YouTube PV >=100,000,000 views; cap 10,000",
         "rows": len(vocaloid),
         "invalid_rows": invalid_vocaloid[:100],
         "threshold_valid": not invalid_vocaloid and len(vocaloid) <= 10_000,
         "corpus_completeness": "Read STATUS.json datasets.vocaloid.complete; threshold validity does not prove exhaustive source coverage.",
+    }
+
+    kpop = read_csv("kpop/kpop_youtube_over_100m.csv")
+    invalid_kpop = []
+    for i, r in enumerate(kpop, 1):
+        try:
+            value = float(r.get("metric_value") or 0)
+            view_count = int(float(r.get("view_count") or 0))
+        except Exception:
+            value = 0
+            view_count = 0
+        if (
+            r.get("metric_name") != "youtube_views"
+            or r.get("metric_unit") != "views"
+            or value <= 100_000_000
+            or view_count != int(value)
+        ):
+            invalid_kpop.append(i)
+    report["semantic_checks"]["kpop_youtube_threshold"] = {
+        "target": "all materialized source-tagged K-pop songs strictly above 100,000,000 observed YouTube views",
+        "rows": len(kpop),
+        "invalid_rows": invalid_kpop[:100],
+        "threshold_valid": not invalid_kpop,
+        "corpus_completeness": "Read STATUS.json datasets.kpop.complete; current source catalog is not claimed exhaustive.",
+    }
+
+    special = read_csv("special_required/special_required.csv")
+    required_special = {
+        "Beethoven Virus",
+        "The Pi Song (100 Digits of π)",
+        "SpongeBob SquarePants Theme",
+        "Pink Fluffy Unicorns Dancing on Rainbows",
+    }
+    observed_special = {str(r.get("title") or "") for r in special}
+    report["semantic_checks"]["special_required"] = {
+        "required": sorted(required_special),
+        "missing": sorted(required_special - observed_special),
+        "complete": required_special.issubset(observed_special),
     }
 
     for rel, expected in [
@@ -143,6 +202,20 @@ def main() -> None:
         for p in parts:
             with p.open(encoding="utf-8", newline="") as f:
                 mega.extend(csv.DictReader(f))
+    invalid_languages = []
+    for i, r in enumerate(mega, 1):
+        try:
+            languages = json.loads(r.get("languages") or "[]")
+            if not isinstance(languages, list) or not languages or any(not str(x).strip() for x in languages):
+                invalid_languages.append(i)
+        except Exception:
+            invalid_languages.append(i)
+    report["semantic_checks"]["megalist_languages"] = {
+        "rows": len(mega),
+        "invalid_rows": invalid_languages[:100],
+        "complete": bool(mega) and not invalid_languages,
+    }
+
     keys = [song_key(r) for r in mega if all(song_key(r))]
     dupes = len(keys) - len(set(keys))
     report["semantic_checks"]["megalist_deduplication"] = {
@@ -156,6 +229,9 @@ def main() -> None:
         all(x["complete"] for x in bucket_result.values())
         and len(genres) == 10_000 and len(selected_genres) >= 50
         and not invalid_vocaloid
+        and not invalid_kpop
+        and required_special.issubset(observed_special)
+        and not invalid_languages
         and bool(country_check.get("complete"))
         and dupes == 0
     )

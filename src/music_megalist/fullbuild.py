@@ -36,6 +36,17 @@ from rapidfuzz import fuzz
 from .dedupe import dedupe, norm
 from .io import append_row, write_rows
 from .models import SongRow
+from .culturelists import (
+    build_alternative_extreme,
+    build_children_childhood,
+    build_electronic_subcultures,
+    build_internet_native,
+    build_jazz_depth,
+    build_kpop_youtube_100m,
+    build_required_special,
+    build_unserious,
+    build_video_game_music,
+)
 
 ROOT = Path(__file__).resolve().parents[2]
 DATA = ROOT / "data"
@@ -84,6 +95,14 @@ FIXED_TARGETS = {
     "genres": 10_000,
     "screen_soundtracks": 10_000,
     "vtuber_non_original": 1_000,
+    "video_game_music": 1_000,
+    "internet_native": 1_000,
+    "electronic_subcultures": 1_000,
+    "alternative_extreme": 1_000,
+    "jazz_depth": 1_000,
+    "children_childhood": 100,
+    "unserious": 1_000,
+    "special_required": 4,
 }
 
 WORLDWIDE_BUCKETS = [
@@ -126,12 +145,6 @@ SOUNDTRACK_RE = re.compile(
     r"netflix|hbo|disney|season\s+\d+|original score)", re.I,
 )
 
-VOICE_SYNTH_MARKERS = {
-    "hatsune miku", "初音ミク", "kagamine rin", "鏡音リン", "kagamine len", "鏡音レン",
-    "megurine luka", "巡音ルカ", "kaito", "meiko", "gumi", "megpoid", "v flower", "flower",
-    "kasane teto", "重音テト", "otomachi una", "音街ウナ", "kafu", "可不", "cevio",
-    "synthesizer v", "vocaloid", "utau", "ia", "結月ゆかり", "yuzuki yukari", "kaai yuki",
-}
 
 
 @dataclass
@@ -1014,6 +1027,49 @@ def _score(r: pd.Series) -> float:
             + 10 * min(math.log10(daily + 1) / 7, 1))
 
 
+def _catalog_languages(r: pd.Series) -> list[str]:
+    """Use explicit source language metadata; never guess lyric language from title script."""
+    aliases={
+        "english":"en","japanese":"ja","korean":"ko","spanish":"es","french":"fr",
+        "german":"de","italian":"it","portuguese":"pt","russian":"ru","arabic":"ar",
+        "hindi":"hi","punjabi":"pa","chinese":"zh","mandarin":"zh","cantonese":"yue",
+        "thai":"th","vietnamese":"vi","indonesian":"id","instrumental":"zxx",
+        "no linguistic content":"zxx","unknown":"und","undetermined":"und",
+    }
+    for key in ("languages","language","track_language","lyrics_language","vocal_language"):
+        if key not in r.index:
+            continue
+        value=r.get(key)
+        if value is None:
+            continue
+        if isinstance(value,(list,tuple,set)):
+            raw=[str(x) for x in value]
+        else:
+            text=str(value).strip()
+            if not text or text.casefold() in {"nan","none","null","<na>","[]"}:
+                continue
+            try:
+                parsed=json.loads(text)
+                raw=[str(x) for x in parsed] if isinstance(parsed,list) else [text]
+            except Exception:
+                raw=re.split(r"[|;,/]",text)
+        out=[]
+        for item in raw:
+            token=item.strip().casefold()
+            if not token:
+                continue
+            token=aliases.get(token,token)
+            if re.fullmatch(r"[a-z]{2,3}(?:-[a-z0-9]{2,8})*",token) and token not in out:
+                out.append(token)
+        if out:
+            return out
+    genres=_parse_genres(r.get("genres"))
+    text=f"{r.get('title','')} | {r.get('album_name','')}".casefold()
+    if "instrumental" in genres or re.search(r"\b(?:instrumental|karaoke|wordless|no vocals?)\b",text):
+        return ["zxx"]
+    return ["und"]
+
+
 def _catalog_row_to_song(r: pd.Series, *, rank: int | None = None, extra: dict[str, Any] | None = None,
                          metric_override: tuple[str, float, str] | None = None, source_notes: str | None = None) -> SongRow:
     artists = _split_artist_string(r.get("artists"))
@@ -1029,6 +1085,7 @@ def _catalog_row_to_song(r: pd.Series, *, rank: int | None = None, extra: dict[s
         release_date=(str(r.get("release_date") or "").strip() or None),
         release_year=_parse_year(r.get("release_year")) or _parse_year(r.get("release_date")),
         genres=genres,
+        languages=_catalog_languages(r),
         metric_name=metric[0], metric_value=float(metric[1]), metric_unit=metric[2],
         listen_count=(int(metric[1]) if metric[2] in {"streams","listens"} else None),
         listen_source=(("Spotify (daily count)" if metric[0]=="spotify_daily_streams" else "Spotify") if metric[0].startswith("spotify_") and metric[2]=="streams" else ("ListenBrainz" if metric[2]=="listens" else None)),
@@ -2170,170 +2227,429 @@ def build_anime(catalog: pd.DataFrame, sources:dict[str,Path], status:BuildStatu
     return final_rows
 
 def _vocadb_all(status:BuildStatus,max_songs:int|None=None)->tuple[list[dict],bool]:
-    """Fetch a high-recall VocaDB candidate window without abusive full-site crawling.
-
-    VocaDB explicitly warns against excessive thousands of API calls per day. A complete
-    enumeration of its hundreds of thousands of songs would require many thousands of
-    requests, so the default build scans the top 25k songs by RatingScore (popular songs are
-    the plausible >=10M Spotify candidates). Operators can raise the limit deliberately with
-    BEATHIT_VOCADB_SCAN_LIMIT, but the result is only marked exhaustive when the API-reported
-    total was actually reached.
-    """
+    # Fetch VocaDB original songs that have at least one YouTube PV.
+    # Spotify is not consulted anywhere in this pipeline.
     if max_songs is None:
-        max_songs=max(1_000,min(_safe_int(os.getenv("BEATHIT_VOCADB_SCAN_LIMIT")) or 25_000,250_000))
-    out=[];start=0;size=50; exhaustive=False; total_seen=None
-    with httpx.Client(timeout=90,headers={"User-Agent":"BeatHit-Dataset/1.0 (contact via GitHub repository)"}) as c:
+        max_songs=max(
+            1_000,
+            min(_safe_int(os.getenv("BEATHIT_VOCADB_SCAN_LIMIT")) or 100_000,250_000),
+        )
+
+    out=[]
+    start=0
+    size=50
+    exhaustive=False
+    total_seen=None
+    pages=0
+
+    _progress(f"Vocaloid VocaDB START scan_limit={max_songs}")
+    with httpx.Client(
+        timeout=90,
+        follow_redirects=True,
+        headers={"User-Agent":"BeatHit-Dataset/1.0 (contact via GitHub repository)"},
+    ) as client:
         while start<max_songs:
-            params={"start":start,"maxResults":size,"sort":"RatingScore","fields":"Artists,Names"}
-            if start==0: params["getTotalCount"]="true"
-            try:d=_http_json(c,"GET",VOCADB_API,params=params)
+            params={
+                "songTypes":"Original",
+                "onlyWithPvs":"true",
+                "pvServices":"Youtube",
+                "start":start,
+                "maxResults":size,
+                "sort":"RatingScore",
+                "fields":"Artists,Names,PVs",
+                "lang":"Default",
+            }
+            if start==0:
+                params["getTotalCount"]="true"
+
+            try:
+                data=_http_json(client,"GET",VOCADB_API,params=params)
             except Exception as exc:
-                status.warnings.append(f"VocaDB start={start}: {exc}");break
-            items=d.get("items",[]) or []
-            if total_seen is None: total_seen=_safe_int(d.get("totalCount"))
+                status.warnings.append(f"VocaDB original-song scan start={start}: {exc}")
+                break
+
+            items=data.get("items",[]) or []
+            if total_seen is None:
+                total_seen=_safe_int(data.get("totalCount"))
             if not items:
-                exhaustive=True; break
-            out.extend(items);start+=len(items)
+                exhaustive=True
+                break
+
+            accepted_page=[]
+            for item in items:
+                if str(item.get("songType") or "").casefold()!="original":
+                    continue
+                if str(item.get("status") or "").casefold()=="draft":
+                    continue
+                if not _vocadb_official_youtube_pvs(item):
+                    continue
+                accepted_page.append(item)
+
+            out.extend(accepted_page)
+            start+=len(items)
+            pages+=1
+            _progress(
+                f"Vocaloid VocaDB page={pages} source_rows={len(items)} "
+                f"accepted_originals={len(accepted_page)} total_candidates={len(out)} "
+                f"source_offset={start} api_total={total_seen}"
+            )
+
             if total_seen is not None and start>=total_seen:
-                exhaustive=True; break
+                exhaustive=True
+                break
             if len(items)<size:
-                exhaustive=True; break
-            time.sleep(.25)
-    status.sources["vocadb_candidate_scan"]={
-        "url":"https://vocadb.net/api/songs", "rows":len(out), "requested_limit":max_songs,
-        "api_reported_total":total_seen, "exhaustive":exhaustive, "sort":"RatingScore", "ok":bool(out),
-        "note":"Bounded high-popularity scan to respect VocaDB API usage guidance; qualifying Spotify threshold remains strict."
+                exhaustive=True
+                break
+            time.sleep(.20)
+
+    status.sources["vocadb_original_youtube_scan"]={
+        "url":"https://vocadb.net/api/songs",
+        "rows":len(out),
+        "requested_limit":max_songs,
+        "api_reported_total":total_seen,
+        "pages":pages,
+        "exhaustive":exhaustive,
+        "filters":{
+            "songTypes":"Original",
+            "onlyWithPvs":True,
+            "pvServices":"Youtube",
+        },
+        "ok":bool(out),
+        "note":"VocaDB-only candidate discovery; locally revalidated as original songs with original YouTube PVs.",
     }
+    _progress(
+        f"Vocaloid VocaDB DONE candidates={len(out)} exhaustive={exhaustive} "
+        f"api_total={total_seen}"
+    )
     return out,exhaustive
 
 
 def _vocadb_names(item:dict)->list[str]:
     names=[item.get("name"),item.get("defaultName"),item.get("additionalNames")]
-    for n in item.get("names",[]) or []: names.append(n.get("value"))
+    for value in item.get("names",[]) or []:
+        names.append(value.get("value"))
     out=[]
-    for x in names:
-        if not x:continue
-        if isinstance(x,str) and ", " in x and x==item.get("additionalNames"):
-            out.extend(x.split(", "))
-        else:out.append(str(x))
-    return list(dict.fromkeys(x.strip() for x in out if x and x.strip()))
+    for value in names:
+        if not value:
+            continue
+        if isinstance(value,str) and ", " in value and value==item.get("additionalNames"):
+            out.extend(value.split(", "))
+        else:
+            out.append(str(value))
+    return list(dict.fromkeys(value.strip() for value in out if value and value.strip()))
+
+
+def _vocadb_official_youtube_pvs(item:dict)->list[dict]:
+    # Return only VocaDB PVs classified as authorized original YouTube uploads.
+    out=[]
+    seen=set()
+    for pv in item.get("pvs",[]) or []:
+        if bool(pv.get("disabled")):
+            continue
+        if str(pv.get("service") or "").casefold()!="youtube":
+            continue
+        if str(pv.get("pvType") or "").casefold()!="original":
+            continue
+
+        video_id=str(pv.get("pvId") or "").strip()
+        if not re.fullmatch(r"[A-Za-z0-9_-]{11}",video_id):
+            url=str(pv.get("url") or "")
+            match=re.search(
+                r"(?:youtube\.com/(?:watch\?.*?v=|shorts/|embed/)|youtu\.be/)([A-Za-z0-9_-]{11})",
+                url,
+                flags=re.I,
+            )
+            video_id=match.group(1) if match else ""
+        if not video_id or video_id in seen:
+            continue
+        seen.add(video_id)
+        out.append({
+            "video_id":video_id,
+            "url":str(pv.get("url") or f"https://www.youtube.com/watch?v={video_id}"),
+            "name":pv.get("name"),
+            "author":pv.get("author"),
+            "publish_date":pv.get("publishDate"),
+            "pv_type":"Original",
+            "service":"Youtube",
+        })
+    return out
+
+
+def _vocadb_roles(value:Any)->set[str]:
+    if value is None:
+        return set()
+    if isinstance(value,(list,tuple,set)):
+        parts=[str(x) for x in value]
+    else:
+        parts=re.split(r"[,|;]",str(value))
+    return {re.sub(r"[^a-z]","",part.casefold()) for part in parts if str(part).strip()}
+
+
+def _vocadb_song_credit(item:dict)->tuple[str,list[str],dict]:
+    # Choose producer/composer as main artist and voicebanks as featured artists.
+    producer_priority=[]
+    other_humans=[]
+    vocalists=[]
+    all_artists=[]
+
+    synth_types={
+        "vocaloid","utau","cevio","synthesizerv","neutrino","voisona",
+        "newtype","voiceroid","othervoicesynthesizer",
+    }
+    producer_roles={"composer","arranger","voicemanipulator"}
+    vocalist_roles={"vocalist","chorus","vocaldataprovider"}
+
+    for credit in item.get("artists",[]) or []:
+        artist=credit.get("artist") or {}
+        name=str(artist.get("name") or credit.get("name") or "").strip()
+        if not name:
+            continue
+        artist_type=re.sub(r"[^a-z]","",str(artist.get("artistType") or "").casefold())
+        roles=_vocadb_roles(credit.get("effectiveRoles") or credit.get("roles"))
+        is_support=bool(credit.get("isSupport"))
+        all_artists.append({
+            "name":name,
+            "artist_type":artist.get("artistType"),
+            "roles":sorted(roles),
+            "is_support":is_support,
+            "vocadb_artist_id":artist.get("id"),
+        })
+
+        if artist_type in synth_types:
+            vocalists.append(name)
+            continue
+
+        # A human vocalist credit is not evidence that the song belongs in a voice-synth corpus.
+        if roles & vocalist_roles:
+            if not is_support:
+                other_humans.append(name)
+            continue
+
+        if not is_support and (artist_type=="producer" or roles & producer_roles):
+            score=(
+                3 if "composer" in roles else
+                2 if "arranger" in roles else
+                1 if "voicemanipulator" in roles else
+                0
+            )
+            producer_priority.append((score,name))
+        elif not is_support and artist_type not in {"animator","illustrator","designer","label"}:
+            other_humans.append(name)
+
+    producer_priority.sort(key=lambda x:x[0],reverse=True)
+    producers=list(dict.fromkeys(name for _,name in producer_priority))
+    other_humans=list(dict.fromkeys(other_humans))
+    vocalists=list(dict.fromkeys(vocalists))
+
+    if producers:
+        main_artist=producers[0]
+        additional_producers=producers[1:]
+    elif other_humans:
+        main_artist=other_humans[0]
+        additional_producers=other_humans[1:]
+    else:
+        fallback=str(item.get("artistString") or "").strip()
+        main_artist=fallback or (vocalists[0] if vocalists else "Unknown VocaDB producer")
+        additional_producers=[]
+
+    featured=list(dict.fromkeys(vocalists+additional_producers))
+    featured=[name for name in featured if norm(name)!=norm(main_artist)]
+    return main_artist,featured,{
+        "producer_artists":producers,
+        "voice_synth_vocalists":vocalists,
+        "all_vocadb_artist_credits":all_artists,
+    }
+
+
+def _youtube_views_official(ids:list[str],status:BuildStatus)->tuple[dict[str,int],int]:
+    # Fetch live view counts only from the official YouTube Data API.
+    ids=list(dict.fromkeys(video_id for video_id in ids if video_id))
+    key=os.getenv("YOUTUBE_API_KEY","").strip()
+    if not key:
+        status.warnings.append(
+            "Vocaloid build requires YOUTUBE_API_KEY; no third-party or Spotify fallback is allowed."
+        )
+        status.sources["vocaloid_youtube_view_counts"]={
+            "source":"YouTube Data API v3",
+            "requested":len(ids),
+            "resolved":0,
+            "unresolved":len(ids),
+            "ok":False,
+            "error":"missing YOUTUBE_API_KEY",
+        }
+        return {},len(ids)
+
+    out={}
+    with httpx.Client(timeout=60,follow_redirects=True) as client:
+        for start in range(0,len(ids),50):
+            batch=ids[start:start+50]
+            try:
+                data=_http_json(
+                    client,
+                    "GET",
+                    YOUTUBE_API,
+                    params={
+                        "part":"statistics",
+                        "id":",".join(batch),
+                        "key":key,
+                    },
+                )
+                for item in data.get("items",[]) or []:
+                    views=_safe_int((item.get("statistics") or {}).get("viewCount"))
+                    if views is not None:
+                        out[str(item.get("id"))]=views
+                _progress(
+                    f"Vocaloid YouTube batch={start//50+1} batch_size={len(batch)} "
+                    f"resolved={len(out)}/{len(ids)}"
+                )
+            except Exception as exc:
+                status.warnings.append(f"Vocaloid YouTube API batch {start}: {exc}")
+                _progress(
+                    f"Vocaloid YouTube batch={start//50+1} ERROR "
+                    f"{type(exc).__name__}: {exc}"
+                )
+
+    unresolved=len([video_id for video_id in ids if video_id not in out])
+    status.sources["vocaloid_youtube_view_counts"]={
+        "source":"YouTube Data API v3 videos.list(part=statistics)",
+        "requested":len(ids),
+        "resolved":len(out),
+        "unresolved":unresolved,
+        "ok":bool(out) and unresolved==0,
+        "threshold":100_000_000,
+        "note":"Official YouTube API only; no Return YouTube Dislike, yt-dlp, or Spotify fallback.",
+    }
+    return out,unresolved
 
 
 def build_vocaloid(catalog:pd.DataFrame,status:BuildStatus)->list[SongRow]:
-    from .io import read_rows
-    voca,vocadb_exhaustive=_vocadb_all(status)
-    title_map,_=_catalog_match_index(catalog)
-    # Preserve manually verified qualifying seeds as a resilience floor, then merge the
-    # exhaustive VocaDB/catalog classification results on top.
-    seed_path=DATA/"seeds"/"vocaloid_verified_seed.csv"
-    out=[]
-    if seed_path.exists():
-        try:
-            seeds=[r for r in read_rows(seed_path) if r.listen_count is not None and r.listen_count>=10_000_000]
-            # Refresh manually verified seeds from the acquired catalog whenever the same Spotify ID
-            # or exact normalized title+artist has a newer/higher cumulative stream observation.
-            by_tid={}
-            for _,cr in catalog.iterrows():
-                tid=_clean_track_id(cr.get("track_id"))
-                if tid: by_tid[tid]=cr
-            for seed in seeds:
-                match=by_tid.get(seed.spotify_track_id or "")
-                if match is None:
-                    ids=title_map.get(norm(seed.title),[])
-                    for idx in ids:
-                        cr=catalog.loc[idx]
-                        if norm(str(cr.main_artist))==norm(seed.main_artist):
-                            match=cr; break
-                if match is not None:
-                    streams=_safe_float(match.get("trusted_cumulative_streams"))
-                    trusted_url=str(match.get("trusted_streams_source_url") or "")
-                    if streams is not None and streams>=10_000_000 and streams>float(seed.metric_value):
-                        refreshed=_catalog_row_to_song(match,metric_override=("spotify_streams_snapshot" if "zenodo" in trusted_url else "spotify_streams",streams,"streams"),
-                            extra={**(seed.extra or {}),"verified_seed":True,"trusted_stream_snapshot_date":str(match.get("trusted_streams_snapshot_date") or "")},
-                            source_notes="Manually verified voice-synth seed; stream count refreshed from stricter cumulative Spotify evidence.")
-                        if trusted_url: refreshed.source_url=trusted_url
-                        # Preserve the verified canonical display credit/title from the seed.
-                        refreshed.title=seed.title; refreshed.main_artist=seed.main_artist; refreshed.featured_artists=seed.featured_artists
-                        seed=refreshed
-                out.append(seed)
-        except Exception as exc:
-            status.warnings.append(f"vocaloid seed read: {exc}")
-    seen={_identity(r.title,r.main_artist,r.spotify_track_id) for r in out}
-    # Direct high-precision classification from explicit voice-synth credits/genres. This catches
-    # qualifying tracks that may sit outside the bounded VocaDB popularity scan without requiring
-    # an abusive full-database crawl.
-    for _,cr in catalog.iterrows():
-        streams=_safe_float(cr.get("trusted_cumulative_streams"))
-        if streams is None or streams < 10_000_000:
+    # Build original voice-synth songs whose official YouTube PV has >=100M views.
+    # catalog is intentionally unused so Spotify/catalog data cannot affect the list.
+    del catalog
+    threshold=100_000_000
+    cap=10_000
+    output_path=DATA/"vocaloid"/"vocaloid_youtube_100m.csv"
+    partial_path=DATA/"vocaloid"/"vocaloid_youtube_100m.partial.csv"
+    legacy_path=DATA/"vocaloid"/"vocaloid_spotify_10m.csv"
+
+    output_path.parent.mkdir(parents=True,exist_ok=True)
+    partial_path.unlink(missing_ok=True)
+
+    vocadb_rows,vocadb_exhaustive=_vocadb_all(status)
+
+    songs=[]
+    all_video_ids=[]
+    for item in vocadb_rows:
+        pvs=_vocadb_official_youtube_pvs(item)
+        if not pvs:
             continue
-        trusted_url=str(cr.get("trusted_streams_source_url") or "")
-        stream_metric="spotify_streams_snapshot" if "zenodo" in trusted_url else "spotify_streams"
-        credit_text=f"{cr.get('title','')} | {cr.get('artists','')} | {cr.get('genres','')}".casefold()
-        explicit_marker=any(marker.casefold() in credit_text for marker in VOICE_SYNTH_MARKERS)
-        if not explicit_marker:
+        songs.append((item,pvs))
+        all_video_ids.extend(pv["video_id"] for pv in pvs)
+
+    _progress(
+        f"Vocaloid official-PV candidates songs={len(songs)} "
+        f"unique_youtube_ids={len(set(all_video_ids))}"
+    )
+    view_counts,unresolved_video_ids=_youtube_views_official(all_video_ids,status)
+
+    rows=[]
+    for item,pvs in songs:
+        resolved=[
+            (view_counts[pv["video_id"]],pv)
+            for pv in pvs
+            if pv["video_id"] in view_counts
+        ]
+        if not resolved:
             continue
-        k=_identity(str(cr.title),str(cr.main_artist),_clean_track_id(cr.get("track_id")))
-        if k in seen: continue
-        seen.add(k)
-        row=_catalog_row_to_song(cr,metric_override=(stream_metric,float(streams),"streams"),
-            extra={"classification":"explicit_voice_synth_credit_or_genre","trusted_stream_snapshot_date":str(cr.get("trusted_streams_snapshot_date") or "")},
-            source_notes="Voice-synth classification from explicit track credit/genre marker; >=10M qualification uses the stricter cumulative Spotify evidence channel (Zenodo Spotify-API snapshot or live Kworb overlay).")
-        if trusted_url: row.source_url=trusted_url
-        out.append(row)
-    for item in voca:
+
+        # One individual official upload must qualify; counts are never summed across PVs.
+        best_views,best_pv=max(resolved,key=lambda pair:pair[0])
+        if best_views<threshold:
+            continue
+
         names=_vocadb_names(item)
-        cand_ids=[]
-        for name in names:
-            cand_ids.extend(title_map.get(norm(name),[]))
-        cand_ids=list(dict.fromkeys(cand_ids))
-        if not cand_ids:continue
-        voca_artists=[]
-        for ar in item.get("artists",[]) or []:
-            name=(ar.get("artist") or {}).get("name") or ar.get("name")
-            if name:voca_artists.append(name)
-        artist_norms=[norm(x) for x in voca_artists]
-        best=None;best_score=-1
-        for idx in cand_ids[:200]:
-            r=catalog.loc[idx];streams=_safe_float(r.get("trusted_cumulative_streams"))
-            # The hard threshold uses only the stricter cumulative channel (Zenodo Spotify-API
-            # snapshot or live Kworb overlay). Chart-window totals and noisy cross-platform
-            # snapshot outliers remain ranking evidence but cannot qualify a track by themselves.
-            if streams is None or streams<10_000_000:
-                continue
-            trusted_url=str(r.get("trusted_streams_source_url") or "")
-            stream_metric="spotify_streams_snapshot" if "zenodo" in trusted_url else "spotify_streams"
-            ar=norm(str(r.main_artist))
-            similarity=max([fuzz.ratio(ar,x) for x in artist_norms],default=0)
-            # Accuracy-first entity resolution: a title collision alone is not enough. VocaDB
-            # normally exposes producer/artist credits, so require reasonable credit similarity
-            # whenever those credits exist. This deliberately accepts false negatives rather than
-            # attaching a mainstream same-title Spotify hit to a voice-synth song.
-            if artist_norms and similarity < 45:
-                continue
-            score=streams + similarity*1_000_000
-            if score>best_score:best_score=score;best=r
-        if best is None:continue
-        k=_identity(str(best.title),str(best.main_artist),_clean_track_id(best.track_id))
-        if k in seen:continue
-        seen.add(k)
-        trusted_value=float(best.get("trusted_cumulative_streams"))
-        trusted_url=str(best.get("trusted_streams_source_url") or "")
-        trusted_metric="spotify_streams_snapshot" if "zenodo" in trusted_url else "spotify_streams"
-        row=_catalog_row_to_song(best,metric_override=(trusted_metric,trusted_value,"streams"),
-            extra={"vocadb_id":item.get("id"),"vocadb_url":f"https://vocadb.net/S/{item.get('id')}","vocadb_artists":voca_artists,"match":"exact_normalized_title","trusted_stream_snapshot_date":str(best.get("trusted_streams_snapshot_date") or "")},
-            source_notes="Qualified only when stricter cumulative Spotify evidence reports >=10,000,000 streams and the title/artist resolves to a VocaDB voice-synth song entry.")
-        if trusted_url: row.source_url=trusted_url
-        out.append(row)
-    # Every qualifying row uses the same platform/unit, so exact cumulative Spotify
-    # streams are the ranking key. Do not let a secondary composite score reorder the list.
-    out=dedupe(out)
-    out.sort(key=lambda r: (r.listen_count if r.listen_count is not None else int(r.metric_value)), reverse=True)
-    for i,r in enumerate(out[:10_000],1): r.rank=i
-    out=out[:10_000]
-    write_rows(out,DATA/"vocaloid"/"vocaloid_spotify_10m.csv")
-    status.datasets["vocaloid"] = DatasetStatus(target="all verified >=10,000,000 Spotify streams; cap 10,000",rows=len(out),complete=(vocadb_exhaustive and bool(status.sources.get("spotify_zenodo_0_9m",{}).get("ok"))),
-        metric_coverage=dict(_metric_counts(out)),notes=["Conditional list: never padded. Completeness requires exhaustive VocaDB enumeration and remains bounded by acquired Spotify stream-snapshot coverage.", f"vocadb_exhaustive={vocadb_exhaustive}"])
-    status.save();return out
+        title=names[0] if names else str(item.get("id") or "Unknown VocaDB song")
+        main_artist,featured_artists,credit_extra=_vocadb_song_credit(item)
+        # VocaDB contains some human-only originals too; require an actual credited voice synth.
+        if not credit_extra.get("voice_synth_vocalists"):
+            continue
+        publish_date=str(item.get("publishDate") or best_pv.get("publish_date") or "")
+        year_match=re.search(r"\b(19|20)\d{2}\b",publish_date)
+
+        row=SongRow(
+            rank=0,
+            title=title,
+            main_artist=main_artist,
+            featured_artists=featured_artists,
+            release_date=publish_date or None,
+            release_year=int(year_match.group(0)) if year_match else None,
+            languages=["und"],
+            metric_name="youtube_views",
+            metric_value=float(best_views),
+            metric_unit="views",
+            view_count=int(best_views),
+            source_url=f"https://www.youtube.com/watch?v={best_pv['video_id']}",
+            retrieved_at=TODAY,
+            source_notes=(
+                "VocaDB SongType=Original and VocaDB PVType=Original identify an original song "
+                "with an authorized YouTube upload; live viewCount is from the official YouTube "
+                "Data API. Remixes, mashups, covers, remasters, MusicPV entries, reprints, other "
+                "PVs, disabled PVs, and Spotify evidence are excluded."
+            ),
+            extra={
+                "vocadb_id":item.get("id"),
+                "vocadb_url":f"https://vocadb.net/S/{item.get('id')}",
+                "vocadb_song_type":"Original",
+                "vocadb_status":item.get("status"),
+                "vocadb_rating_score":item.get("ratingScore"),
+                "youtube_video_id":best_pv["video_id"],
+                "youtube_pv_type":"Original",
+                "youtube_pv_service":"Youtube",
+                "youtube_pv_author":best_pv.get("author"),
+                "official_youtube_pv_count":len(pvs),
+                "qualification_threshold_views":threshold,
+                "selection":"highest-view individual official original YouTube PV",
+                **credit_extra,
+            },
+        )
+        rows.append(row)
+        append_row(row,partial_path)
+        _progress(
+            f"Vocaloid QUALIFY provisional={len(rows)} views={best_views} "
+            f"title={title!r} artist={main_artist!r} video={best_pv['video_id']}"
+        )
+
+    rows=dedupe(rows)
+    rows.sort(key=lambda row:int(row.view_count or row.metric_value),reverse=True)
+    rows=rows[:cap]
+    for rank,row in enumerate(rows,1):
+        row.rank=rank
+    if rows:
+        write_rows(rows,output_path)
+        # Retire the contaminated legacy Spotify classifier only after a replacement was
+        # successfully materialized. A failed/empty run never destroys the last canonical file.
+        legacy_path.unlink(missing_ok=True)
+    partial_path.unlink(missing_ok=True)
+
+    complete=bool(rows and vocadb_exhaustive and unresolved_video_ids==0 and os.getenv("YOUTUBE_API_KEY","").strip())
+    status.datasets["vocaloid"]=DatasetStatus(
+        target="all VocaDB original songs with an official original YouTube PV >=100,000,000 views; cap 10,000",
+        rows=len(rows),
+        complete=complete,
+        metric_coverage=dict(_metric_counts(rows)),
+        notes=[
+            "VocaDB-only classification and metadata; YouTube Data API view counts only.",
+            "SongType must equal Original. Qualifying PV must be service=Youtube, pvType=Original, enabled, and individually >=100,000,000 views.",
+            "No Spotify matching, title collision matching, remix, mashup, cover, remaster, MusicPV entry, reprint, or third-party view-count fallback.",
+            f"vocadb_exhaustive={vocadb_exhaustive}; unresolved_youtube_video_ids={unresolved_video_ids}",
+        ],
+    )
+    status.save()
+    _progress(
+        f"Vocaloid DONE rows={len(rows)} threshold={threshold} "
+        f"vocadb_exhaustive={vocadb_exhaustive} unresolved_video_ids={unresolved_video_ids}"
+    )
+    return rows
 
 
 def _holodex_headers()->dict[str,str]:
@@ -2648,7 +2964,7 @@ def build_megalist(all_rows:dict[str,list[SongRow]],status:BuildStatus)->list[So
     # The union itself is mechanically complete only when every upstream requested list is
     # complete. Otherwise it is still a valid deduplicated union of what was retrieved, but must
     # not be presented as the finished user-requested megalist.
-    upstream_keys=["anime","vocaloid","worldwide","classical","vtuber_original","emerging","genres","screen_soundtracks","vtuber_non_original","countries"]
+    upstream_keys=["anime","vocaloid","worldwide","classical","vtuber_original","emerging","genres","screen_soundtracks","vtuber_non_original","video_game_music","kpop","internet_native","electronic_subcultures","alternative_extreme","jazz_depth","children_childhood","unserious","special_required","countries"]
     upstream_complete=all(status.datasets.get(k) is not None and status.datasets[k].complete for k in upstream_keys)
     if not upstream_complete:
         notes.append("Megalist is a deduplicated union of materialized rows; completeness is false because one or more upstream requested lists are incomplete.")
@@ -2669,9 +2985,10 @@ def write_coverage(status:BuildStatus)->None:
 def write_status_json(status: BuildStatus) -> None:
     fixed_complete=all(status.datasets.get(k) is not None and status.datasets[k].complete for k in FIXED_TARGETS)
     vocaloid_complete=bool(status.datasets.get("vocaloid") and status.datasets["vocaloid"].complete)
+    kpop_complete=bool(status.datasets.get("kpop") and status.datasets["kpop"].complete)
     countries_complete=bool(status.datasets.get("countries") and status.datasets["countries"].complete)
     payload={
-      "schema_version":6,
+      "schema_version":7,
       "requested_at":"2026-07-20",
       "last_build_started_at":status.started_at,
       "last_build_finished_at":status.finished_at,
@@ -2680,8 +2997,9 @@ def write_status_json(status: BuildStatus) -> None:
       "completion_summary":{
         "all_fixed_size_targets_complete":fixed_complete,
         "vocaloid_conditional_corpus_marked_complete":vocaloid_complete,
+        "kpop_conditional_corpus_marked_complete":kpop_complete,
         "spotify_country_lists_complete":countries_complete,
-        "all_requested_lists_complete":fixed_complete and vocaloid_complete and countries_complete,
+        "all_requested_lists_complete":fixed_complete and vocaloid_complete and kpop_complete and countries_complete,
       },
       "datasets":{k:{"target":v.target,"materialized_rows":v.rows,"complete":v.complete,"metric_coverage":v.metric_coverage,"notes":v.notes} for k,v in status.datasets.items()},
       "source_status":status.sources,
@@ -2694,7 +3012,8 @@ def full_build(*,skip_zenodo:bool=False,only:list[str]|None=None)->BuildStatus:
     status=BuildStatus(started_at=_now())
     _progress(f"FULL BUILD START only={only or 'ALL'} skip_zenodo={skip_zenodo}")
     for name,target in FIXED_TARGETS.items():status.datasets[name]=DatasetStatus(target=target)
-    status.datasets["vocaloid"]=DatasetStatus(target="all verified >=10,000,000 Spotify streams; cap 10,000")
+    status.datasets["vocaloid"]=DatasetStatus(target="all VocaDB Original songs with an official Original YouTube PV >=100,000,000 views; cap 10,000")
+    status.datasets["kpop"]=DatasetStatus(target="all source-tagged K-pop songs with observed YouTube views strictly above 100,000,000")
     status.datasets["countries"]=DatasetStatus(target="top 1,000 unique songs for every detected Spotify regional country/territory chart")
     status.save()
     _progress("PHASE acquire_sources START")
@@ -2712,7 +3031,7 @@ def full_build(*,skip_zenodo:bool=False,only:list[str]|None=None)->BuildStatus:
     catalog=apply_kworb_overlay(catalog,fetch_kworb_global(status))
     catalog=apply_kworb_overlay(catalog,fetch_kworb_daily(status))
     _progress(f"PHASE Kworb overlays DONE catalog_rows={len(catalog)}")
-    wanted=set(only or ["worldwide","genres","classical","emerging","screen_soundtracks","anime","vocaloid","vtuber_original","vtuber_non_original","countries"])
+    wanted=set(only or ["worldwide","genres","classical","emerging","screen_soundtracks","anime","vocaloid","vtuber_original","vtuber_non_original","video_game_music","kpop","internet_native","electronic_subcultures","alternative_extreme","jazz_depth","children_childhood","unserious","special_required","countries"])
     _progress(f"Selected builders={sorted(wanted)}")
     built:dict[str,list[SongRow]]={}
     def run(name:str, fn):
@@ -2739,6 +3058,15 @@ def full_build(*,skip_zenodo:bool=False,only:list[str]|None=None)->BuildStatus:
     run("vocaloid",lambda:build_vocaloid(catalog,status))
     run("vtuber_original",lambda:build_vtuber(catalog,status,original=True))
     run("vtuber_non_original",lambda:build_vtuber(catalog,status,original=False))
+    run("video_game_music",lambda:build_video_game_music(catalog,status))
+    run("kpop",lambda:build_kpop_youtube_100m(catalog,status))
+    run("internet_native",lambda:build_internet_native(catalog,status))
+    run("electronic_subcultures",lambda:build_electronic_subcultures(catalog,status))
+    run("alternative_extreme",lambda:build_alternative_extreme(catalog,status))
+    run("jazz_depth",lambda:build_jazz_depth(catalog,status))
+    run("children_childhood",lambda:build_children_childhood(catalog,status))
+    run("unserious",lambda:build_unserious(catalog,status))
+    run("special_required",lambda:build_required_special(catalog,status))
     if "countries" in wanted:
         try:
             from .countries import build_country_lists, country_completion
@@ -2756,11 +3084,20 @@ def full_build(*,skip_zenodo:bool=False,only:list[str]|None=None)->BuildStatus:
 
     # Include existing materialized categories not rebuilt in partial runs.
     paths={
-      "anime":DATA/"anime"/"anime_songs.csv","vocaloid":DATA/"vocaloid"/"vocaloid_spotify_10m.csv",
+      "anime":DATA/"anime"/"anime_songs.csv","vocaloid":DATA/"vocaloid"/"vocaloid_youtube_100m.csv",
       "worldwide":DATA/"worldwide"/"worldwide_51000.csv","classical":DATA/"classical"/"classical_10000.csv",
       "vtuber_original":DATA/"vtuber_original"/"vtuber_original_10000.csv","emerging":DATA/"emerging"/"emerging_10000.csv",
       "genres":DATA/"genres"/"genres_10000.csv","screen_soundtracks":DATA/"screen_soundtracks"/"screen_soundtracks_10000.csv",
       "vtuber_non_original":DATA/"vtuber_non_original"/"vtuber_non_original_10000.csv",
+      "video_game_music":DATA/"video_games"/"video_game_music_1000.csv",
+      "kpop":DATA/"kpop"/"kpop_youtube_over_100m.csv",
+      "internet_native":DATA/"internet_native"/"internet_native_1000.csv",
+      "electronic_subcultures":DATA/"electronic_subcultures"/"electronic_subcultures_1000.csv",
+      "alternative_extreme":DATA/"alternative_extreme"/"alternative_extreme_1000.csv",
+      "jazz_depth":DATA/"jazz_depth"/"jazz_depth_1000.csv",
+      "children_childhood":DATA/"children_childhood"/"children_childhood_100.csv",
+      "unserious":DATA/"unserious"/"unserious_1000.csv",
+      "special_required":DATA/"special_required"/"special_required.csv",
     }
     from .io import read_rows
     for k,p in paths.items():
@@ -2811,7 +3148,7 @@ def main(argv:list[str]|None=None)->int:
     import argparse
     ap=argparse.ArgumentParser(description="Build all BeatHit datasets from public source snapshots/APIs")
     ap.add_argument("--skip-zenodo",action="store_true",help="Skip the 931MB 0.9M-track source and use smaller fallbacks")
-    ap.add_argument("--only",nargs="*",choices=list(FIXED_TARGETS)+["vocaloid","countries"],help="Build only selected categories")
+    ap.add_argument("--only",nargs="*",choices=list(FIXED_TARGETS)+["vocaloid","kpop","countries"],help="Build only selected categories")
     a=ap.parse_args(argv)
     st=full_build(skip_zenodo=a.skip_zenodo,only=a.only)
     print(REPORT)

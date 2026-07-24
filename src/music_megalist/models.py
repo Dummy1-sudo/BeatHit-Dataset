@@ -12,6 +12,9 @@ class SongRow(BaseModel):
     release_date: str | None = None
     release_year: int | None = None
     genres: list[str] = Field(default_factory=list)
+    # Language tags are a list because one song may contain multiple languages.
+    # "und" means unknown/undetermined; "zxx" means no linguistic content.
+    languages: list[str] = Field(default_factory=lambda: ["und"])
     composer: str | None = None
     anime_title: str | None = None
     anime_popularity: int | None = None

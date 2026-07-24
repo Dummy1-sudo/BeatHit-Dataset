@@ -1,0 +1,1894 @@
+diff --git a/.github/workflows/full-build.yml b/.github/workflows/full-build.yml
+index a5ef576..d7ef648 100644
+--- a/.github/workflows/full-build.yml
++++ b/.github/workflows/full-build.yml
+@@ -65,8 +65,8 @@ jobs:
+           BEATHIT_RYD_WORKERS: '20'
+           BEATHIT_YTDLP_FALLBACK: '0'
+-          BEATHIT_VOCADB_SCAN_LIMIT: ${{ vars.BEATHIT_VOCADB_SCAN_LIMIT || '25000' }}
++          BEATHIT_VOCADB_SCAN_LIMIT: ${{ vars.BEATHIT_VOCADB_SCAN_LIMIT || '100000' }}
+           BEATHIT_COUNTRY_WORKERS: ${{ vars.BEATHIT_COUNTRY_WORKERS || '4' }}
+         run: |
+-          python scripts/build_full_dataset.py --only anime vtuber_original vtuber_non_original
++          python scripts/build_full_dataset.py --only anime vocaloid vtuber_original vtuber_non_original video_game_music kpop internet_native electronic_subcultures alternative_extreme jazz_depth children_childhood unserious special_required
+           python -m music_megalist validate
+           python scripts/verify_targets.py > data/target_report.json
+@@ -86,5 +86,7 @@ jobs:
+           git config user.name "BeatHit Dataset Builder"
+           git config user.email "actions@users.noreply.github.com"
+-          git add -A data STATUS.json
++          # Stage only known generated outputs. Never stage the whole repository or raw/source inputs.
++          git add -- STATUS.json data/BUILD_REPORT.json data/coverage_report.csv data/target_report.json data/complete_validation.txt data/MANIFEST.json
++          git add -- data/anime data/vocaloid data/vtuber_original data/vtuber_non_original data/video_games data/kpop data/internet_native data/electronic_subcultures data/alternative_extreme data/jazz_depth data/children_childhood data/unserious data/special_required data/megalist
+           if git diff --cached --quiet; then
+             echo "No generated-data changes"
+@@ -114,2 +116,11 @@ jobs:
+             data/countries/*
+             data/megalist/*
++            data/video_games/*.csv
++            data/kpop/*.csv
++            data/internet_native/*.csv
++            data/electronic_subcultures/*.csv
++            data/alternative_extreme/*.csv
++            data/jazz_depth/*.csv
++            data/children_childhood/*.csv
++            data/unserious/*.csv
++            data/special_required/*.csv
+diff --git a/scripts/verify_targets.py b/scripts/verify_targets.py
+index f752721..c26ecb1 100755
+--- a/scripts/verify_targets.py
++++ b/scripts/verify_targets.py
+@@ -23,4 +23,12 @@ FIXED = {
+     "screen_soundtracks/screen_soundtracks_10000.csv": 10_000,
+     "vtuber_non_original/vtuber_non_original_10000.csv": 1_000,
++    "video_games/video_game_music_1000.csv": 1_000,
++    "internet_native/internet_native_1000.csv": 1_000,
++    "electronic_subcultures/electronic_subcultures_1000.csv": 1_000,
++    "alternative_extreme/alternative_extreme_1000.csv": 1_000,
++    "jazz_depth/jazz_depth_1000.csv": 1_000,
++    "children_childhood/children_childhood_100.csv": 100,
++    "unserious/unserious_1000.csv": 1_000,
++    "special_required/special_required.csv": 4,
+ }
+ WORLDWIDE_BUCKETS = {
+@@ -105,15 +113,28 @@ def main() -> None:
+     report["semantic_checks"]["spotify_country_top1000"] = country_check
+ 
+-    vocaloid = read_csv("vocaloid/vocaloid_spotify_10m.csv")
++    vocaloid = read_csv("vocaloid/vocaloid_youtube_100m.csv")
+     invalid_vocaloid = []
+     for i, r in enumerate(vocaloid, 1):
+         try:
+             value = float(r.get("metric_value") or 0)
++            view_count = int(float(r.get("view_count") or 0))
+         except Exception:
+             value = 0
+-        if r.get("metric_name") not in {"spotify_streams", "spotify_streams_snapshot"} or value < 10_000_000:
++            view_count = 0
++        e = extra(r)
++        valid = (
++            r.get("metric_name") == "youtube_views"
++            and r.get("metric_unit") == "views"
++            and value >= 100_000_000
++            and view_count == int(value)
++            and str(e.get("vocadb_song_type") or "").casefold() == "original"
++            and str(e.get("youtube_pv_type") or "").casefold() == "original"
++            and str(e.get("youtube_pv_service") or "").casefold() == "youtube"
++            and bool(str(e.get("youtube_video_id") or "").strip())
++        )
++        if not valid:
+             invalid_vocaloid.append(i)
+     report["semantic_checks"]["vocaloid_threshold"] = {
+-        "target": "all verified cumulative Spotify-stream songs >=10,000,000; cap 10,000",
++        "target": "VocaDB Original voice-synth songs with one official Original YouTube PV >=100,000,000 views; cap 10,000",
+         "rows": len(vocaloid),
+         "invalid_rows": invalid_vocaloid[:100],
+@@ -122,4 +143,42 @@ def main() -> None:
+     }
+ 
++    kpop = read_csv("kpop/kpop_youtube_over_100m.csv")
++    invalid_kpop = []
++    for i, r in enumerate(kpop, 1):
++        try:
++            value = float(r.get("metric_value") or 0)
++            view_count = int(float(r.get("view_count") or 0))
++        except Exception:
++            value = 0
++            view_count = 0
++        if (
++            r.get("metric_name") != "youtube_views"
++            or r.get("metric_unit") != "views"
++            or value <= 100_000_000
++            or view_count != int(value)
++        ):
++            invalid_kpop.append(i)
++    report["semantic_checks"]["kpop_youtube_threshold"] = {
++        "target": "all materialized source-tagged K-pop songs strictly above 100,000,000 observed YouTube views",
++        "rows": len(kpop),
++        "invalid_rows": invalid_kpop[:100],
++        "threshold_valid": not invalid_kpop,
++        "corpus_completeness": "Read STATUS.json datasets.kpop.complete; current source catalog is not claimed exhaustive.",
++    }
++
++    special = read_csv("special_required/special_required.csv")
++    required_special = {
++        "Beethoven Virus",
++        "The Pi Song (100 Digits of π)",
++        "SpongeBob SquarePants Theme",
++        "Pink Fluffy Unicorns Dancing on Rainbows",
++    }
++    observed_special = {str(r.get("title") or "") for r in special}
++    report["semantic_checks"]["special_required"] = {
++        "required": sorted(required_special),
++        "missing": sorted(required_special - observed_special),
++        "complete": required_special.issubset(observed_special),
++    }
++
+     for rel, expected in [
+         ("vtuber_original/vtuber_original_10000.csv", True),
+@@ -139,4 +198,18 @@ def main() -> None:
+             with p.open(encoding="utf-8", newline="") as f:
+                 mega.extend(csv.DictReader(f))
++    invalid_languages = []
++    for i, r in enumerate(mega, 1):
++        try:
++            languages = json.loads(r.get("languages") or "[]")
++            if not isinstance(languages, list) or not languages or any(not str(x).strip() for x in languages):
++                invalid_languages.append(i)
++        except Exception:
++            invalid_languages.append(i)
++    report["semantic_checks"]["megalist_languages"] = {
++        "rows": len(mega),
++        "invalid_rows": invalid_languages[:100],
++        "complete": bool(mega) and not invalid_languages,
++    }
++
+     keys = [song_key(r) for r in mega if all(song_key(r))]
+     dupes = len(keys) - len(set(keys))
+@@ -152,4 +225,7 @@ def main() -> None:
+         and len(genres) == 10_000 and len(selected_genres) >= 50
+         and not invalid_vocaloid
++        and not invalid_kpop
++        and required_special.issubset(observed_special)
++        and not invalid_languages
+         and bool(country_check.get("complete"))
+         and dupes == 0
+diff --git a/src/music_megalist/culturelists.py b/src/music_megalist/culturelists.py
+new file mode 100644
+index 0000000..478ae8c
+--- /dev/null
++++ b/src/music_megalist/culturelists.py
+@@ -0,0 +1,770 @@
++from __future__ import annotations
++
++import json
++import math
++import re
++import time
++from collections import defaultdict
++from datetime import date
++from pathlib import Path
++from typing import Any, Iterable
++
++import httpx
++import pandas as pd
++from rapidfuzz import fuzz
++
++from .dedupe import norm
++from .io import write_rows
++from .models import SongRow
++
++ROOT = Path(__file__).resolve().parents[2]
++DATA = ROOT / "data"
++TODAY = date.today().isoformat()
++LISTENBRAINZ_API = "https://api.listenbrainz.org/1"
++WIKIDATA_SPARQL = "https://query.wikidata.org/sparql"
++
++TAG_LISTS = {
++    "internet_native": [
++        "meme", "internet meme", "nerdcore", "nightcore", "vaporwave", "future funk",
++        "hyperpop", "digicore", "glitchcore", "webcore", "scenecore", "phonk",
++        "drift phonk", "breakcore", "chiptune", "bitpop", "otacore", "speedcore",
++        "happy hardcore", "doujin", "denpa",
++    ],
++    "electronic_subcultures": [
++        "ambient", "dark ambient", "drone", "idm", "glitch", "breakbeat", "breakcore",
++        "drum and bass", "jungle", "liquid funk", "neurofunk", "dubstep", "brostep",
++        "future garage", "uk garage", "2-step", "grime", "house", "deep house",
++        "acid house", "tech house", "progressive house", "electro house", "trance",
++        "goa trance", "psytrance", "hardstyle", "gabber", "hardcore techno",
++        "industrial techno", "minimal techno", "detroit techno", "electro",
++        "synthwave", "darksynth", "vaporwave", "future funk", "witch house",
++        "chillwave", "downtempo", "trip hop", "ebm", "electro-industrial",
++    ],
++    "alternative_extreme": [
++        "alternative rock", "indie rock", "post-punk", "gothic rock", "darkwave",
++        "coldwave", "shoegaze", "dream pop", "noise rock", "no wave", "math rock",
++        "post-rock", "emo", "screamo", "hardcore punk", "crust punk", "d-beat",
++        "anarcho-punk", "grindcore", "powerviolence", "metalcore", "deathcore",
++        "black metal", "death metal", "doom metal", "sludge metal", "drone metal",
++        "thrash metal", "speed metal", "industrial metal", "avant-garde metal",
++        "progressive metal", "noise", "harsh noise", "power electronics",
++        "industrial", "neofolk", "psychobilly", "horror punk",
++    ],
++    "jazz_depth": [
++        "jazz", "bebop", "hard bop", "cool jazz", "modal jazz", "free jazz",
++        "avant-garde jazz", "spiritual jazz", "jazz fusion", "jazz funk",
++        "acid jazz", "nu jazz", "smooth jazz", "vocal jazz", "big band",
++        "swing", "ragtime", "stride", "dixieland", "new orleans jazz",
++        "gypsy jazz", "latin jazz", "afro-cuban jazz", "bossa nova",
++        "third stream", "jazz piano", "jazz trumpet", "jazz saxophone",
++    ],
++    "children_childhood": [
++        "children's music", "children", "kids", "nursery rhyme", "nursery rhymes",
++        "lullaby", "educational music", "sing-along", "preschool", "family music",
++        "cartoon music", "sesame street",
++    ],
++    "unserious": [
++        "novelty", "comedy", "comedy rock", "musical comedy", "parody", "meme",
++        "internet meme", "nerdcore", "children's music", "cartoon music",
++        "party novelty", "viral", "funny", "satire", "denpa",
++    ],
++}
++
++TAG_TARGETS = {
++    "internet_native": 1_000,
++    "electronic_subcultures": 1_000,
++    "alternative_extreme": 1_000,
++    "jazz_depth": 1_000,
++    "children_childhood": 100,
++    "unserious": 1_000,
++}
++
++TAG_OUTPUTS = {
++    "internet_native": DATA / "internet_native" / "internet_native_1000.csv",
++    "electronic_subcultures": DATA / "electronic_subcultures" / "electronic_subcultures_1000.csv",
++    "alternative_extreme": DATA / "alternative_extreme" / "alternative_extreme_1000.csv",
++    "jazz_depth": DATA / "jazz_depth" / "jazz_depth_1000.csv",
++    "children_childhood": DATA / "children_childhood" / "children_childhood_100.csv",
++    "unserious": DATA / "unserious" / "unserious_1000.csv",
++}
++
++REQUIRED_SPECIAL = [
++    {
++        "title": "Beethoven Virus",
++        "main_artist": "BanYa",
++        "languages": ["zxx"],
++        "source_url": "https://musicbrainz.org/release/029e1725-8b4a-4a8f-8421-0c9c1c351835",
++        "categories": ["special_required"],
++        "note": "Explicit required inclusion. Official Pump It Up soundtrack release; instrumental.",
++    },
++    {
++        "title": "The Pi Song (100 Digits of π)",
++        "main_artist": "AsapSCIENCE",
++        "languages": ["en"],
++        "source_url": "https://www.youtube.com/watch?v=3HRkKznJoZA",
++        "categories": ["special_required", "children_childhood", "unserious", "internet_native"],
++        "note": "Explicit required educational internet-song inclusion.",
++    },
++    {
++        "title": "SpongeBob SquarePants Theme",
++        "main_artist": "SpongeBob SquarePants",
++        "languages": ["en"],
++        "source_url": "https://music.apple.com/us/song/323049096",
++        "categories": ["special_required", "children_childhood", "unserious"],
++        "note": "Explicit required television opening-theme inclusion.",
++    },
++    {
++        "title": "Pink Fluffy Unicorns Dancing on Rainbows",
++        "main_artist": "Andrew Huang",
++        "languages": ["en"],
++        "source_url": "https://www.youtube.com/watch?v=eWM2joNb9NE",
++        "categories": ["special_required", "unserious", "internet_native"],
++        "note": "Explicit required internet novelty-song inclusion.",
++    },
++]
++
++LANGUAGE_ALIASES = {
++    "english": "en", "en": "en",
++    "japanese": "ja", "ja": "ja",
++    "korean": "ko", "ko": "ko",
++    "spanish": "es", "es": "es",
++    "french": "fr", "fr": "fr",
++    "german": "de", "de": "de",
++    "italian": "it", "it": "it",
++    "portuguese": "pt", "pt": "pt",
++    "russian": "ru", "ru": "ru",
++    "arabic": "ar", "ar": "ar",
++    "hindi": "hi", "hi": "hi",
++    "punjabi": "pa", "pa": "pa",
++    "chinese": "zh", "mandarin": "zh", "zh": "zh",
++    "cantonese": "yue", "yue": "yue",
++    "thai": "th", "th": "th",
++    "vietnamese": "vi", "vi": "vi",
++    "indonesian": "id", "id": "id",
++    "instrumental": "zxx", "no linguistic content": "zxx", "zxx": "zxx",
++    "unknown": "und", "undetermined": "und", "und": "und",
++}
++
++
++def _safe_float(value: Any) -> float | None:
++    if value is None:
++        return None
++    try:
++        text = str(value).strip()
++        if not text or text.casefold() in {"nan", "none", "null", "<na>"}:
++            return None
++        return float(text.replace(",", ""))
++    except (TypeError, ValueError):
++        return None
++
++
++def _safe_int(value: Any) -> int | None:
++    number = _safe_float(value)
++    return int(number) if number is not None else None
++
++
++def _parse_genres(value: Any) -> list[str]:
++    if value is None:
++        return []
++    if isinstance(value, list):
++        return [str(x).strip().casefold() for x in value if str(x).strip()]
++    text = str(value).strip()
++    if not text or text.casefold() in {"nan", "none", "null", "[]"}:
++        return []
++    try:
++        parsed = json.loads(text)
++        if isinstance(parsed, list):
++            return [str(x).strip().casefold() for x in parsed if str(x).strip()]
++    except Exception:
++        pass
++    return [x.strip().casefold() for x in re.split(r"[|;,]", text) if x.strip()]
++
++
++def _normalize_languages(value: Any) -> list[str]:
++    if value is None:
++        return []
++    if isinstance(value, (list, tuple, set)):
++        raw = [str(x) for x in value]
++    else:
++        text = str(value).strip()
++        if not text or text.casefold() in {"nan", "none", "null", "<na>", "[]"}:
++            return []
++        try:
++            parsed = json.loads(text)
++            if isinstance(parsed, list):
++                raw = [str(x) for x in parsed]
++            else:
++                raw = [text]
++        except Exception:
++            raw = re.split(r"[|;,/]", text)
++    out: list[str] = []
++    for item in raw:
++        token = item.strip()
++        if not token:
++            continue
++        mapped = LANGUAGE_ALIASES.get(token.casefold(), token.casefold())
++        if re.fullmatch(r"[a-z]{2,3}(?:-[a-z0-9]{2,8})*", mapped) and mapped not in out:
++            out.append(mapped)
++    return out
++
++
++def catalog_languages(row: pd.Series) -> list[str]:
++    """Use only explicit source language metadata; never infer lyric language from a title."""
++    for key in ("languages", "language", "track_language", "lyrics_language", "vocal_language"):
++        if key in row.index:
++            values = _normalize_languages(row.get(key))
++            if values:
++                return values
++
++    genres = _parse_genres(row.get("genres"))
++    text = f"{row.get('title', '')} | {row.get('album_name', '')}".casefold()
++    if "instrumental" in genres or re.search(r"\b(?:instrumental|karaoke|wordless|no vocals?)\b", text):
++        return ["zxx"]
++    return ["und"]
++
++
++def _genre_matches(genres: Iterable[str], terms: Iterable[str]) -> bool:
++    def clean(value: str) -> str:
++        return re.sub(r"[^a-z0-9]+", " ", value.casefold()).strip()
++
++    normalized = [clean(str(g)) for g in genres if str(g).strip()]
++    wanted = [clean(str(t)) for t in terms if str(t).strip()]
++    for genre in normalized:
++        padded = f" {genre} "
++        for term in wanted:
++            if genre == term:
++                return True
++            # Match a complete genre phrase inside a more specific source tag
++            # (for example "jazz" inside "avant-garde jazz"), never arbitrary
++            # short character substrings such as the old "ia" Vocaloid bug.
++            if len(term) >= 4 and f" {term} " in padded:
++                return True
++    return False
++
++
++def _catalog_score(row: pd.Series) -> float:
++    streams = max(_safe_float(row.get("streams")) or 0.0, 0.0)
++    views = max(_safe_float(row.get("youtube_views")) or 0.0, 0.0)
++    popularity = max(_safe_float(row.get("popularity")) or 0.0, 0.0)
++    track_score = max(_safe_float(row.get("track_score")) or 0.0, 0.0)
++    daily = max(_safe_float(row.get("daily_streams")) or 0.0, 0.0)
++    return (
++        math.log10(streams + 1) * 10
++        + math.log10(views + 1) * 7
++        + popularity * 0.35
++        + min(track_score, 1_000) * 0.02
++        + math.log10(daily + 1) * 3
++    )
++
++
++def _catalog_metric(row: pd.Series) -> tuple[str, float, str, str]:
++    streams = _safe_float(row.get("streams"))
++    if streams is not None:
++        return (
++            str(row.get("streams_metric_name") or "spotify_streams"),
++            streams,
++            "streams",
++            str(row.get("streams_source_url") or row.get("source_url") or "dataset source"),
++        )
++    views = _safe_float(row.get("youtube_views"))
++    if views is not None:
++        return (
++            "youtube_views",
++            views,
++            "views",
++            str(row.get("youtube_views_source_url") or row.get("source_url") or "dataset source"),
++        )
++    daily = _safe_float(row.get("daily_streams"))
++    if daily is not None:
++        return (
++            "spotify_daily_streams",
++            daily,
++            "streams",
++            str(row.get("daily_streams_source_url") or row.get("source_url") or "dataset source"),
++        )
++    popularity = _safe_float(row.get("popularity"))
++    if popularity is not None:
++        return (
++            "spotify_popularity",
++            popularity,
++            "score_0_100",
++            str(row.get("popularity_source_url") or row.get("source_url") or "dataset source"),
++        )
++    return "source_rank_score", 0.0, "score", str(row.get("source_url") or "dataset source")
++
++
++def _catalog_song(
++    row: pd.Series,
++    *,
++    extra: dict[str, Any] | None = None,
++    force_metric: tuple[str, float, str, str] | None = None,
++) -> SongRow:
++    title = str(row.get("title") or "").strip()
++    artist = str(row.get("main_artist") or row.get("artists") or "Unknown").strip()
++    genres = _parse_genres(row.get("genres"))
++    metric = force_metric or _catalog_metric(row)
++    return SongRow(
++        title=title,
++        main_artist=artist,
++        album=str(row.get("album_name") or "").strip() or None,
++        release_date=str(row.get("release_date") or "").strip() or None,
++        release_year=_safe_int(row.get("release_year")),
++        genres=genres,
++        languages=catalog_languages(row),
++        metric_name=metric[0],
++        metric_value=float(metric[1]),
++        metric_unit=metric[2],
++        listen_count=int(metric[1]) if metric[2] in {"streams", "listens"} else None,
++        listen_source="Spotify" if metric[0].startswith("spotify_") and metric[2] == "streams" else None,
++        view_count=int(metric[1]) if metric[2] == "views" else None,
++        overall_popularity_score=_catalog_score(row),
++        spotify_track_id=str(row.get("track_id") or "").strip() or None,
++        isrc=str(row.get("isrc") or "").strip().upper() or None,
++        source_url=metric[3],
++        retrieved_at=TODAY,
++        source_notes="Category membership comes from source genre/metadata tags; popularity evidence is preserved.",
++        extra=extra or {},
++    )
++
++
++def _dedupe_rank(rows: list[SongRow], target: int | None = None) -> list[SongRow]:
++    seen: set[tuple[str, str]] = set()
++    out: list[SongRow] = []
++    ordered = sorted(
++        rows,
++        key=lambda row: (
++            float(row.overall_popularity_score or 0),
++            1 if row.metric_unit in {"views", "streams", "listens"} else 0,
++            float(row.metric_value),
++        ),
++        reverse=True,
++    )
++    for row in ordered:
++        key = (norm(row.title), norm(row.main_artist))
++        if not all(key) or key in seen:
++            continue
++        seen.add(key)
++        out.append(row)
++        if target is not None and len(out) >= target:
++            break
++    for rank, row in enumerate(out, 1):
++        row.rank = rank
++    return out
++
++
++def _metric_counts(rows: Iterable[SongRow]) -> dict[str, int]:
++    counts: dict[str, int] = defaultdict(int)
++    for row in rows:
++        counts[row.metric_name] += 1
++    return dict(sorted(counts.items()))
++
++
++def _seed_rows(category: str) -> list[SongRow]:
++    rows: list[SongRow] = []
++    for seed in REQUIRED_SPECIAL:
++        if category not in seed["categories"]:
++            continue
++        rows.append(
++            SongRow(
++                title=seed["title"],
++                main_artist=seed["main_artist"],
++                languages=list(seed["languages"]),
++                metric_name="curated_required_seed",
++                metric_value=1.0,
++                metric_unit="required_item",
++                source_url=seed["source_url"],
++                retrieved_at=TODAY,
++                source_notes=seed["note"],
++                extra={"culture_categories": list(seed["categories"]), "required_by_user": True},
++            )
++        )
++    return rows
++
++
++def _listenbrainz_tag_rows(
++    tags: list[str],
++    needed: int,
++    category: str,
++    used: set[tuple[str, str]],
++    status: Any,
++) -> list[SongRow]:
++    if needed <= 0:
++        return []
++    rows: list[SongRow] = []
++    with httpx.Client(
++        timeout=60,
++        follow_redirects=True,
++        headers={"User-Agent": "BeatHit-Dataset/1.0"},
++    ) as client:
++        for tag in tags:
++            if len(rows) >= needed:
++                break
++            try:
++                response = client.get(
++                    f"{LISTENBRAINZ_API}/lb-radio/tags",
++                    params={"tag": tag, "operator": "OR", "count": 1000, "pop_begin": 0, "pop_end": 100},
++                )
++                response.raise_for_status()
++                data = response.json()
++            except Exception as exc:
++                status.warnings.append(f"ListenBrainz {category} tag {tag}: {exc}")
++                continue
++
++            payload = data.get("payload", data) if isinstance(data, dict) else data
++            tracks = (
++                payload.get("jspf", {}).get("playlist", {}).get("track", [])
++                if isinstance(payload, dict)
++                else []
++            )
++            if not tracks and isinstance(payload, list):
++                tracks = payload
++
++            for position, item in enumerate(tracks, 1):
++                title = item.get("title") or item.get("track_name") or item.get("recording_name")
++                artist = item.get("creator") or item.get("artist_name") or item.get("artist_credit_name")
++                if not title or not artist:
++                    continue
++                key = (norm(str(title)), norm(str(artist)))
++                if key in used:
++                    continue
++                used.add(key)
++
++                identifier = item.get("identifier") or item.get("recording_mbid")
++                if isinstance(identifier, list):
++                    identifier = identifier[0] if identifier else None
++                if isinstance(identifier, str) and "/" in identifier:
++                    identifier = identifier.rsplit("/", 1)[-1]
++
++                rows.append(
++                    SongRow(
++                        title=str(title),
++                        main_artist=str(artist),
++                        genres=[tag],
++                        languages=["und"],
++                        metric_name="listenbrainz_tag_radio_rank",
++                        metric_value=float(max(1, 1001 - position)),
++                        metric_unit="rank_score",
++                        musicbrainz_recording_mbid=identifier,
++                        source_url="https://listenbrainz.org/",
++                        retrieved_at=TODAY,
++                        source_notes="ListenBrainz tag-radio popularity rank; no stream count is implied.",
++                        extra={"culture_category": category, "source_tag": tag},
++                    )
++                )
++                if len(rows) >= needed:
++                    break
++            time.sleep(0.12)
++    return rows
++
++
++def _build_tag_list(catalog: pd.DataFrame, status: Any, name: str) -> list[SongRow]:
++    target = TAG_TARGETS[name]
++    tags = TAG_LISTS[name]
++    output = TAG_OUTPUTS[name]
++
++    rows = _seed_rows(name)
++    used = {(norm(row.title), norm(row.main_artist)) for row in rows}
++
++    candidates: list[tuple[float, pd.Series, list[str]]] = []
++    for _, row in catalog.iterrows():
++        row_genres = _parse_genres(row.get("genres"))
++        if _genre_matches(row_genres, tags):
++            candidates.append((_catalog_score(row), row, row_genres))
++    candidates.sort(key=lambda item: item[0], reverse=True)
++
++    for _, row, row_genres in candidates:
++        key = (
++            norm(str(row.get("title") or "")),
++            norm(str(row.get("main_artist") or row.get("artists") or "")),
++        )
++        if not all(key) or key in used:
++            continue
++        used.add(key)
++        rows.append(
++            _catalog_song(
++                row,
++                extra={
++                    "culture_category": name,
++                    "matched_source_genres": row_genres,
++                    "selection": "source genre/tag membership plus source-backed popularity ranking",
++                },
++            )
++        )
++        if len(rows) >= target:
++            break
++
++    if len(rows) < target:
++        rows.extend(_listenbrainz_tag_rows(tags, target - len(rows), name, used, status))
++
++    rows = _dedupe_rank(rows, target)
++    write_rows(rows, output)
++    st = status.datasets[name]
++    st.rows = len(rows)
++    st.complete = len(rows) == target
++    st.metric_coverage = _metric_counts(rows)
++    st.notes = [
++        "Source-backed catalog genres/tags first; ListenBrainz tag-radio fallback second.",
++        "No fabricated quota padding. Unknown song language is stored as ['und'], not guessed from title text.",
++        f"catalog_candidates={len(candidates)}; target={target}",
++    ]
++    status.save()
++    return rows
++
++
++def build_internet_native(catalog: pd.DataFrame, status: Any) -> list[SongRow]:
++    return _build_tag_list(catalog, status, "internet_native")
++
++
++def build_electronic_subcultures(catalog: pd.DataFrame, status: Any) -> list[SongRow]:
++    return _build_tag_list(catalog, status, "electronic_subcultures")
++
++
++def build_alternative_extreme(catalog: pd.DataFrame, status: Any) -> list[SongRow]:
++    return _build_tag_list(catalog, status, "alternative_extreme")
++
++
++def build_jazz_depth(catalog: pd.DataFrame, status: Any) -> list[SongRow]:
++    return _build_tag_list(catalog, status, "jazz_depth")
++
++
++def build_children_childhood(catalog: pd.DataFrame, status: Any) -> list[SongRow]:
++    return _build_tag_list(catalog, status, "children_childhood")
++
++
++def build_unserious(catalog: pd.DataFrame, status: Any) -> list[SongRow]:
++    return _build_tag_list(catalog, status, "unserious")
++
++
++def build_required_special(catalog: pd.DataFrame, status: Any) -> list[SongRow]:
++    del catalog
++    rows = _dedupe_rank(_seed_rows("special_required"), 4)
++    write_rows(rows, DATA / "special_required" / "special_required.csv")
++    st = status.datasets["special_required"]
++    st.rows = len(rows)
++    st.complete = len(rows) == 4
++    st.metric_coverage = _metric_counts(rows)
++    st.notes = [
++        "Explicit required inclusions: Beethoven Virus, The Pi Song, SpongeBob SquarePants Theme, and Pink Fluffy Unicorns Dancing on Rainbows.",
++        "The inclusion metric is not represented as a popularity count.",
++    ]
++    status.save()
++    return rows
++
++
++def build_kpop_youtube_100m(catalog: pd.DataFrame, status: Any) -> list[SongRow]:
++    """Build source-tagged K-pop tracks with observed YouTube views strictly >100M."""
++    threshold = 100_000_000
++    rows: list[SongRow] = []
++    for _, row in catalog.iterrows():
++        row_genres = _parse_genres(row.get("genres"))
++        if not _genre_matches(row_genres, ["k-pop", "korean pop", "k-pop boy group", "k-pop girl group"]):
++            continue
++        views = _safe_int(row.get("youtube_views"))
++        if views is None or views <= threshold:
++            continue
++        url = str(row.get("youtube_views_source_url") or row.get("source_url") or "").strip()
++        if not url:
++            continue
++        rows.append(
++            _catalog_song(
++                row,
++                force_metric=("youtube_views", float(views), "views", url),
++                extra={
++                    "culture_category": "kpop",
++                    "youtube_view_threshold_strictly_greater_than": threshold,
++                    "matched_source_genres": row_genres,
++                },
++            )
++        )
++
++    rows = _dedupe_rank(rows, 10_000)
++    write_rows(rows, DATA / "kpop" / "kpop_youtube_over_100m.csv")
++    st = status.datasets["kpop"]
++    st.rows = len(rows)
++    st.complete = False
++    st.metric_coverage = _metric_counts(rows)
++    st.notes = [
++        "Every materialized row is source-tagged K-pop with an observed YouTube view count strictly above 100,000,000.",
++        "Not marked exhaustive because the acquired catalog is not a complete enumeration of all YouTube music videos.",
++    ]
++    status.save()
++    return rows
++
++
++def _fetch_top_games(status: Any, limit: int = 1_000) -> list[dict[str, Any]]:
++    query = f"""
++SELECT ?game ?gameLabel ?sitelinks WHERE {{
++  ?game wdt:P31/wdt:P279* wd:Q7889 ;
++        wikibase:sitelinks ?sitelinks .
++  SERVICE wikibase:label {{ bd:serviceParam wikibase:language "en". }}
++}}
++ORDER BY DESC(?sitelinks)
++LIMIT {int(limit)}
++"""
++    try:
++        with httpx.Client(
++            timeout=120,
++            follow_redirects=True,
++            headers={"User-Agent": "BeatHit-Dataset/1.0 (source-backed music research)"},
++        ) as client:
++            response = client.get(
++                WIKIDATA_SPARQL,
++                params={"query": query, "format": "json"},
++                headers={"Accept": "application/sparql-results+json"},
++            )
++            response.raise_for_status()
++            bindings = response.json().get("results", {}).get("bindings", [])
++    except Exception as exc:
++        status.warnings.append(f"Wikidata top video games: {exc}")
++        status.sources["wikidata_top_video_games"] = {
++            "url": WIKIDATA_SPARQL,
++            "rows": 0,
++            "ranking_proxy": "wikimedia_sitelinks",
++            "ok": False,
++            "error": str(exc),
++        }
++        return []
++
++    games: list[dict[str, Any]] = []
++    for index, binding in enumerate(bindings, 1):
++        uri = str((binding.get("game") or {}).get("value") or "")
++        title = str((binding.get("gameLabel") or {}).get("value") or "").strip()
++        sitelinks = _safe_int((binding.get("sitelinks") or {}).get("value")) or 0
++        if uri and title:
++            games.append(
++                {
++                    "game_rank": index,
++                    "game_title": title,
++                    "wikidata_url": uri,
++                    "wikidata_id": uri.rsplit("/", 1)[-1],
++                    "sitelinks": sitelinks,
++                }
++            )
++
++    status.sources["wikidata_top_video_games"] = {
++        "url": WIKIDATA_SPARQL,
++        "rows": len(games),
++        "ranking_proxy": "wikimedia_sitelinks",
++        "ok": bool(games),
++    }
++    return games
++
++
++def build_video_game_music(catalog: pd.DataFrame, status: Any) -> list[SongRow]:
++    """Choose one recognizable source-backed soundtrack recording for each ranked game."""
++    target = 1_000
++    games = _fetch_top_games(status, target)
++
++    candidates: list[tuple[pd.Series, str, str, bool]] = []
++    token_index: dict[str, set[int]] = defaultdict(set)
++    stop = {"the", "and", "for", "with", "from", "game", "edition", "remastered", "original", "soundtrack", "score"}
++
++    for _, row in catalog.iterrows():
++        row_genres = _parse_genres(row.get("genres"))
++        genre_hit = _genre_matches(
++            row_genres,
++            ["video game music", "game soundtrack", "video game soundtrack", "vgm", "chiptune"],
++        )
++        album_norm = norm(str(row.get("album_name") or ""))
++        title_norm = norm(str(row.get("title") or ""))
++        text = f"{row.get('album_name', '')} | {row.get('title', '')}"
++        soundtrack_hit = bool(
++            re.search(r"\b(?:original game soundtrack|video game soundtrack|game soundtrack|ost|score)\b", text, re.I)
++        )
++        if not genre_hit and not soundtrack_hit:
++            continue
++        position = len(candidates)
++        candidates.append((row, album_norm, title_norm, genre_hit))
++        for token in set(re.findall(r"[a-z0-9]{4,}", f"{album_norm} {title_norm}")) - stop:
++            token_index[token].add(position)
++
++    selected: list[SongRow] = []
++    used_tracks: set[str] = set()
++    for game in games:
++        game_norm = norm(game["game_title"])
++        tokens = [token for token in re.findall(r"[a-z0-9]{4,}", game_norm) if token not in stop]
++        pools = [token_index[token] for token in tokens if token in token_index]
++        if not pools:
++            continue
++
++        pools.sort(key=len)
++        pool = set(pools[0])
++        for extra_pool in pools[1:3]:
++            intersection = pool & extra_pool
++            if intersection:
++                pool = intersection
++
++        best_row: pd.Series | None = None
++        best_score = -1.0
++        best_match = 0.0
++        for position in list(pool)[:1_000]:
++            row, album_norm, title_norm, genre_hit = candidates[position]
++            exact = game_norm == album_norm or game_norm == title_norm
++            contained = bool(game_norm and (game_norm in album_norm or game_norm in title_norm))
++            similarity = max(
++                fuzz.ratio(game_norm, album_norm) if album_norm else 0,
++                fuzz.ratio(game_norm, title_norm) if title_norm else 0,
++                fuzz.partial_ratio(game_norm, album_norm) if album_norm else 0,
++            )
++            if not exact and not contained and similarity < 88:
++                continue
++            if not genre_hit and not re.search(
++                r"\b(?:soundtrack|ost|score)\b",
++                str(row.get("album_name") or ""),
++                re.I,
++            ):
++                continue
++
++            track_key = str(row.get("track_id") or "").strip() or (
++                f"{norm(str(row.get('title') or ''))}|{norm(str(row.get('main_artist') or ''))}"
++            )
++            if track_key in used_tracks:
++                continue
++            combined = _catalog_score(row) + similarity * 0.35 + game["sitelinks"] * 0.002
++            if combined > best_score:
++                best_score = combined
++                best_row = row
++                best_match = float(similarity)
++
++        if best_row is None:
++            continue
++
++        track_key = str(best_row.get("track_id") or "").strip() or (
++            f"{norm(str(best_row.get('title') or ''))}|{norm(str(best_row.get('main_artist') or ''))}"
++        )
++        used_tracks.add(track_key)
++        song = _catalog_song(
++            best_row,
++            extra={
++                "culture_category": "video_game_music",
++                "video_game": game["game_title"],
++                "game_rank": game["game_rank"],
++                "game_popularity_proxy": "wikimedia_sitelinks",
++                "game_sitelinks": game["sitelinks"],
++                "game_wikidata_id": game["wikidata_id"],
++                "game_wikidata_url": game["wikidata_url"],
++                "game_soundtrack_match_score": best_match,
++                "selection": "highest-popularity confident soundtrack match for this ranked game",
++            },
++        )
++        song.screen_work = game["game_title"]
++        selected.append(song)
++        if len(selected) >= target:
++            break
++
++    selected.sort(key=lambda row: int((row.extra or {}).get("game_rank") or 10**9))
++    for rank, row in enumerate(selected, 1):
++        row.rank = rank
++    write_rows(selected, DATA / "video_games" / "video_game_music_1000.csv")
++
++    st = status.datasets["video_game_music"]
++    st.rows = len(selected)
++    st.complete = len(selected) == target
++    st.metric_coverage = _metric_counts(selected)
++    st.notes = [
++        "Game popularity is ranked by Wikidata Wikimedia-sitelink count, a transparent cross-language recognition proxy.",
++        "One highest-popularity confident soundtrack match per game; unmatched games are omitted rather than fabricated.",
++        f"ranked_games={len(games)}; soundtrack_candidates={len(candidates)}; matched_games={len(selected)}",
++    ]
++    status.save()
++    return selected
+diff --git a/src/music_megalist/fullbuild.py b/src/music_megalist/fullbuild.py
+index 27fbc3a..18466f4 100644
+--- a/src/music_megalist/fullbuild.py
++++ b/src/music_megalist/fullbuild.py
+@@ -36,4 +36,15 @@ from .dedupe import dedupe, norm
+ from .io import append_row, write_rows
+ from .models import SongRow
++from .culturelists import (
++    build_alternative_extreme,
++    build_children_childhood,
++    build_electronic_subcultures,
++    build_internet_native,
++    build_jazz_depth,
++    build_kpop_youtube_100m,
++    build_required_special,
++    build_unserious,
++    build_video_game_music,
++)
+ 
+ ROOT = Path(__file__).resolve().parents[2]
+@@ -84,4 +95,12 @@ FIXED_TARGETS = {
+     "screen_soundtracks": 10_000,
+     "vtuber_non_original": 1_000,
++    "video_game_music": 1_000,
++    "internet_native": 1_000,
++    "electronic_subcultures": 1_000,
++    "alternative_extreme": 1_000,
++    "jazz_depth": 1_000,
++    "children_childhood": 100,
++    "unserious": 1_000,
++    "special_required": 4,
+ }
+ 
+@@ -126,10 +145,4 @@ SOUNDTRACK_RE = re.compile(
+ )
+ 
+-VOICE_SYNTH_MARKERS = {
+-    "hatsune miku", "初音ミク", "kagamine rin", "鏡音リン", "kagamine len", "鏡音レン",
+-    "megurine luka", "巡音ルカ", "kaito", "meiko", "gumi", "megpoid", "v flower", "flower",
+-    "kasane teto", "重音テト", "otomachi una", "音街ウナ", "kafu", "可不", "cevio",
+-    "synthesizer v", "vocaloid", "utau", "ia", "結月ゆかり", "yuzuki yukari", "kaai yuki",
+-}
+ 
+ 
+@@ -1010,4 +1023,47 @@ def _score(r: pd.Series) -> float:
+ 
+ 
++def _catalog_languages(r: pd.Series) -> list[str]:
++    """Use explicit source language metadata; never guess lyric language from title script."""
++    aliases={
++        "english":"en","japanese":"ja","korean":"ko","spanish":"es","french":"fr",
++        "german":"de","italian":"it","portuguese":"pt","russian":"ru","arabic":"ar",
++        "hindi":"hi","punjabi":"pa","chinese":"zh","mandarin":"zh","cantonese":"yue",
++        "thai":"th","vietnamese":"vi","indonesian":"id","instrumental":"zxx",
++        "no linguistic content":"zxx","unknown":"und","undetermined":"und",
++    }
++    for key in ("languages","language","track_language","lyrics_language","vocal_language"):
++        if key not in r.index:
++            continue
++        value=r.get(key)
++        if value is None:
++            continue
++        if isinstance(value,(list,tuple,set)):
++            raw=[str(x) for x in value]
++        else:
++            text=str(value).strip()
++            if not text or text.casefold() in {"nan","none","null","<na>","[]"}:
++                continue
++            try:
++                parsed=json.loads(text)
++                raw=[str(x) for x in parsed] if isinstance(parsed,list) else [text]
++            except Exception:
++                raw=re.split(r"[|;,/]",text)
++        out=[]
++        for item in raw:
++            token=item.strip().casefold()
++            if not token:
++                continue
++            token=aliases.get(token,token)
++            if re.fullmatch(r"[a-z]{2,3}(?:-[a-z0-9]{2,8})*",token) and token not in out:
++                out.append(token)
++        if out:
++            return out
++    genres=_parse_genres(r.get("genres"))
++    text=f"{r.get('title','')} | {r.get('album_name','')}".casefold()
++    if "instrumental" in genres or re.search(r"\b(?:instrumental|karaoke|wordless|no vocals?)\b",text):
++        return ["zxx"]
++    return ["und"]
++
++
+ def _catalog_row_to_song(r: pd.Series, *, rank: int | None = None, extra: dict[str, Any] | None = None,
+                          metric_override: tuple[str, float, str] | None = None, source_notes: str | None = None) -> SongRow:
+@@ -1025,4 +1081,5 @@ def _catalog_row_to_song(r: pd.Series, *, rank: int | None = None, extra: dict[s
+         release_year=_parse_year(r.get("release_year")) or _parse_year(r.get("release_date")),
+         genres=genres,
++        languages=_catalog_languages(r),
+         metric_name=metric[0], metric_value=float(metric[1]), metric_unit=metric[2],
+         listen_count=(int(metric[1]) if metric[2] in {"streams","listens"} else None),
+@@ -1590,38 +1647,98 @@ def build_anime(catalog: pd.DataFrame, sources:dict[str,Path], status:BuildStatu
+ 
+ def _vocadb_all(status:BuildStatus,max_songs:int|None=None)->tuple[list[dict],bool]:
+-    """Fetch a high-recall VocaDB candidate window without abusive full-site crawling.
+-
+-    VocaDB explicitly warns against excessive thousands of API calls per day. A complete
+-    enumeration of its hundreds of thousands of songs would require many thousands of
+-    requests, so the default build scans the top 25k songs by RatingScore (popular songs are
+-    the plausible >=10M Spotify candidates). Operators can raise the limit deliberately with
+-    BEATHIT_VOCADB_SCAN_LIMIT, but the result is only marked exhaustive when the API-reported
+-    total was actually reached.
+-    """
++    # Fetch VocaDB original songs that have at least one YouTube PV.
++    # Spotify is not consulted anywhere in this pipeline.
+     if max_songs is None:
+-        max_songs=max(1_000,min(_safe_int(os.getenv("BEATHIT_VOCADB_SCAN_LIMIT")) or 25_000,250_000))
+-    out=[];start=0;size=50; exhaustive=False; total_seen=None
+-    with httpx.Client(timeout=90,headers={"User-Agent":"BeatHit-Dataset/1.0 (contact via GitHub repository)"}) as c:
++        max_songs=max(
++            1_000,
++            min(_safe_int(os.getenv("BEATHIT_VOCADB_SCAN_LIMIT")) or 100_000,250_000),
++        )
++
++    out=[]
++    start=0
++    size=50
++    exhaustive=False
++    total_seen=None
++    pages=0
++
++    _progress(f"Vocaloid VocaDB START scan_limit={max_songs}")
++    with httpx.Client(
++        timeout=90,
++        follow_redirects=True,
++        headers={"User-Agent":"BeatHit-Dataset/1.0 (contact via GitHub repository)"},
++    ) as client:
+         while start<max_songs:
+-            params={"start":start,"maxResults":size,"sort":"RatingScore","fields":"Artists,Names"}
+-            if start==0: params["getTotalCount"]="true"
+-            try:d=_http_json(c,"GET",VOCADB_API,params=params)
++            params={
++                "songTypes":"Original",
++                "onlyWithPvs":"true",
++                "pvServices":"Youtube",
++                "start":start,
++                "maxResults":size,
++                "sort":"RatingScore",
++                "fields":"Artists,Names,PVs",
++                "lang":"Default",
++            }
++            if start==0:
++                params["getTotalCount"]="true"
++
++            try:
++                data=_http_json(client,"GET",VOCADB_API,params=params)
+             except Exception as exc:
+-                status.warnings.append(f"VocaDB start={start}: {exc}");break
+-            items=d.get("items",[]) or []
+-            if total_seen is None: total_seen=_safe_int(d.get("totalCount"))
++                status.warnings.append(f"VocaDB original-song scan start={start}: {exc}")
++                break
++
++            items=data.get("items",[]) or []
++            if total_seen is None:
++                total_seen=_safe_int(data.get("totalCount"))
+             if not items:
+-                exhaustive=True; break
+-            out.extend(items);start+=len(items)
++                exhaustive=True
++                break
++
++            accepted_page=[]
++            for item in items:
++                if str(item.get("songType") or "").casefold()!="original":
++                    continue
++                if str(item.get("status") or "").casefold()=="draft":
++                    continue
++                if not _vocadb_official_youtube_pvs(item):
++                    continue
++                accepted_page.append(item)
++
++            out.extend(accepted_page)
++            start+=len(items)
++            pages+=1
++            _progress(
++                f"Vocaloid VocaDB page={pages} source_rows={len(items)} "
++                f"accepted_originals={len(accepted_page)} total_candidates={len(out)} "
++                f"source_offset={start} api_total={total_seen}"
++            )
++
+             if total_seen is not None and start>=total_seen:
+-                exhaustive=True; break
++                exhaustive=True
++                break
+             if len(items)<size:
+-                exhaustive=True; break
+-            time.sleep(.25)
+-    status.sources["vocadb_candidate_scan"]={
+-        "url":"https://vocadb.net/api/songs", "rows":len(out), "requested_limit":max_songs,
+-        "api_reported_total":total_seen, "exhaustive":exhaustive, "sort":"RatingScore", "ok":bool(out),
+-        "note":"Bounded high-popularity scan to respect VocaDB API usage guidance; qualifying Spotify threshold remains strict."
++                exhaustive=True
++                break
++            time.sleep(.20)
++
++    status.sources["vocadb_original_youtube_scan"]={
++        "url":"https://vocadb.net/api/songs",
++        "rows":len(out),
++        "requested_limit":max_songs,
++        "api_reported_total":total_seen,
++        "pages":pages,
++        "exhaustive":exhaustive,
++        "filters":{
++            "songTypes":"Original",
++            "onlyWithPvs":True,
++            "pvServices":"Youtube",
++        },
++        "ok":bool(out),
++        "note":"VocaDB-only candidate discovery; locally revalidated as original songs with original YouTube PVs.",
+     }
++    _progress(
++        f"Vocaloid VocaDB DONE candidates={len(out)} exhaustive={exhaustive} "
++        f"api_total={total_seen}"
++    )
+     return out,exhaustive
+ 
+@@ -1629,129 +1746,328 @@ def _vocadb_all(status:BuildStatus,max_songs:int|None=None)->tuple[list[dict],bo
+ def _vocadb_names(item:dict)->list[str]:
+     names=[item.get("name"),item.get("defaultName"),item.get("additionalNames")]
+-    for n in item.get("names",[]) or []: names.append(n.get("value"))
++    for value in item.get("names",[]) or []:
++        names.append(value.get("value"))
+     out=[]
+-    for x in names:
+-        if not x:continue
+-        if isinstance(x,str) and ", " in x and x==item.get("additionalNames"):
+-            out.extend(x.split(", "))
+-        else:out.append(str(x))
+-    return list(dict.fromkeys(x.strip() for x in out if x and x.strip()))
++    for value in names:
++        if not value:
++            continue
++        if isinstance(value,str) and ", " in value and value==item.get("additionalNames"):
++            out.extend(value.split(", "))
++        else:
++            out.append(str(value))
++    return list(dict.fromkeys(value.strip() for value in out if value and value.strip()))
+ 
+ 
+-def build_vocaloid(catalog:pd.DataFrame,status:BuildStatus)->list[SongRow]:
+-    from .io import read_rows
+-    voca,vocadb_exhaustive=_vocadb_all(status)
+-    title_map,_=_catalog_match_index(catalog)
+-    # Preserve manually verified qualifying seeds as a resilience floor, then merge the
+-    # exhaustive VocaDB/catalog classification results on top.
+-    seed_path=DATA/"seeds"/"vocaloid_verified_seed.csv"
++def _vocadb_official_youtube_pvs(item:dict)->list[dict]:
++    # Return only VocaDB PVs classified as authorized original YouTube uploads.
+     out=[]
+-    if seed_path.exists():
+-        try:
+-            seeds=[r for r in read_rows(seed_path) if r.listen_count is not None and r.listen_count>=10_000_000]
+-            # Refresh manually verified seeds from the acquired catalog whenever the same Spotify ID
+-            # or exact normalized title+artist has a newer/higher cumulative stream observation.
+-            by_tid={}
+-            for _,cr in catalog.iterrows():
+-                tid=_clean_track_id(cr.get("track_id"))
+-                if tid: by_tid[tid]=cr
+-            for seed in seeds:
+-                match=by_tid.get(seed.spotify_track_id or "")
+-                if match is None:
+-                    ids=title_map.get(norm(seed.title),[])
+-                    for idx in ids:
+-                        cr=catalog.loc[idx]
+-                        if norm(str(cr.main_artist))==norm(seed.main_artist):
+-                            match=cr; break
+-                if match is not None:
+-                    streams=_safe_float(match.get("trusted_cumulative_streams"))
+-                    trusted_url=str(match.get("trusted_streams_source_url") or "")
+-                    if streams is not None and streams>=10_000_000 and streams>float(seed.metric_value):
+-                        refreshed=_catalog_row_to_song(match,metric_override=("spotify_streams_snapshot" if "zenodo" in trusted_url else "spotify_streams",streams,"streams"),
+-                            extra={**(seed.extra or {}),"verified_seed":True,"trusted_stream_snapshot_date":str(match.get("trusted_streams_snapshot_date") or "")},
+-                            source_notes="Manually verified voice-synth seed; stream count refreshed from stricter cumulative Spotify evidence.")
+-                        if trusted_url: refreshed.source_url=trusted_url
+-                        # Preserve the verified canonical display credit/title from the seed.
+-                        refreshed.title=seed.title; refreshed.main_artist=seed.main_artist; refreshed.featured_artists=seed.featured_artists
+-                        seed=refreshed
+-                out.append(seed)
+-        except Exception as exc:
+-            status.warnings.append(f"vocaloid seed read: {exc}")
+-    seen={_identity(r.title,r.main_artist,r.spotify_track_id) for r in out}
+-    # Direct high-precision classification from explicit voice-synth credits/genres. This catches
+-    # qualifying tracks that may sit outside the bounded VocaDB popularity scan without requiring
+-    # an abusive full-database crawl.
+-    for _,cr in catalog.iterrows():
+-        streams=_safe_float(cr.get("trusted_cumulative_streams"))
+-        if streams is None or streams < 10_000_000:
++    seen=set()
++    for pv in item.get("pvs",[]) or []:
++        if bool(pv.get("disabled")):
++            continue
++        if str(pv.get("service") or "").casefold()!="youtube":
+             continue
+-        trusted_url=str(cr.get("trusted_streams_source_url") or "")
+-        stream_metric="spotify_streams_snapshot" if "zenodo" in trusted_url else "spotify_streams"
+-        credit_text=f"{cr.get('title','')} | {cr.get('artists','')} | {cr.get('genres','')}".casefold()
+-        explicit_marker=any(marker.casefold() in credit_text for marker in VOICE_SYNTH_MARKERS)
+-        if not explicit_marker:
++        if str(pv.get("pvType") or "").casefold()!="original":
++            continue
++
++        video_id=str(pv.get("pvId") or "").strip()
++        if not re.fullmatch(r"[A-Za-z0-9_-]{11}",video_id):
++            url=str(pv.get("url") or "")
++            match=re.search(
++                r"(?:youtube\.com/(?:watch\?.*?v=|shorts/|embed/)|youtu\.be/)([A-Za-z0-9_-]{11})",
++                url,
++                flags=re.I,
++            )
++            video_id=match.group(1) if match else ""
++        if not video_id or video_id in seen:
+             continue
+-        k=_identity(str(cr.title),str(cr.main_artist),_clean_track_id(cr.get("track_id")))
+-        if k in seen: continue
+-        seen.add(k)
+-        row=_catalog_row_to_song(cr,metric_override=(stream_metric,float(streams),"streams"),
+-            extra={"classification":"explicit_voice_synth_credit_or_genre","trusted_stream_snapshot_date":str(cr.get("trusted_streams_snapshot_date") or "")},
+-            source_notes="Voice-synth classification from explicit track credit/genre marker; >=10M qualification uses the stricter cumulative Spotify evidence channel (Zenodo Spotify-API snapshot or live Kworb overlay).")
+-        if trusted_url: row.source_url=trusted_url
+-        out.append(row)
+-    for item in voca:
++        seen.add(video_id)
++        out.append({
++            "video_id":video_id,
++            "url":str(pv.get("url") or f"https://www.youtube.com/watch?v={video_id}"),
++            "name":pv.get("name"),
++            "author":pv.get("author"),
++            "publish_date":pv.get("publishDate"),
++            "pv_type":"Original",
++            "service":"Youtube",
++        })
++    return out
++
++
++def _vocadb_roles(value:Any)->set[str]:
++    if value is None:
++        return set()
++    if isinstance(value,(list,tuple,set)):
++        parts=[str(x) for x in value]
++    else:
++        parts=re.split(r"[,|;]",str(value))
++    return {re.sub(r"[^a-z]","",part.casefold()) for part in parts if str(part).strip()}
++
++
++def _vocadb_song_credit(item:dict)->tuple[str,list[str],dict]:
++    # Choose producer/composer as main artist and voicebanks as featured artists.
++    producer_priority=[]
++    other_humans=[]
++    vocalists=[]
++    all_artists=[]
++
++    synth_types={
++        "vocaloid","utau","cevio","synthesizerv","neutrino","voisona",
++        "newtype","voiceroid","othervoicesynthesizer",
++    }
++    producer_roles={"composer","arranger","voicemanipulator"}
++    vocalist_roles={"vocalist","chorus","vocaldataprovider"}
++
++    for credit in item.get("artists",[]) or []:
++        artist=credit.get("artist") or {}
++        name=str(artist.get("name") or credit.get("name") or "").strip()
++        if not name:
++            continue
++        artist_type=re.sub(r"[^a-z]","",str(artist.get("artistType") or "").casefold())
++        roles=_vocadb_roles(credit.get("effectiveRoles") or credit.get("roles"))
++        is_support=bool(credit.get("isSupport"))
++        all_artists.append({
++            "name":name,
++            "artist_type":artist.get("artistType"),
++            "roles":sorted(roles),
++            "is_support":is_support,
++            "vocadb_artist_id":artist.get("id"),
++        })
++
++        if artist_type in synth_types:
++            vocalists.append(name)
++            continue
++
++        # A human vocalist credit is not evidence that the song belongs in a voice-synth corpus.
++        if roles & vocalist_roles:
++            if not is_support:
++                other_humans.append(name)
++            continue
++
++        if not is_support and (artist_type=="producer" or roles & producer_roles):
++            score=(
++                3 if "composer" in roles else
++                2 if "arranger" in roles else
++                1 if "voicemanipulator" in roles else
++                0
++            )
++            producer_priority.append((score,name))
++        elif not is_support and artist_type not in {"animator","illustrator","designer","label"}:
++            other_humans.append(name)
++
++    producer_priority.sort(key=lambda x:x[0],reverse=True)
++    producers=list(dict.fromkeys(name for _,name in producer_priority))
++    other_humans=list(dict.fromkeys(other_humans))
++    vocalists=list(dict.fromkeys(vocalists))
++
++    if producers:
++        main_artist=producers[0]
++        additional_producers=producers[1:]
++    elif other_humans:
++        main_artist=other_humans[0]
++        additional_producers=other_humans[1:]
++    else:
++        fallback=str(item.get("artistString") or "").strip()
++        main_artist=fallback or (vocalists[0] if vocalists else "Unknown VocaDB producer")
++        additional_producers=[]
++
++    featured=list(dict.fromkeys(vocalists+additional_producers))
++    featured=[name for name in featured if norm(name)!=norm(main_artist)]
++    return main_artist,featured,{
++        "producer_artists":producers,
++        "voice_synth_vocalists":vocalists,
++        "all_vocadb_artist_credits":all_artists,
++    }
++
++
++def _youtube_views_official(ids:list[str],status:BuildStatus)->tuple[dict[str,int],int]:
++    # Fetch live view counts only from the official YouTube Data API.
++    ids=list(dict.fromkeys(video_id for video_id in ids if video_id))
++    key=os.getenv("YOUTUBE_API_KEY","").strip()
++    if not key:
++        status.warnings.append(
++            "Vocaloid build requires YOUTUBE_API_KEY; no third-party or Spotify fallback is allowed."
++        )
++        status.sources["vocaloid_youtube_view_counts"]={
++            "source":"YouTube Data API v3",
++            "requested":len(ids),
++            "resolved":0,
++            "unresolved":len(ids),
++            "ok":False,
++            "error":"missing YOUTUBE_API_KEY",
++        }
++        return {},len(ids)
++
++    out={}
++    with httpx.Client(timeout=60,follow_redirects=True) as client:
++        for start in range(0,len(ids),50):
++            batch=ids[start:start+50]
++            try:
++                data=_http_json(
++                    client,
++                    "GET",
++                    YOUTUBE_API,
++                    params={
++                        "part":"statistics",
++                        "id":",".join(batch),
++                        "key":key,
++                    },
++                )
++                for item in data.get("items",[]) or []:
++                    views=_safe_int((item.get("statistics") or {}).get("viewCount"))
++                    if views is not None:
++                        out[str(item.get("id"))]=views
++                _progress(
++                    f"Vocaloid YouTube batch={start//50+1} batch_size={len(batch)} "
++                    f"resolved={len(out)}/{len(ids)}"
++                )
++            except Exception as exc:
++                status.warnings.append(f"Vocaloid YouTube API batch {start}: {exc}")
++                _progress(
++                    f"Vocaloid YouTube batch={start//50+1} ERROR "
++                    f"{type(exc).__name__}: {exc}"
++                )
++
++    unresolved=len([video_id for video_id in ids if video_id not in out])
++    status.sources["vocaloid_youtube_view_counts"]={
++        "source":"YouTube Data API v3 videos.list(part=statistics)",
++        "requested":len(ids),
++        "resolved":len(out),
++        "unresolved":unresolved,
++        "ok":bool(out) and unresolved==0,
++        "threshold":100_000_000,
++        "note":"Official YouTube API only; no Return YouTube Dislike, yt-dlp, or Spotify fallback.",
++    }
++    return out,unresolved
++
++
++def build_vocaloid(catalog:pd.DataFrame,status:BuildStatus)->list[SongRow]:
++    # Build original voice-synth songs whose official YouTube PV has >=100M views.
++    # catalog is intentionally unused so Spotify/catalog data cannot affect the list.
++    del catalog
++    threshold=100_000_000
++    cap=10_000
++    output_path=DATA/"vocaloid"/"vocaloid_youtube_100m.csv"
++    partial_path=DATA/"vocaloid"/"vocaloid_youtube_100m.partial.csv"
++    legacy_path=DATA/"vocaloid"/"vocaloid_spotify_10m.csv"
++
++    output_path.parent.mkdir(parents=True,exist_ok=True)
++    partial_path.unlink(missing_ok=True)
++
++    vocadb_rows,vocadb_exhaustive=_vocadb_all(status)
++
++    songs=[]
++    all_video_ids=[]
++    for item in vocadb_rows:
++        pvs=_vocadb_official_youtube_pvs(item)
++        if not pvs:
++            continue
++        songs.append((item,pvs))
++        all_video_ids.extend(pv["video_id"] for pv in pvs)
++
++    _progress(
++        f"Vocaloid official-PV candidates songs={len(songs)} "
++        f"unique_youtube_ids={len(set(all_video_ids))}"
++    )
++    view_counts,unresolved_video_ids=_youtube_views_official(all_video_ids,status)
++
++    rows=[]
++    for item,pvs in songs:
++        resolved=[
++            (view_counts[pv["video_id"]],pv)
++            for pv in pvs
++            if pv["video_id"] in view_counts
++        ]
++        if not resolved:
++            continue
++
++        # One individual official upload must qualify; counts are never summed across PVs.
++        best_views,best_pv=max(resolved,key=lambda pair:pair[0])
++        if best_views<threshold:
++            continue
++
+         names=_vocadb_names(item)
+-        cand_ids=[]
+-        for name in names:
+-            cand_ids.extend(title_map.get(norm(name),[]))
+-        cand_ids=list(dict.fromkeys(cand_ids))
+-        if not cand_ids:continue
+-        voca_artists=[]
+-        for ar in item.get("artists",[]) or []:
+-            name=(ar.get("artist") or {}).get("name") or ar.get("name")
+-            if name:voca_artists.append(name)
+-        artist_norms=[norm(x) for x in voca_artists]
+-        best=None;best_score=-1
+-        for idx in cand_ids[:200]:
+-            r=catalog.loc[idx];streams=_safe_float(r.get("trusted_cumulative_streams"))
+-            # The hard threshold uses only the stricter cumulative channel (Zenodo Spotify-API
+-            # snapshot or live Kworb overlay). Chart-window totals and noisy cross-platform
+-            # snapshot outliers remain ranking evidence but cannot qualify a track by themselves.
+-            if streams is None or streams<10_000_000:
+-                continue
+-            trusted_url=str(r.get("trusted_streams_source_url") or "")
+-            stream_metric="spotify_streams_snapshot" if "zenodo" in trusted_url else "spotify_streams"
+-            ar=norm(str(r.main_artist))
+-            similarity=max([fuzz.ratio(ar,x) for x in artist_norms],default=0)
+-            # Accuracy-first entity resolution: a title collision alone is not enough. VocaDB
+-            # normally exposes producer/artist credits, so require reasonable credit similarity
+-            # whenever those credits exist. This deliberately accepts false negatives rather than
+-            # attaching a mainstream same-title Spotify hit to a voice-synth song.
+-            if artist_norms and similarity < 45:
+-                continue
+-            score=streams + similarity*1_000_000
+-            if score>best_score:best_score=score;best=r
+-        if best is None:continue
+-        k=_identity(str(best.title),str(best.main_artist),_clean_track_id(best.track_id))
+-        if k in seen:continue
+-        seen.add(k)
+-        trusted_value=float(best.get("trusted_cumulative_streams"))
+-        trusted_url=str(best.get("trusted_streams_source_url") or "")
+-        trusted_metric="spotify_streams_snapshot" if "zenodo" in trusted_url else "spotify_streams"
+-        row=_catalog_row_to_song(best,metric_override=(trusted_metric,trusted_value,"streams"),
+-            extra={"vocadb_id":item.get("id"),"vocadb_url":f"https://vocadb.net/S/{item.get('id')}","vocadb_artists":voca_artists,"match":"exact_normalized_title","trusted_stream_snapshot_date":str(best.get("trusted_streams_snapshot_date") or "")},
+-            source_notes="Qualified only when stricter cumulative Spotify evidence reports >=10,000,000 streams and the title/artist resolves to a VocaDB voice-synth song entry.")
+-        if trusted_url: row.source_url=trusted_url
+-        out.append(row)
+-    # Every qualifying row uses the same platform/unit, so exact cumulative Spotify
+-    # streams are the ranking key. Do not let a secondary composite score reorder the list.
+-    out=dedupe(out)
+-    out.sort(key=lambda r: (r.listen_count if r.listen_count is not None else int(r.metric_value)), reverse=True)
+-    for i,r in enumerate(out[:10_000],1): r.rank=i
+-    out=out[:10_000]
+-    write_rows(out,DATA/"vocaloid"/"vocaloid_spotify_10m.csv")
+-    status.datasets["vocaloid"] = DatasetStatus(target="all verified >=10,000,000 Spotify streams; cap 10,000",rows=len(out),complete=(vocadb_exhaustive and bool(status.sources.get("spotify_zenodo_0_9m",{}).get("ok"))),
+-        metric_coverage=dict(_metric_counts(out)),notes=["Conditional list: never padded. Completeness requires exhaustive VocaDB enumeration and remains bounded by acquired Spotify stream-snapshot coverage.", f"vocadb_exhaustive={vocadb_exhaustive}"])
+-    status.save();return out
++        title=names[0] if names else str(item.get("id") or "Unknown VocaDB song")
++        main_artist,featured_artists,credit_extra=_vocadb_song_credit(item)
++        # VocaDB contains some human-only originals too; require an actual credited voice synth.
++        if not credit_extra.get("voice_synth_vocalists"):
++            continue
++        publish_date=str(item.get("publishDate") or best_pv.get("publish_date") or "")
++        year_match=re.search(r"\b(19|20)\d{2}\b",publish_date)
++
++        row=SongRow(
++            rank=0,
++            title=title,
++            main_artist=main_artist,
++            featured_artists=featured_artists,
++            release_date=publish_date or None,
++            release_year=int(year_match.group(0)) if year_match else None,
++            languages=["und"],
++            metric_name="youtube_views",
++            metric_value=float(best_views),
++            metric_unit="views",
++            view_count=int(best_views),
++            source_url=f"https://www.youtube.com/watch?v={best_pv['video_id']}",
++            retrieved_at=TODAY,
++            source_notes=(
++                "VocaDB SongType=Original and VocaDB PVType=Original identify an original song "
++                "with an authorized YouTube upload; live viewCount is from the official YouTube "
++                "Data API. Remixes, mashups, covers, remasters, MusicPV entries, reprints, other "
++                "PVs, disabled PVs, and Spotify evidence are excluded."
++            ),
++            extra={
++                "vocadb_id":item.get("id"),
++                "vocadb_url":f"https://vocadb.net/S/{item.get('id')}",
++                "vocadb_song_type":"Original",
++                "vocadb_status":item.get("status"),
++                "vocadb_rating_score":item.get("ratingScore"),
++                "youtube_video_id":best_pv["video_id"],
++                "youtube_pv_type":"Original",
++                "youtube_pv_service":"Youtube",
++                "youtube_pv_author":best_pv.get("author"),
++                "official_youtube_pv_count":len(pvs),
++                "qualification_threshold_views":threshold,
++                "selection":"highest-view individual official original YouTube PV",
++                **credit_extra,
++            },
++        )
++        rows.append(row)
++        append_row(row,partial_path)
++        _progress(
++            f"Vocaloid QUALIFY provisional={len(rows)} views={best_views} "
++            f"title={title!r} artist={main_artist!r} video={best_pv['video_id']}"
++        )
++
++    rows=dedupe(rows)
++    rows.sort(key=lambda row:int(row.view_count or row.metric_value),reverse=True)
++    rows=rows[:cap]
++    for rank,row in enumerate(rows,1):
++        row.rank=rank
++    if rows:
++        write_rows(rows,output_path)
++        # Retire the contaminated legacy Spotify classifier only after a replacement was
++        # successfully materialized. A failed/empty run never destroys the last canonical file.
++        legacy_path.unlink(missing_ok=True)
++    partial_path.unlink(missing_ok=True)
++
++    complete=bool(rows and vocadb_exhaustive and unresolved_video_ids==0 and os.getenv("YOUTUBE_API_KEY","").strip())
++    status.datasets["vocaloid"]=DatasetStatus(
++        target="all VocaDB original songs with an official original YouTube PV >=100,000,000 views; cap 10,000",
++        rows=len(rows),
++        complete=complete,
++        metric_coverage=dict(_metric_counts(rows)),
++        notes=[
++            "VocaDB-only classification and metadata; YouTube Data API view counts only.",
++            "SongType must equal Original. Qualifying PV must be service=Youtube, pvType=Original, enabled, and individually >=100,000,000 views.",
++            "No Spotify matching, title collision matching, remix, mashup, cover, remaster, MusicPV entry, reprint, or third-party view-count fallback.",
++            f"vocadb_exhaustive={vocadb_exhaustive}; unresolved_youtube_video_ids={unresolved_video_ids}",
++        ],
++    )
++    status.save()
++    _progress(
++        f"Vocaloid DONE rows={len(rows)} threshold={threshold} "
++        f"vocadb_exhaustive={vocadb_exhaustive} unresolved_video_ids={unresolved_video_ids}"
++    )
++    return rows
+ 
+ 
+@@ -2041,5 +2357,5 @@ def build_megalist(all_rows:dict[str,list[SongRow]],status:BuildStatus)->list[So
+     # complete. Otherwise it is still a valid deduplicated union of what was retrieved, but must
+     # not be presented as the finished user-requested megalist.
+-    upstream_keys=["anime","vocaloid","worldwide","classical","vtuber_original","emerging","genres","screen_soundtracks","vtuber_non_original","countries"]
++    upstream_keys=["anime","vocaloid","worldwide","classical","vtuber_original","emerging","genres","screen_soundtracks","vtuber_non_original","video_game_music","kpop","internet_native","electronic_subcultures","alternative_extreme","jazz_depth","children_childhood","unserious","special_required","countries"]
+     upstream_complete=all(status.datasets.get(k) is not None and status.datasets[k].complete for k in upstream_keys)
+     if not upstream_complete:
+@@ -2062,7 +2378,8 @@ def write_status_json(status: BuildStatus) -> None:
+     fixed_complete=all(status.datasets.get(k) is not None and status.datasets[k].complete for k in FIXED_TARGETS)
+     vocaloid_complete=bool(status.datasets.get("vocaloid") and status.datasets["vocaloid"].complete)
++    kpop_complete=bool(status.datasets.get("kpop") and status.datasets["kpop"].complete)
+     countries_complete=bool(status.datasets.get("countries") and status.datasets["countries"].complete)
+     payload={
+-      "schema_version":6,
++      "schema_version":7,
+       "requested_at":"2026-07-20",
+       "last_build_started_at":status.started_at,
+@@ -2073,6 +2390,7 @@ def write_status_json(status: BuildStatus) -> None:
+         "all_fixed_size_targets_complete":fixed_complete,
+         "vocaloid_conditional_corpus_marked_complete":vocaloid_complete,
++        "kpop_conditional_corpus_marked_complete":kpop_complete,
+         "spotify_country_lists_complete":countries_complete,
+-        "all_requested_lists_complete":fixed_complete and vocaloid_complete and countries_complete,
++        "all_requested_lists_complete":fixed_complete and vocaloid_complete and kpop_complete and countries_complete,
+       },
+       "datasets":{k:{"target":v.target,"materialized_rows":v.rows,"complete":v.complete,"metric_coverage":v.metric_coverage,"notes":v.notes} for k,v in status.datasets.items()},
+@@ -2086,6 +2404,7 @@ def full_build(*,skip_zenodo:bool=False,only:list[str]|None=None)->BuildStatus:
+     status=BuildStatus(started_at=_now())
+     _progress(f"FULL BUILD START only={only or 'ALL'} skip_zenodo={skip_zenodo}")
+     for name,target in FIXED_TARGETS.items():status.datasets[name]=DatasetStatus(target=target)
+-    status.datasets["vocaloid"]=DatasetStatus(target="all verified >=10,000,000 Spotify streams; cap 10,000")
++    status.datasets["vocaloid"]=DatasetStatus(target="all VocaDB Original songs with an official Original YouTube PV >=100,000,000 views; cap 10,000")
++    status.datasets["kpop"]=DatasetStatus(target="all source-tagged K-pop songs with observed YouTube views strictly above 100,000,000")
+     status.datasets["countries"]=DatasetStatus(target="top 1,000 unique songs for every detected Spotify regional country/territory chart")
+     status.save()
+@@ -2097,5 +2416,5 @@ def full_build(*,skip_zenodo:bool=False,only:list[str]|None=None)->BuildStatus:
+     catalog=apply_kworb_overlay(catalog,fetch_kworb_global(status))
+     catalog=apply_kworb_overlay(catalog,fetch_kworb_daily(status))
+-    wanted=set(only or ["worldwide","genres","classical","emerging","screen_soundtracks","anime","vocaloid","vtuber_original","vtuber_non_original","countries"])
++    wanted=set(only or ["worldwide","genres","classical","emerging","screen_soundtracks","anime","vocaloid","vtuber_original","vtuber_non_original","video_game_music","kpop","internet_native","electronic_subcultures","alternative_extreme","jazz_depth","children_childhood","unserious","special_required","countries"])
+     built:dict[str,list[SongRow]]={}
+     def run(name:str, fn):
+@@ -2117,4 +2436,13 @@ def full_build(*,skip_zenodo:bool=False,only:list[str]|None=None)->BuildStatus:
+     run("vtuber_original",lambda:build_vtuber(catalog,status,original=True))
+     run("vtuber_non_original",lambda:build_vtuber(catalog,status,original=False))
++    run("video_game_music",lambda:build_video_game_music(catalog,status))
++    run("kpop",lambda:build_kpop_youtube_100m(catalog,status))
++    run("internet_native",lambda:build_internet_native(catalog,status))
++    run("electronic_subcultures",lambda:build_electronic_subcultures(catalog,status))
++    run("alternative_extreme",lambda:build_alternative_extreme(catalog,status))
++    run("jazz_depth",lambda:build_jazz_depth(catalog,status))
++    run("children_childhood",lambda:build_children_childhood(catalog,status))
++    run("unserious",lambda:build_unserious(catalog,status))
++    run("special_required",lambda:build_required_special(catalog,status))
+     if "countries" in wanted:
+         try:
+@@ -2134,9 +2462,18 @@ def full_build(*,skip_zenodo:bool=False,only:list[str]|None=None)->BuildStatus:
+     # Include existing materialized categories not rebuilt in partial runs.
+     paths={
+-      "anime":DATA/"anime"/"anime_songs.csv","vocaloid":DATA/"vocaloid"/"vocaloid_spotify_10m.csv",
++      "anime":DATA/"anime"/"anime_songs.csv","vocaloid":DATA/"vocaloid"/"vocaloid_youtube_100m.csv",
+       "worldwide":DATA/"worldwide"/"worldwide_51000.csv","classical":DATA/"classical"/"classical_10000.csv",
+       "vtuber_original":DATA/"vtuber_original"/"vtuber_original_10000.csv","emerging":DATA/"emerging"/"emerging_10000.csv",
+       "genres":DATA/"genres"/"genres_10000.csv","screen_soundtracks":DATA/"screen_soundtracks"/"screen_soundtracks_10000.csv",
+       "vtuber_non_original":DATA/"vtuber_non_original"/"vtuber_non_original_10000.csv",
++      "video_game_music":DATA/"video_games"/"video_game_music_1000.csv",
++      "kpop":DATA/"kpop"/"kpop_youtube_over_100m.csv",
++      "internet_native":DATA/"internet_native"/"internet_native_1000.csv",
++      "electronic_subcultures":DATA/"electronic_subcultures"/"electronic_subcultures_1000.csv",
++      "alternative_extreme":DATA/"alternative_extreme"/"alternative_extreme_1000.csv",
++      "jazz_depth":DATA/"jazz_depth"/"jazz_depth_1000.csv",
++      "children_childhood":DATA/"children_childhood"/"children_childhood_100.csv",
++      "unserious":DATA/"unserious"/"unserious_1000.csv",
++      "special_required":DATA/"special_required"/"special_required.csv",
+     }
+     from .io import read_rows
+@@ -2167,5 +2504,5 @@ def main(argv:list[str]|None=None)->int:
+     ap=argparse.ArgumentParser(description="Build all BeatHit datasets from public source snapshots/APIs")
+     ap.add_argument("--skip-zenodo",action="store_true",help="Skip the 931MB 0.9M-track source and use smaller fallbacks")
+-    ap.add_argument("--only",nargs="*",choices=list(FIXED_TARGETS)+["vocaloid","countries"],help="Build only selected categories")
++    ap.add_argument("--only",nargs="*",choices=list(FIXED_TARGETS)+["vocaloid","kpop","countries"],help="Build only selected categories")
+     a=ap.parse_args(argv)
+     st=full_build(skip_zenodo=a.skip_zenodo,only=a.only)
+diff --git a/src/music_megalist/io.py b/src/music_megalist/io.py
+index 7428974..b9812ad 100644
+--- a/src/music_megalist/io.py
++++ b/src/music_megalist/io.py
+@@ -62,4 +62,9 @@ def read_rows(path: str | Path) -> list[SongRow]:
+             for k in ("featured_artists", "genres"):
+                 d[k] = json.loads(d[k] or "[]")
++            # Backward compatibility for materialized CSVs created before languages existed.
++            if "languages" in d:
++                d["languages"] = json.loads(d.get("languages") or '["und"]')
++            else:
++                d["languages"] = ["und"]
+             d["extra"] = json.loads(d.get("extra") or "{}")
+             for k in ("rank", "release_year", "anime_popularity", "listen_count", "view_count"):
+diff --git a/src/music_megalist/models.py b/src/music_megalist/models.py
+index d4b8ae1..8690a9c 100644
+--- a/src/music_megalist/models.py
++++ b/src/music_megalist/models.py
+@@ -13,4 +13,7 @@ class SongRow(BaseModel):
+     release_year: int | None = None
+     genres: list[str] = Field(default_factory=list)
++    # Language tags are a list because one song may contain multiple languages.
++    # "und" means unknown/undetermined; "zxx" means no linguistic content.
++    languages: list[str] = Field(default_factory=lambda: ["und"])
+     composer: str | None = None
+     anime_title: str | None = None
+diff --git a/src/music_megalist/validate.py b/src/music_megalist/validate.py
+index bcca3e2..cd8f230 100644
+--- a/src/music_megalist/validate.py
++++ b/src/music_megalist/validate.py
+@@ -15,4 +15,12 @@ TARGETS={
+  "screen_soundtracks/screen_soundtracks_10000.csv":10000,
+  "vtuber_non_original/vtuber_non_original_10000.csv":1000,
++ "video_games/video_game_music_1000.csv":1000,
++ "internet_native/internet_native_1000.csv":1000,
++ "electronic_subcultures/electronic_subcultures_1000.csv":1000,
++ "alternative_extreme/alternative_extreme_1000.csv":1000,
++ "jazz_depth/jazz_depth_1000.csv":1000,
++ "children_childhood/children_childhood_100.csv":100,
++ "unserious/unserious_1000.csv":1000,
++ "special_required/special_required.csv":4,
+ }
+ 
+@@ -47,4 +55,13 @@ def _generic_csv_errors(path: Path) -> list[str]:
+         for k in required:
+             if not str(r.get(k,'')).strip(): errors.append(f"BLANK {path} row {i} field {k}")
++        # New canonical outputs include languages as a JSON list. Legacy/minimal fixtures
++        # without this newer optional column remain valid and readable.
++        if 'languages' in r:
++            try:
++                languages=json.loads(r.get('languages') or '[]')
++                if not isinstance(languages,list) or not languages or any(not str(x).strip() for x in languages):
++                    errors.append(f"LANGUAGES {path} row {i}: expected non-empty JSON list")
++            except Exception:
++                errors.append(f"LANGUAGES_INVALID {path} row {i}")
+         try: mv=float(r.get('metric_value',''))
+         except Exception: errors.append(f"METRIC {path} row {i}"); continue
+@@ -107,11 +124,30 @@ def validate(data_dir: str|Path='data', *, require_complete: bool=False) -> list
+         if '/bootstrap/' in p.as_posix() or '/seeds/' in p.as_posix() or p.name.endswith('_snapshot.csv'): continue
+         errors.extend(_generic_csv_errors(p))
+-    vp=data/'vocaloid'/'vocaloid_spotify_10m.csv'
++    vp=data/'vocaloid'/'vocaloid_youtube_100m.csv'
+     if vp.exists():
+         rows=read_rows(vp)
+         if len(rows)>10000: errors.append('COUNT vocaloid > 10000')
+         for i,r in enumerate(rows,1):
+-            if r.metric_name not in {'spotify_streams','spotify_streams_snapshot'} or r.metric_value<10_000_000:
++            ex=r.extra or {}
++            if r.metric_name!='youtube_views' or r.metric_unit!='views' or r.metric_value<100_000_000:
+                 errors.append(f'VOCALOID_THRESHOLD row {i}')
++            if r.view_count is None or int(r.view_count)!=int(r.metric_value):
++                errors.append(f'VOCALOID_VIEW_COUNT row {i}')
++            if str(ex.get('vocadb_song_type') or '').casefold()!='original':
++                errors.append(f'VOCALOID_SONG_TYPE row {i}')
++            if str(ex.get('youtube_pv_type') or '').casefold()!='original':
++                errors.append(f'VOCALOID_PV_TYPE row {i}')
++            if str(ex.get('youtube_pv_service') or '').casefold()!='youtube':
++                errors.append(f'VOCALOID_PV_SERVICE row {i}')
++            if not str(ex.get('youtube_video_id') or '').strip():
++                errors.append(f'VOCALOID_VIDEO_ID row {i}')
++    kp=data/'kpop'/'kpop_youtube_over_100m.csv'
++    if kp.exists():
++        rows=read_rows(kp)
++        for i,r in enumerate(rows,1):
++            if r.metric_name!='youtube_views' or r.metric_unit!='views' or r.metric_value<=100_000_000:
++                errors.append(f'KPOP_THRESHOLD row {i}')
++            if r.view_count is None or int(r.view_count)!=int(r.metric_value):
++                errors.append(f'KPOP_VIEW_COUNT row {i}')
+     wp=data/'worldwide'/'worldwide_51000.csv'
+     if wp.exists():
+diff --git a/tests/test_culturelists.py b/tests/test_culturelists.py
+new file mode 100644
+index 0000000..9df4144
+--- /dev/null
++++ b/tests/test_culturelists.py
+@@ -0,0 +1,47 @@
++import json
++
++import pandas as pd
++
++from music_megalist.culturelists import (
++    _genre_matches,
++    catalog_languages,
++)
++from music_megalist.io import read_rows, write_rows
++from music_megalist.models import SongRow
++
++
++def test_languages_are_lists_and_support_multiple_explicit_languages(tmp_path):
++    row = pd.Series({"language": '["ja","en"]', "title": "Example", "genres": "pop"})
++    assert catalog_languages(row) == ["ja", "en"]
++
++    song = SongRow(
++        title="Example",
++        main_artist="Artist",
++        languages=["ja", "en"],
++        metric_name="youtube_views",
++        metric_value=123,
++        metric_unit="views",
++        view_count=123,
++        source_url="https://example.test",
++    )
++    path = tmp_path / "songs.csv"
++    write_rows([song], path)
++    raw = path.read_text(encoding="utf-8")
++    assert '"[""ja"",""en""]"' in raw
++    assert read_rows(path)[0].languages == ["ja", "en"]
++
++
++def test_unknown_language_is_not_guessed_from_latin_title():
++    row = pd.Series({"title": "This Looks English But Is Not Proven", "genres": "pop"})
++    assert catalog_languages(row) == ["und"]
++
++
++def test_instrumental_language_uses_zxx():
++    row = pd.Series({"title": "Theme (Instrumental)", "genres": "soundtrack"})
++    assert catalog_languages(row) == ["zxx"]
++
++
++def test_genre_matching_is_category_based_not_short_substring_marker():
++    assert _genre_matches(["k-pop"], ["k-pop"])
++    assert _genre_matches(["avant-garde jazz"], ["jazz"])
++    assert not _genre_matches(["canadian pop"], ["ia"])
+diff --git a/tests/test_vocaloid_vocadb.py b/tests/test_vocaloid_vocadb.py
+new file mode 100644
+index 0000000..bbf982f
+--- /dev/null
++++ b/tests/test_vocaloid_vocadb.py
+@@ -0,0 +1,60 @@
++from music_megalist.fullbuild import (
++    _vocadb_official_youtube_pvs,
++    _vocadb_song_credit,
++)
++
++
++def test_vocadb_pv_filter_accepts_only_enabled_original_youtube():
++    item = {
++        "pvs": [
++            {"service": "Youtube", "pvType": "Original", "pvId": "abcdefghijk", "disabled": False},
++            {"service": "Youtube", "pvType": "Reprint", "pvId": "bbbbbbbbbbb", "disabled": False},
++            {"service": "Youtube", "pvType": "Other", "pvId": "ccccccccccc", "disabled": False},
++            {"service": "NicoNicoDouga", "pvType": "Original", "pvId": "sm9", "disabled": False},
++            {"service": "Youtube", "pvType": "Original", "pvId": "ddddddddddd", "disabled": True},
++        ]
++    }
++    assert [pv["video_id"] for pv in _vocadb_official_youtube_pvs(item)] == ["abcdefghijk"]
++
++
++def test_vocadb_song_credit_prefers_producer_and_features_voicebank():
++    item = {
++        "artists": [
++            {
++                "artist": {"id": 1, "name": "Producer P", "artistType": "Producer"},
++                "effectiveRoles": "Composer",
++                "isSupport": False,
++            },
++            {
++                "artist": {"id": 2, "name": "Hatsune Miku", "artistType": "Vocaloid"},
++                "effectiveRoles": "Vocalist",
++                "isSupport": False,
++            },
++        ]
++    }
++    main, featured, metadata = _vocadb_song_credit(item)
++    assert main == "Producer P"
++    assert featured == ["Hatsune Miku"]
++    assert metadata["producer_artists"] == ["Producer P"]
++    assert metadata["voice_synth_vocalists"] == ["Hatsune Miku"]
++
++
++def test_human_vocalist_is_not_misclassified_as_voice_synth():
++    item = {
++        "artists": [
++            {
++                "artist": {"id": 1, "name": "Producer P", "artistType": "Producer"},
++                "effectiveRoles": "Composer",
++                "isSupport": False,
++            },
++            {
++                "artist": {"id": 2, "name": "Human Singer", "artistType": "Person"},
++                "effectiveRoles": "Vocalist",
++                "isSupport": False,
++            },
++        ]
++    }
++    main, featured, metadata = _vocadb_song_credit(item)
++    assert main == "Producer P"
++    assert metadata["voice_synth_vocalists"] == []
++    assert "Human Singer" not in featured
