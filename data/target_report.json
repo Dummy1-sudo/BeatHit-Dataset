@@ -42,7 +42,7 @@
     },
     "video_games/video_game_music_1000.csv": {
       "target": 1000,
-      "rows": 0,
+      "rows": 388,
       "complete": false
     },
     "internet_native/internet_native_1000.csv": {
@@ -149,7 +149,7 @@
     },
     "kpop_youtube_threshold": {
       "target": "all materialized source-tagged K-pop songs strictly above 100,000,000 observed YouTube views",
-      "rows": 70,
+      "rows": 316,
       "invalid_rows": [],
       "threshold_valid": true,
       "corpus_completeness": "Read STATUS.json datasets.kpop.complete; current source catalog is not claimed exhaustive."
@@ -175,12 +175,12 @@
       "complete": true
     },
     "megalist_languages": {
-      "rows": 93619,
+      "rows": 94026,
       "invalid_rows": [],
       "complete": true
     },
     "megalist_deduplication": {
-      "rows": 93619,
+      "rows": 94026,
       "duplicate_title_main_artist_keys": 0,
       "complete": true
     }

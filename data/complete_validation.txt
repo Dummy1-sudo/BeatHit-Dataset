@@ -4,6 +4,6 @@ COUNTRY_MARKETS built 75 != detected 76
 COUNTRY_FAILURES 1
 COUNTRY_TOTAL_ROWS 73590 != 76000
 COUNT screen_soundtracks/screen_soundtracks_10000.csv: 5660 != 10000
-COUNT video_games/video_game_music_1000.csv: 0 != 1000
+COUNT video_games/video_game_music_1000.csv: 388 != 1000
 COUNT jazz_depth/jazz_depth_1000.csv: 999 != 1000
 Strict fixed-target validation did not pass; see source-backed shortfalls above.
