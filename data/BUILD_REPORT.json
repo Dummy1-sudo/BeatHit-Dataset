@@ -1,6 +1,6 @@
 {
-  "started_at": "2026-07-23T06:36:25.539196+00:00",
-  "finished_at": "2026-07-23T09:40:23.659633+00:00",
+  "started_at": "2026-07-25T01:59:41.815797+00:00",
+  "finished_at": "2026-07-25T05:35:03.629153+00:00",
   "sources": {
     "spotify_zenodo_0_9m": {
       "url": "https://zenodo.org/records/11453410/files/tracks.csv?download=1",
@@ -56,14 +56,14 @@
     },
     "kworb_live_spotify": {
       "url": "https://kworb.net/spotify/songs.html",
-      "rows": 2483,
-      "retrieved_at": "2026-07-23",
+      "rows": 2484,
+      "retrieved_at": "2026-07-25",
       "ok": true
     },
     "kworb_global_daily": {
       "url": "https://kworb.net/spotify/country/global_daily.html",
       "rows": 200,
-      "retrieved_at": "2026-07-23",
+      "retrieved_at": "2026-07-25",
       "ok": true
     },
     "anime_popularity_candidates": {
@@ -84,11 +84,42 @@
       "stop_reason": "circuit_breaker_after_4_consecutive_failures",
       "ok": false
     },
+    "vocadb_original_youtube_scan": {
+      "url": "https://vocadb.net/api/songs",
+      "rows": 82203,
+      "requested_limit": 100000,
+      "api_reported_total": 289777,
+      "pages": 2000,
+      "exhaustive": false,
+      "filters": {
+        "songTypes": "Original",
+        "onlyWithPvs": true,
+        "pvServices": "Youtube"
+      },
+      "ok": true,
+      "note": "VocaDB-only candidate discovery; locally revalidated as original songs with original YouTube PVs."
+    },
+    "vocaloid_youtube_view_counts": {
+      "source": "YouTube Data API v3 videos.list(part=statistics)",
+      "requested": 66373,
+      "resolved": 65512,
+      "unresolved": 861,
+      "ok": false,
+      "threshold": 100000000,
+      "note": "Official YouTube API only; no Return YouTube Dislike, yt-dlp, or Spotify fallback."
+    },
     "youtube_view_counts": {
       "source": "YouTube Data API v3",
-      "requested": 41373,
-      "resolved": 41339,
+      "requested": 41405,
+      "resolved": 41361,
       "ok": true
+    },
+    "wikidata_top_video_games": {
+      "url": "https://query.wikidata.org/sparql",
+      "rows": 0,
+      "ranking_proxy": "wikimedia_sitelinks",
+      "ok": false,
+      "error": "Client error '403 Forbidden' for url 'https://query.wikidata.org/sparql?query=%0ASELECT+%3Fgame+%3FgameLabel+%3Fsitelinks+WHERE+%7B%0A++%3Fgame+wdt%3AP31%2Fwdt%3AP279%2A+wd%3AQ7889+%3B%0A++++++++wikibase%3Asitelinks+%3Fsitelinks+.%0A++SERVICE+wikibase%3Alabel+%7B+bd%3AserviceParam+wikibase%3Alanguage+%22en%22.+%7D%0A%7D%0AORDER+BY+DESC%28%3Fsitelinks%29%0ALIMIT+1000%0A&format=json'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/403"
     }
   },
   "datasets": {
@@ -191,16 +222,150 @@
         "Holodex topic classification with mentions/channel metadata; exact YouTube views used when available, Spotify streams used on confident catalog matches, subscriber counts only as an explicitly labeled proxy. Finite verified corpus is never padded."
       ]
     },
-    "vocaloid": {
-      "target": "all verified >=10,000,000 Spotify streams; cap 10,000",
-      "rows": 305,
+    "video_game_music": {
+      "target": 1000,
+      "rows": 0,
       "complete": false,
+      "metric_coverage": {},
+      "notes": [
+        "Game popularity is ranked by Wikidata Wikimedia-sitelink count, a transparent cross-language recognition proxy.",
+        "One highest-popularity confident soundtrack match per game; unmatched games are omitted rather than fabricated.",
+        "ranked_games=0; soundtrack_candidates=1127; matched_games=0"
+      ]
+    },
+    "internet_native": {
+      "target": 1000,
+      "rows": 1000,
+      "complete": true,
       "metric_coverage": {
-        "spotify_streams": 305
+        "curated_required_seed": 2,
+        "spotify_chart_streams_snapshot": 1,
+        "spotify_popularity": 992,
+        "spotify_streams_snapshot": 5
       },
       "notes": [
-        "Conditional list: never padded. Completeness requires exhaustive VocaDB enumeration and remains bounded by acquired Spotify stream-snapshot coverage.",
-        "vocadb_exhaustive=False"
+        "Source-backed catalog genres/tags first; ListenBrainz tag-radio fallback second.",
+        "No fabricated quota padding. Unknown song language is stored as ['und'], not guessed from title text.",
+        "catalog_candidates=1081; target=1000"
+      ]
+    },
+    "electronic_subcultures": {
+      "target": 1000,
+      "rows": 1000,
+      "complete": true,
+      "metric_coverage": {
+        "spotify_chart_streams_snapshot": 191,
+        "spotify_popularity": 518,
+        "spotify_streams": 185,
+        "spotify_streams_snapshot": 106
+      },
+      "notes": [
+        "Source-backed catalog genres/tags first; ListenBrainz tag-radio fallback second.",
+        "No fabricated quota padding. Unknown song language is stored as ['und'], not guessed from title text.",
+        "catalog_candidates=20436; target=1000"
+      ]
+    },
+    "alternative_extreme": {
+      "target": 1000,
+      "rows": 1000,
+      "complete": true,
+      "metric_coverage": {
+        "spotify_chart_streams_snapshot": 130,
+        "spotify_popularity": 749,
+        "spotify_streams": 107,
+        "spotify_streams_snapshot": 14
+      },
+      "notes": [
+        "Source-backed catalog genres/tags first; ListenBrainz tag-radio fallback second.",
+        "No fabricated quota padding. Unknown song language is stored as ['und'], not guessed from title text.",
+        "catalog_candidates=10266; target=1000"
+      ]
+    },
+    "jazz_depth": {
+      "target": 1000,
+      "rows": 999,
+      "complete": false,
+      "metric_coverage": {
+        "spotify_chart_streams_snapshot": 40,
+        "spotify_popularity": 936,
+        "spotify_streams": 23
+      },
+      "notes": [
+        "Source-backed catalog genres/tags first; ListenBrainz tag-radio fallback second.",
+        "No fabricated quota padding. Unknown song language is stored as ['und'], not guessed from title text.",
+        "catalog_candidates=5173; target=1000"
+      ]
+    },
+    "children_childhood": {
+      "target": 100,
+      "rows": 100,
+      "complete": true,
+      "metric_coverage": {
+        "curated_required_seed": 2,
+        "spotify_chart_streams_snapshot": 2,
+        "spotify_popularity": 94,
+        "spotify_streams": 1,
+        "spotify_streams_snapshot": 1
+      },
+      "notes": [
+        "Source-backed catalog genres/tags first; ListenBrainz tag-radio fallback second.",
+        "No fabricated quota padding. Unknown song language is stored as ['und'], not guessed from title text.",
+        "catalog_candidates=2102; target=100"
+      ]
+    },
+    "unserious": {
+      "target": 1000,
+      "rows": 1000,
+      "complete": true,
+      "metric_coverage": {
+        "curated_required_seed": 3,
+        "spotify_chart_streams_snapshot": 38,
+        "spotify_popularity": 917,
+        "spotify_streams": 26,
+        "spotify_streams_snapshot": 16
+      },
+      "notes": [
+        "Source-backed catalog genres/tags first; ListenBrainz tag-radio fallback second.",
+        "No fabricated quota padding. Unknown song language is stored as ['und'], not guessed from title text.",
+        "catalog_candidates=1820; target=1000"
+      ]
+    },
+    "special_required": {
+      "target": 4,
+      "rows": 4,
+      "complete": true,
+      "metric_coverage": {
+        "curated_required_seed": 4
+      },
+      "notes": [
+        "Explicit required inclusions: Beethoven Virus, The Pi Song, SpongeBob SquarePants Theme, and Pink Fluffy Unicorns Dancing on Rainbows.",
+        "The inclusion metric is not represented as a popularity count."
+      ]
+    },
+    "vocaloid": {
+      "target": "all VocaDB original songs with an official original YouTube PV >=100,000,000 views; cap 10,000",
+      "rows": 16,
+      "complete": false,
+      "metric_coverage": {
+        "youtube_views": 16
+      },
+      "notes": [
+        "VocaDB-only classification and metadata; YouTube Data API view counts only.",
+        "SongType must equal Original. Qualifying PV must be service=Youtube, pvType=Original, enabled, and individually >=100,000,000 views.",
+        "No Spotify matching, title collision matching, remix, mashup, cover, remaster, MusicPV entry, reprint, or third-party view-count fallback.",
+        "vocadb_exhaustive=False; unresolved_youtube_video_ids=861"
+      ]
+    },
+    "kpop": {
+      "target": "all source-tagged K-pop songs with observed YouTube views strictly above 100,000,000",
+      "rows": 70,
+      "complete": false,
+      "metric_coverage": {
+        "youtube_views": 70
+      },
+      "notes": [
+        "Every materialized row is source-tagged K-pop with an observed YouTube view count strictly above 100,000,000.",
+        "Not marked exhaustive because the acquired catalog is not a complete enumeration of all YouTube music videos."
       ]
     },
     "countries": {
@@ -218,17 +383,18 @@
     },
     "megalist": {
       "target": "deduplicated union of all requested lists",
-      "rows": 91708,
+      "rows": 93619,
       "complete": false,
       "metric_coverage": {
         "anime_popularity_proxy": 794,
         "cross_platform_track_score": 2,
-        "spotify_chart_streams_snapshot": 2812,
-        "spotify_popularity": 52350,
-        "spotify_regional_chart_streams_sum": 27702,
-        "spotify_streams": 2716,
-        "spotify_streams_snapshot": 3328,
-        "youtube_views": 2004
+        "curated_required_seed": 4,
+        "spotify_chart_streams_snapshot": 2832,
+        "spotify_popularity": 54238,
+        "spotify_regional_chart_streams_sum": 27709,
+        "spotify_streams": 2690,
+        "spotify_streams_snapshot": 3331,
+        "youtube_views": 2019
       },
       "notes": [
         "Megalist is a deduplicated union of materialized rows; completeness is false because one or more upstream requested lists are incomplete."
@@ -236,10 +402,14 @@
     }
   },
   "warnings": [
+    "anime existing output could not be checked: No module named 'music_megalist.validation'",
     "AnimeThemes page 1: GET https://api.animethemes.moe/api/anime failed: HTTP 404: {     \"message\": \"\" }",
     "Jikan themes MAL 38000: HTTP 504 after 2 attempts",
     "Jikan themes MAL 40748: HTTP 504 after 2 attempts",
     "Jikan themes MAL 35760: HTTP 504 after 2 attempts",
-    "Jikan themes MAL 40028: HTTP 429 rate limited; skipping optional fallback"
+    "Jikan themes MAL 40028: HTTP 429 rate limited; skipping optional fallback",
+    "vtuber_original existing output could not be checked: No module named 'music_megalist.validation'",
+    "vtuber_non_original existing output could not be checked: No module named 'music_megalist.validation'",
+    "Wikidata top video games: Client error '403 Forbidden' for url 'https://query.wikidata.org/sparql?query=%0ASELECT+%3Fgame+%3FgameLabel+%3Fsitelinks+WHERE+%7B%0A++%3Fgame+wdt%3AP31%2Fwdt%3AP279%2A+wd%3AQ7889+%3B%0A++++++++wikibase%3Asitelinks+%3Fsitelinks+.%0A++SERVICE+wikibase%3Alabel+%7B+bd%3AserviceParam+wikibase%3Alanguage+%22en%22.+%7D%0A%7D%0AORDER+BY+DESC%28%3Fsitelinks%29%0ALIMIT+1000%0A&format=json'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/403"
   ]
 }

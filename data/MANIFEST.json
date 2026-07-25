@@ -3,8 +3,8 @@
   "files": [
     {
       "path": "data/BUILD_REPORT.json",
-      "bytes": 8495,
-      "sha256": "82fcae35368a939864a809629a310c338267545ea5e7c496660d0ddb1a4b6851"
+      "bytes": 15906,
+      "sha256": "f36b6204c8fffe6885592318a0da14c0ceb39e1c213316462b32e326eea95b28"
     },
     {
       "path": "data/README.md",
@@ -12,14 +12,24 @@
       "sha256": "267e14c99d2ade054fe286cc1e3c2061ae256f1d39849f277f44211dea78b31d"
     },
     {
+      "path": "data/alternative_extreme/alternative_extreme_1000.csv",
+      "bytes": 623767,
+      "sha256": "b64942213ee474bec2faea532fa7e77ad5db80b09513c28b85707ad82eb89a7d"
+    },
+    {
       "path": "data/anime/anime_songs.csv",
-      "bytes": 598827,
-      "sha256": "71972f6be5a6d40ed752e40cda2798dd98175e0262396e0a16a02a07a48fa4df"
+      "bytes": 611118,
+      "sha256": "4962846db724d8102f19b48716bd0ddf48474b5a91cce55f7d674c005e5424fc"
     },
     {
       "path": "data/bootstrap/megalist_bootstrap.csv",
       "bytes": 4203101,
       "sha256": "372acc641d00a348ecfec044118d6f5520589ac381f39658ee13066a1c571588"
+    },
+    {
+      "path": "data/children_childhood/children_childhood_100.csv",
+      "bytes": 56534,
+      "sha256": "e6a458b42780b485fb4027a8cc976bd0e08f4a6d2a7b4b85a22a4247000e376b"
     },
     {
       "path": "data/classical/classical_10000.csv",
@@ -418,8 +428,13 @@
     },
     {
       "path": "data/coverage_report.csv",
-      "bytes": 3338,
-      "sha256": "433ef739b95e1ad28e08000182c7f5d11bf84e8efd9e032e8ffb9305a82976c7"
+      "bytes": 6947,
+      "sha256": "e4d1b3f8ab0490a040c1e1f77c9bc9c7a575785b99a9e02443e85be98720bf7c"
+    },
+    {
+      "path": "data/electronic_subcultures/electronic_subcultures_1000.csv",
+      "bytes": 595104,
+      "sha256": "73ad529ed4d621f7decb5f7600dea2316f6df6242c8e69da41dce7a009bafbd7"
     },
     {
       "path": "data/emerging/emerging_10000.csv",
@@ -432,9 +447,24 @@
       "sha256": "cabd4d446d6f1d7504a0913a01d3ec7819f001f237beb97c46981997582beb37"
     },
     {
+      "path": "data/internet_native/internet_native_1000.csv",
+      "bytes": 574664,
+      "sha256": "46350320bb329d75b1fa644d096955e59226b0d03c6102b38b35624abd6cc308"
+    },
+    {
+      "path": "data/jazz_depth/jazz_depth_1000.csv",
+      "bytes": 636035,
+      "sha256": "ec654601371b371dc6e0dcd048364a010efa1c857b1b4ef2bb8724b0b42482f1"
+    },
+    {
+      "path": "data/kpop/kpop_youtube_over_100m.csv",
+      "bytes": 36689,
+      "sha256": "434ecf8ef68acc9e610535d5cd500a2e9a65ec0506e7e336c00161c364593200"
+    },
+    {
       "path": "data/megalist/megalist.csv",
-      "bytes": 65326623,
-      "sha256": "04333e5e8f264d50118aafb847f7e5fa4d0bfc8bffe23ef7013f2a19b2306c66"
+      "bytes": 68236717,
+      "sha256": "592c2314b65770084a48bc8cee1fce5959de25dcd09305a0a00818a6563a2dc4"
     },
     {
       "path": "data/raw/spotify_top10000_streamed_songs_2023.csv",
@@ -462,24 +492,39 @@
       "sha256": "1332192a9d9771da1e1e02cbcd6b3e33514f8e43b2f5e9766f965803b0b85a58"
     },
     {
+      "path": "data/special_required/special_required.csv",
+      "bytes": 1743,
+      "sha256": "d6701bcd56f93140a94b660cb4282e59c6a7b7854de3ce4516481a997cf5cd1c"
+    },
+    {
       "path": "data/target_report.json",
       "bytes": 2995,
       "sha256": "0be595ffc2d53acada348d73097869596f11db401b938ec7cfa254bdbba2f3c2"
     },
     {
-      "path": "data/vocaloid/vocaloid_spotify_10m.csv",
-      "bytes": 244871,
-      "sha256": "168e646d033e1e3781b64c98685d6a73b1135eb9c05204eafd7c356d3bfc7a95"
+      "path": "data/unserious/unserious_1000.csv",
+      "bytes": 554289,
+      "sha256": "23cd388dca670eed4c80174339eb1b62b4cb7136b33a465b0a0d3ac36929df72"
+    },
+    {
+      "path": "data/video_games/video_game_music_1000.csv",
+      "bytes": 351,
+      "sha256": "9e8ff1b919552a4debf4e585ec4452570e204e085f1f7527ea95453f7d822e93"
+    },
+    {
+      "path": "data/vocaloid/vocaloid_youtube_100m.csv",
+      "bytes": 29349,
+      "sha256": "4074e45865213e13a7266417d2b1f20139ea0eabd8ec3fb75a9112e7065e0710"
     },
     {
       "path": "data/vtuber_non_original/vtuber_non_original_10000.csv",
-      "bytes": 398010,
-      "sha256": "3b34c94558e2f7e050b449bcbf2b590448155f783c2292c80313c58506f1117b"
+      "bytes": 409783,
+      "sha256": "9df69045a986d00fa99e6ff34da6f64c6185b7e350333cfce62763bd602d7fa9"
     },
     {
       "path": "data/vtuber_original/vtuber_original_10000.csv",
-      "bytes": 430149,
-      "sha256": "007115aa548bd12f9ca7250722cef6e95ac297cb55990e6105170ce7a55ab8ac"
+      "bytes": 441808,
+      "sha256": "b858b5d45427093c873e3bb355e7c4f66bf0c117875778d69b39647122be8116"
     },
     {
       "path": "data/worldwide/worldwide_1960s.csv",
