@@ -328,7 +328,10 @@ def _catalog_song(
 
 
 def _dedupe_rank(rows: list[SongRow], target: int | None = None) -> list[SongRow]:
-    seen: set[tuple[str, str]] = set()
+    seen_text: set[tuple[str, str]] = set()
+    seen_spotify: set[str] = set()
+    seen_mbid: set[str] = set()
+    seen_isrc: set[str] = set()
     out: list[SongRow] = []
     ordered = sorted(
         rows,
@@ -340,10 +343,25 @@ def _dedupe_rank(rows: list[SongRow], target: int | None = None) -> list[SongRow
         reverse=True,
     )
     for row in ordered:
-        key = (norm(row.title), norm(row.main_artist))
-        if not all(key) or key in seen:
+        text_key = (norm(row.title), norm(row.main_artist))
+        spotify = str(row.spotify_track_id or "").strip()
+        mbid = str(row.musicbrainz_recording_mbid or "").strip().casefold()
+        isrc = str(row.isrc or "").strip().casefold()
+        if (
+            not all(text_key)
+            or text_key in seen_text
+            or bool(spotify and spotify in seen_spotify)
+            or bool(mbid and mbid in seen_mbid)
+            or bool(isrc and isrc in seen_isrc)
+        ):
             continue
-        seen.add(key)
+        seen_text.add(text_key)
+        if spotify:
+            seen_spotify.add(spotify)
+        if mbid:
+            seen_mbid.add(mbid)
+        if isrc:
+            seen_isrc.add(isrc)
         out.append(row)
         if target is not None and len(out) >= target:
             break

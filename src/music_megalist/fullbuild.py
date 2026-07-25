@@ -34,7 +34,7 @@ import pandas as pd
 from rapidfuzz import fuzz
 
 from .dedupe import dedupe, norm
-from .io import append_row, write_rows
+from .io import append_row, read_rows, write_rows
 from .models import SongRow
 from .culturelists import (
     build_alternative_extreme,
@@ -103,6 +103,27 @@ FIXED_TARGETS = {
     "children_childhood": 100,
     "unserious": 1_000,
     "special_required": 4,
+}
+
+MATERIALIZED_OUTPUTS = {
+    "anime": DATA / "anime" / "anime_songs.csv",
+    "vocaloid": DATA / "vocaloid" / "vocaloid_youtube_100m.csv",
+    "worldwide": DATA / "worldwide" / "worldwide_51000.csv",
+    "classical": DATA / "classical" / "classical_10000.csv",
+    "vtuber_original": DATA / "vtuber_original" / "vtuber_original_10000.csv",
+    "emerging": DATA / "emerging" / "emerging_10000.csv",
+    "genres": DATA / "genres" / "genres_10000.csv",
+    "screen_soundtracks": DATA / "screen_soundtracks" / "screen_soundtracks_10000.csv",
+    "vtuber_non_original": DATA / "vtuber_non_original" / "vtuber_non_original_10000.csv",
+    "video_game_music": DATA / "video_games" / "video_game_music_1000.csv",
+    "kpop": DATA / "kpop" / "kpop_youtube_over_100m.csv",
+    "internet_native": DATA / "internet_native" / "internet_native_1000.csv",
+    "electronic_subcultures": DATA / "electronic_subcultures" / "electronic_subcultures_1000.csv",
+    "alternative_extreme": DATA / "alternative_extreme" / "alternative_extreme_1000.csv",
+    "jazz_depth": DATA / "jazz_depth" / "jazz_depth_1000.csv",
+    "children_childhood": DATA / "children_childhood" / "children_childhood_100.csv",
+    "unserious": DATA / "unserious" / "unserious_1000.csv",
+    "special_required": DATA / "special_required" / "special_required.csv",
 }
 
 WORLDWIDE_BUCKETS = [
@@ -3008,9 +3029,63 @@ def write_status_json(status: BuildStatus) -> None:
     }
     (ROOT/"STATUS.json").write_text(json.dumps(payload,ensure_ascii=False,indent=2)+"\n",encoding="utf-8")
 
-def full_build(*,skip_zenodo:bool=False,only:list[str]|None=None)->BuildStatus:
+
+def _previous_dataset_status() -> dict[str, dict[str, Any]]:
+    path = ROOT / "STATUS.json"
+    if not path.exists():
+        return {}
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        datasets = payload.get("datasets") or {}
+        return datasets if isinstance(datasets, dict) else {}
+    except Exception:
+        return {}
+
+
+def _reuse_complete_output(
+    name: str,
+    status: BuildStatus,
+    previous: dict[str, dict[str, Any]],
+) -> list[SongRow] | None:
+    path = MATERIALIZED_OUTPUTS.get(name)
+    if path is None or not path.exists():
+        return None
+    try:
+        # Validate the individual CSV before trusting it. This catches the duplicate Spotify ID
+        # that caused run 30067726035 to fail after generation had otherwise completed.
+        from .validation import _generic_csv_errors
+
+        errors = _generic_csv_errors(path)
+        if errors:
+            status.warnings.append(f"{name} existing output not reused: {errors[0]}")
+            return None
+        rows = read_rows(path)
+    except Exception as exc:
+        status.warnings.append(f"{name} existing output could not be checked: {exc}")
+        return None
+
+    old = previous.get(name) or {}
+    if name in FIXED_TARGETS:
+        complete = len(rows) == FIXED_TARGETS[name]
+    else:
+        # Conditional corpora cannot be declared complete from row count alone.
+        complete = bool(old.get("complete"))
+    if not complete:
+        return None
+
+    st = status.datasets[name]
+    st.rows = len(rows)
+    st.complete = True
+    st.metric_coverage = dict(_metric_counts(rows))
+    st.notes = list(old.get("notes") or st.notes)
+    st.notes.append(f"Reused validated materialized output: {path.relative_to(ROOT)}")
+    status.save()
+    return rows
+
+
+def full_build(*,skip_zenodo:bool=False,only:list[str]|None=None,reuse_complete:bool=False)->BuildStatus:
     status=BuildStatus(started_at=_now())
-    _progress(f"FULL BUILD START only={only or 'ALL'} skip_zenodo={skip_zenodo}")
+    _progress(f"FULL BUILD START only={only or 'ALL'} skip_zenodo={skip_zenodo} reuse_complete={reuse_complete}")
     for name,target in FIXED_TARGETS.items():status.datasets[name]=DatasetStatus(target=target)
     status.datasets["vocaloid"]=DatasetStatus(target="all VocaDB Original songs with an official Original YouTube PV >=100,000,000 views; cap 10,000")
     status.datasets["kpop"]=DatasetStatus(target="all source-tagged K-pop songs with observed YouTube views strictly above 100,000,000")
@@ -3034,10 +3109,17 @@ def full_build(*,skip_zenodo:bool=False,only:list[str]|None=None)->BuildStatus:
     wanted=set(only or ["worldwide","genres","classical","emerging","screen_soundtracks","anime","vocaloid","vtuber_original","vtuber_non_original","video_game_music","kpop","internet_native","electronic_subcultures","alternative_extreme","jazz_depth","children_childhood","unserious","special_required","countries"])
     _progress(f"Selected builders={sorted(wanted)}")
     built:dict[str,list[SongRow]]={}
+    previous = _previous_dataset_status()
     def run(name:str, fn):
         if name not in wanted:
             _progress(f"SKIP builder={name}")
             return
+        if reuse_complete:
+            existing = _reuse_complete_output(name, status, previous)
+            if existing is not None:
+                built[name] = existing
+                _progress(f"REUSE builder={name} rows={len(existing)}")
+                return
         _progress(f"START builder={name}")
         started=time.monotonic()
         try:
@@ -3083,23 +3165,7 @@ def full_build(*,skip_zenodo:bool=False,only:list[str]|None=None)->BuildStatus:
             status.save()
 
     # Include existing materialized categories not rebuilt in partial runs.
-    paths={
-      "anime":DATA/"anime"/"anime_songs.csv","vocaloid":DATA/"vocaloid"/"vocaloid_youtube_100m.csv",
-      "worldwide":DATA/"worldwide"/"worldwide_51000.csv","classical":DATA/"classical"/"classical_10000.csv",
-      "vtuber_original":DATA/"vtuber_original"/"vtuber_original_10000.csv","emerging":DATA/"emerging"/"emerging_10000.csv",
-      "genres":DATA/"genres"/"genres_10000.csv","screen_soundtracks":DATA/"screen_soundtracks"/"screen_soundtracks_10000.csv",
-      "vtuber_non_original":DATA/"vtuber_non_original"/"vtuber_non_original_10000.csv",
-      "video_game_music":DATA/"video_games"/"video_game_music_1000.csv",
-      "kpop":DATA/"kpop"/"kpop_youtube_over_100m.csv",
-      "internet_native":DATA/"internet_native"/"internet_native_1000.csv",
-      "electronic_subcultures":DATA/"electronic_subcultures"/"electronic_subcultures_1000.csv",
-      "alternative_extreme":DATA/"alternative_extreme"/"alternative_extreme_1000.csv",
-      "jazz_depth":DATA/"jazz_depth"/"jazz_depth_1000.csv",
-      "children_childhood":DATA/"children_childhood"/"children_childhood_100.csv",
-      "unserious":DATA/"unserious"/"unserious_1000.csv",
-      "special_required":DATA/"special_required"/"special_required.csv",
-    }
-    from .io import read_rows
+    paths=MATERIALIZED_OUTPUTS
     for k,p in paths.items():
         if k not in built and p.exists():
             try:
@@ -3149,8 +3215,9 @@ def main(argv:list[str]|None=None)->int:
     ap=argparse.ArgumentParser(description="Build all BeatHit datasets from public source snapshots/APIs")
     ap.add_argument("--skip-zenodo",action="store_true",help="Skip the 931MB 0.9M-track source and use smaller fallbacks")
     ap.add_argument("--only",nargs="*",choices=list(FIXED_TARGETS)+["vocaloid","kpop","countries"],help="Build only selected categories")
+    ap.add_argument("--reuse-complete",action="store_true",help="Reuse existing complete, individually validated outputs instead of rebuilding them")
     a=ap.parse_args(argv)
-    st=full_build(skip_zenodo=a.skip_zenodo,only=a.only)
+    st=full_build(skip_zenodo=a.skip_zenodo,only=a.only,reuse_complete=a.reuse_complete)
     print(REPORT)
     incomplete=[k for k,v in st.datasets.items() if k!="megalist" and not v.complete]
     if incomplete:

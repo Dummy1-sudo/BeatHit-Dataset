@@ -8,6 +8,11 @@ on:
         required: false
         default: false
         type: boolean
+      restore_run_id:
+        description: "Previous workflow run whose generated-output artifact should be restored"
+        required: false
+        default: "30067726035"
+        type: string
   push:
     branches: [main]
     paths:
@@ -55,7 +60,17 @@ jobs:
           restore-keys: |
             beathit-sources-v5-${{ runner.os }}-
 
+      - name: Restore generated outputs from previous run
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.restore_run_id != '' }}
+        uses: actions/download-artifact@v4
+        with:
+          name: beathit-full-build-output
+          path: data
+          github-token: ${{ github.token }}
+          run-id: ${{ inputs.restore_run_id }}
+
       - name: Build all requested lists
+        id: generate
         env:
           HOLODEX_API_KEY: ${{ secrets.HOLODEX_API_KEY }}
           YOUTUBE_API_KEY: ${{ secrets.YOUTUBE_API_KEY }}
@@ -67,16 +82,7 @@ jobs:
           BEATHIT_VOCADB_SCAN_LIMIT: ${{ vars.BEATHIT_VOCADB_SCAN_LIMIT || '100000' }}
           BEATHIT_COUNTRY_WORKERS: ${{ vars.BEATHIT_COUNTRY_WORKERS || '4' }}
         run: |
-          python scripts/build_full_dataset.py --only anime vocaloid vtuber_original vtuber_non_original video_game_music kpop internet_native electronic_subcultures alternative_extreme jazz_depth children_childhood unserious special_required
-          python -m music_megalist validate
-          python scripts/verify_targets.py > data/target_report.json
-          # A strict completion check is recorded but does not fabricate/pad a finite corpus.
-          if python -m music_megalist validate --complete > data/complete_validation.txt 2>&1; then
-            echo "Strict fixed-target validation passed" >> data/complete_validation.txt
-          else
-            echo "Strict fixed-target validation did not pass; see source-backed shortfalls above." >> data/complete_validation.txt
-          fi
-          pytest -q
+          python scripts/build_full_dataset.py --reuse-complete --only anime vocaloid vtuber_original vtuber_non_original video_game_music kpop internet_native electronic_subcultures alternative_extreme jazz_depth children_childhood unserious special_required
 
       - name: Update checksums
         run: python scripts/update_manifest.py
@@ -86,12 +92,42 @@ jobs:
           git config user.name "BeatHit Dataset Builder"
           git config user.email "actions@users.noreply.github.com"
           # Stage only known generated outputs. Never stage the whole repository or raw/source inputs.
-          git add -- STATUS.json data/BUILD_REPORT.json data/coverage_report.csv data/target_report.json data/complete_validation.txt data/MANIFEST.json
+          git add -- STATUS.json data/BUILD_REPORT.json data/coverage_report.csv data/MANIFEST.json
           git add -- data/anime data/vocaloid data/vtuber_original data/vtuber_non_original data/video_games data/kpop data/internet_native data/electronic_subcultures data/alternative_extreme data/jazz_depth data/children_childhood data/unserious data/special_required data/megalist
           if git diff --cached --quiet; then
             echo "No generated-data changes"
           else
             git commit -m "Build source-backed BeatHit datasets [skip full-build]"
+            git push
+          fi
+
+      - name: Validate generated datasets
+        id: validation
+        continue-on-error: true
+        run: |
+          set +e
+          status=0
+          python -m music_megalist validate || status=$?
+          python scripts/verify_targets.py > data/target_report.json || status=$?
+          # A strict completion check is recorded but does not fabricate/pad a finite corpus.
+          if python -m music_megalist validate --complete > data/complete_validation.txt 2>&1; then
+            echo "Strict fixed-target validation passed" >> data/complete_validation.txt
+          else
+            echo "Strict fixed-target validation did not pass; see source-backed shortfalls above." >> data/complete_validation.txt
+          fi
+          pytest -q || status=$?
+          exit "$status"
+
+      - name: Commit validation reports
+        if: always()
+        run: |
+          git config user.name "BeatHit Dataset Builder"
+          git config user.email "actions@users.noreply.github.com"
+          git add -- data/target_report.json data/complete_validation.txt
+          if git diff --cached --quiet; then
+            echo "No validation-report changes"
+          else
+            git commit -m "Update BeatHit validation reports [skip full-build]"
             git push
           fi
 
@@ -124,3 +160,7 @@ jobs:
             data/children_childhood/*.csv
             data/unserious/*.csv
             data/special_required/*.csv
+
+      - name: Propagate validation failure
+        if: ${{ steps.validation.outcome == 'failure' }}
+        run: exit 1
