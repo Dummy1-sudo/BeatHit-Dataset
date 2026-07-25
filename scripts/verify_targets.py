@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import csv
 import json
+import re
 import sys
 from collections import Counter
 from pathlib import Path
@@ -127,11 +128,22 @@ def main() -> None:
             value = 0
             view_count = 0
         e = extra(r)
+        try:
+            official_total = int(e.get("official_youtube_total_views") or 0)
+            resolved_pvs = int(e.get("official_youtube_resolved_pv_count") or 0)
+        except Exception:
+            official_total = 0
+            resolved_pvs = 0
+        voice_synths = e.get("voice_synth_vocalists")
         valid = (
             r.get("metric_name") == "youtube_views"
             and r.get("metric_unit") == "views"
             and value >= 100_000_000
             and view_count == int(value)
+            and official_total == int(value)
+            and resolved_pvs >= 1
+            and isinstance(voice_synths, list)
+            and bool(voice_synths)
             and str(e.get("vocadb_song_type") or "").casefold() == "original"
             and str(e.get("youtube_pv_type") or "").casefold() == "original"
             and str(e.get("youtube_pv_service") or "").casefold() == "youtube"
@@ -140,7 +152,7 @@ def main() -> None:
         if not valid:
             invalid_vocaloid.append(i)
     report["semantic_checks"]["vocaloid_threshold"] = {
-        "target": "VocaDB Original voice-synth songs with one official Original YouTube PV >=100,000,000 views; cap 10,000",
+        "target": "VocaDB Original voice-synth songs whose distinct official Original YouTube PVs total >=100,000,000 views; cap 10,000",
         "rows": len(vocaloid),
         "invalid_rows": invalid_vocaloid[:100],
         "threshold_valid": not invalid_vocaloid and len(vocaloid) <= 10_000,
@@ -149,6 +161,7 @@ def main() -> None:
 
     kpop = read_csv("kpop/kpop_youtube_over_100m.csv")
     invalid_kpop = []
+    kpop_keys = []
     for i, r in enumerate(kpop, 1):
         try:
             value = float(r.get("metric_value") or 0)
@@ -156,19 +169,48 @@ def main() -> None:
         except Exception:
             value = 0
             view_count = 0
+        e = extra(r)
+        verified_artist = str(e.get("verified_kpop_artist") or "").strip()
         if (
             r.get("metric_name") != "youtube_views"
             or r.get("metric_unit") != "views"
             or value <= 100_000_000
             or view_count != int(value)
+            or not bool(e.get("kpop_artist_verified"))
+            or not verified_artist
         ):
             invalid_kpop.append(i)
+        kpop_keys.append((norm(r.get("title") or ""), norm(verified_artist or r.get("main_artist") or "")))
+    duplicate_kpop = len(kpop_keys) - len(set(kpop_keys))
     report["semantic_checks"]["kpop_youtube_threshold"] = {
-        "target": "all materialized source-tagged K-pop songs strictly above 100,000,000 observed YouTube views",
+        "target": "verified K-pop artists with observed YouTube views strictly above 100,000,000",
         "rows": len(kpop),
         "invalid_rows": invalid_kpop[:100],
-        "threshold_valid": not invalid_kpop,
-        "corpus_completeness": "Read STATUS.json datasets.kpop.complete; current source catalog is not claimed exhaustive.",
+        "duplicate_title_artist_keys": duplicate_kpop,
+        "threshold_valid": not invalid_kpop and duplicate_kpop == 0,
+        "corpus_completeness": "Read STATUS.json datasets.kpop.complete; bounded official-YouTube search is not claimed exhaustive.",
+    }
+
+    video_games = read_csv("video_games/video_game_music_1000.csv")
+    invalid_video_games = []
+    reject_game_text = re.compile(
+        r"\b(?:motion picture|film soundtrack|movie soundtrack|television soundtrack|"
+        r"music from the video game|piano collections?|tribute|music box|cover album|remix album)\b",
+        re.I,
+    )
+    for i, r in enumerate(video_games, 1):
+        e = extra(r)
+        evidence = f"{r.get('album') or ''} | {r.get('screen_work') or ''}"
+        if (
+            not str(r.get("screen_work") or "").strip()
+            or str(e.get("culture_category") or "") != "video_game_music"
+            or reject_game_text.search(evidence)
+        ):
+            invalid_video_games.append(i)
+    report["semantic_checks"]["video_game_music_classification"] = {
+        "rows": len(video_games),
+        "invalid_rows": invalid_video_games[:100],
+        "complete": len(video_games) == 1_000 and not invalid_video_games,
     }
 
     special = read_csv("special_required/special_required.csv")
@@ -230,6 +272,9 @@ def main() -> None:
         and len(genres) == 10_000 and len(selected_genres) >= 50
         and not invalid_vocaloid
         and not invalid_kpop
+        and duplicate_kpop == 0
+        and len(video_games) == 1_000
+        and not invalid_video_games
         and required_special.issubset(observed_special)
         and not invalid_languages
         and bool(country_check.get("complete"))

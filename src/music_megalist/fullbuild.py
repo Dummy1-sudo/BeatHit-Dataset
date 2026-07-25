@@ -2480,12 +2480,13 @@ def _vocadb_song_credit(item:dict)->tuple[str,list[str],dict]:
     vocalists=[]
     all_artists=[]
 
+    # Keep only named singing-synthesis engines. VocaDB's broad
+    # OtherVoiceSynthesizer and VirtualSinger buckets can contain ordinary human music.
     synth_types={
         "vocaloid","utau","cevio","synthesizerv","neutrino","voisona",
-        "newtype","voiceroid","othervoicesynthesizer","acevirtualsinger",
-        "sharpkey","deepvocal","voicevox","nnsvs","vocalsharp","xstudio",
-        "muta","aisinger","virtualsinger","voiceroidplus","cevioai",
-        "synthesizervai",
+        "newtype","voiceroid","acevirtualsinger","sharpkey","deepvocal",
+        "voicevox","nnsvs","vocalsharp","xstudio","muta","aisinger",
+        "voiceroidplus","cevioai","synthesizervai",
     }
     producer_roles={"composer","arranger","voicemanipulator"}
     vocalist_roles={"vocalist","chorus","vocaldataprovider"}
@@ -2614,7 +2615,7 @@ def _youtube_views_official(ids:list[str],status:BuildStatus)->tuple[dict[str,in
 
 
 def build_vocaloid(catalog:pd.DataFrame,status:BuildStatus)->list[SongRow]:
-    # Build original voice-synth songs whose official YouTube PV has >=100M views.
+    # Build original voice-synth songs whose combined official Original YouTube PVs have >=100M views.
     # catalog is intentionally unused so Spotify/catalog data cannot affect the list.
     del catalog
     threshold=100_000_000
@@ -2653,15 +2654,17 @@ def build_vocaloid(catalog:pd.DataFrame,status:BuildStatus)->list[SongRow]:
         if not resolved:
             continue
 
-        # One individual official upload must qualify; counts are never summed across PVs.
+        # A song qualifies by the sum of distinct authorized Original PV uploads.
+        # Covers, remixes, reprints and other PV types never enter this sum.
+        total_views=sum(views for views,_ in resolved)
         best_views,best_pv=max(resolved,key=lambda pair:pair[0])
-        if best_views<threshold:
+        if total_views<threshold:
             continue
 
         names=_vocadb_names(item)
         title=names[0] if names else str(item.get("id") or "Unknown VocaDB song")
         main_artist,featured_artists,credit_extra=_vocadb_song_credit(item)
-        # VocaDB contains some human-only originals too; require an actual credited voice synth.
+        # VocaDB contains human-only and generic virtual-singer entries; require a trusted engine.
         if not credit_extra.get("voice_synth_vocalists"):
             continue
         publish_date=str(item.get("publishDate") or best_pv.get("publish_date") or "")
@@ -2676,16 +2679,17 @@ def build_vocaloid(catalog:pd.DataFrame,status:BuildStatus)->list[SongRow]:
             release_year=int(year_match.group(0)) if year_match else None,
             languages=["und"],
             metric_name="youtube_views",
-            metric_value=float(best_views),
+            metric_value=float(total_views),
             metric_unit="views",
-            view_count=int(best_views),
+            view_count=int(total_views),
             source_url=f"https://www.youtube.com/watch?v={best_pv['video_id']}",
             retrieved_at=TODAY,
             source_notes=(
-                "VocaDB SongType=Original and VocaDB PVType=Original identify an original song "
-                "with an authorized YouTube upload; live viewCount is from the official YouTube "
-                "Data API. Remixes, mashups, covers, remasters, MusicPV entries, reprints, other "
-                "PVs, disabled PVs, and Spotify evidence are excluded."
+                "VocaDB SongType=Original and VocaDB PVType=Original identify the original "
+                "voice-synth song and its authorized uploads. The metric sums live YouTube "
+                "viewCount values across distinct enabled Original PV video IDs. Remixes, mashups, "
+                "covers, remasters, MusicPV entries, reprints, other PVs, disabled PVs, generic "
+                "OtherVoiceSynthesizer/VirtualSinger credits, and Spotify evidence are excluded."
             ),
             extra={
                 "vocadb_id":item.get("id"),
@@ -2698,16 +2702,20 @@ def build_vocaloid(catalog:pd.DataFrame,status:BuildStatus)->list[SongRow]:
                 "youtube_pv_service":"Youtube",
                 "youtube_pv_author":best_pv.get("author"),
                 "official_youtube_pv_count":len(pvs),
+                "official_youtube_resolved_pv_count":len(resolved),
+                "official_youtube_total_views":int(total_views),
+                "highest_individual_official_pv_views":int(best_views),
                 "qualification_threshold_views":threshold,
-                "selection":"highest-view individual official original YouTube PV",
+                "selection":"sum of distinct official Original YouTube PV view counts",
                 **credit_extra,
             },
         )
         rows.append(row)
         append_row(row,partial_path)
         _progress(
-            f"Vocaloid QUALIFY provisional={len(rows)} views={best_views} "
-            f"title={title!r} artist={main_artist!r} video={best_pv['video_id']}"
+            f"Vocaloid QUALIFY provisional={len(rows)} total_views={total_views} "
+            f"best_upload_views={best_views} title={title!r} artist={main_artist!r} "
+            f"video={best_pv['video_id']}"
         )
 
     rows=dedupe(rows)
@@ -2724,13 +2732,14 @@ def build_vocaloid(catalog:pd.DataFrame,status:BuildStatus)->list[SongRow]:
 
     complete=bool(rows and vocadb_exhaustive and unresolved_video_ids==0 and os.getenv("YOUTUBE_API_KEY","").strip())
     status.datasets["vocaloid"]=DatasetStatus(
-        target="all VocaDB original songs with an official original YouTube PV >=100,000,000 views; cap 10,000",
+        target="all VocaDB Original voice-synth songs whose distinct official Original YouTube PVs total >=100,000,000 views; cap 10,000",
         rows=len(rows),
         complete=complete,
         metric_coverage=dict(_metric_counts(rows)),
         notes=[
-            "VocaDB-only classification and metadata; YouTube Data API view counts only.",
-            "SongType must equal Original. Qualifying PV must be service=Youtube, pvType=Original, enabled, and individually >=100,000,000 views.",
+            "VocaDB-only classification and metadata; official YouTube Data API view counts only.",
+            "SongType must equal Original. Only enabled service=Youtube, pvType=Original uploads are summed per song.",
+            "Generic OtherVoiceSynthesizer and VirtualSinger artist types do not establish voice-synth eligibility.",
             "No Spotify matching, title collision matching, remix, mashup, cover, remaster, MusicPV entry, reprint, or third-party view-count fallback.",
             f"vocadb_exhaustive={vocadb_exhaustive}; unresolved_youtube_video_ids={unresolved_video_ids}",
         ],

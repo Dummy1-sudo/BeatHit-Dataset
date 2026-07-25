@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import ast
 import html
 import json
 import math
@@ -215,6 +216,46 @@ def _parse_genres(value: Any) -> list[str]:
     except Exception:
         pass
     return [x.strip().casefold() for x in re.split(r"[|;,]", text) if x.strip()]
+
+
+
+def _parse_clean_genres(value: Any) -> list[str]:
+    """Flatten malformed nested-list genre fragments for strict category classifiers."""
+    out: list[str] = []
+    seen: set[str] = set()
+
+    def add(raw: Any) -> None:
+        if raw is None:
+            return
+        if isinstance(raw, (list, tuple, set)):
+            for item in raw:
+                add(item)
+            return
+
+        text = str(raw).strip()
+        if not text or text.casefold() in {"nan", "none", "null", "[]", "<na>"}:
+            return
+
+        for parser in (json.loads, ast.literal_eval):
+            try:
+                parsed = parser(text)
+            except Exception:
+                continue
+            if isinstance(parsed, (list, tuple, set)):
+                add(parsed)
+                return
+            if isinstance(parsed, str) and parsed != text:
+                add(parsed)
+                return
+
+        for part in re.split(r"[|;,]", text):
+            cleaned = part.strip().strip("[](){}").strip().strip("'\"").strip().casefold()
+            if cleaned and cleaned not in {"nan", "none", "null", "<na>"} and cleaned not in seen:
+                seen.add(cleaned)
+                out.append(cleaned)
+
+    add(value)
+    return out
 
 
 def _normalize_languages(value: Any) -> list[str]:
@@ -641,6 +682,12 @@ KPOP_SEARCH_QUERIES = [
     "K-pop debut official MV",
     "K-pop viral official MV",
 ]
+KPOP_STRONG_GENRES = {
+    "k-pop",
+    "korean pop",
+    "k-pop boy group",
+    "k-pop girl group",
+}
 KPOP_REJECT_TITLE = re.compile(
     r"\b(?:reaction|dance practice|dance cover|cover|lyrics?|karaoke|sped up|slowed|"
     r"nightcore|remix|teaser|trailer|shorts?|fanmade|fancam|instrumental)\b",
@@ -656,6 +703,124 @@ KPOP_LABEL_CHANNEL = re.compile(
     r"CUBE ENTERTAINMENT|RBW|PLEDIS|SOURCE MUSIC|ADOR|BELIFT|BIGHIT MUSIC)",
     re.I,
 )
+
+
+def _kpop_primary_artist_key(value: Any) -> str:
+    text = html.unescape(str(value or "")).strip()
+    text = re.sub(r"^official\s*", "", text, flags=re.I)
+    text = re.sub(r"\s*(?:official|vevo|tv)$", "", text, flags=re.I)
+    text = re.sub(r"\(\s*[가-힣\s]+\s*\)", "", text)
+    text = re.sub(r"\s+", " ", text).strip()
+    return norm(text)
+
+
+def _kpop_artist_aliases(value: Any) -> set[str]:
+    text = html.unescape(str(value or "")).strip()
+    if not text:
+        return set()
+    variants = {
+        norm(text),
+        _kpop_primary_artist_key(text),
+        norm(re.sub(r"[가-힣]+", " ", text)),
+        norm(re.sub(r"\([^)]*\)", " ", text)),
+    }
+    return {variant for variant in variants if variant}
+
+
+def _build_trusted_kpop_artists(catalog: pd.DataFrame) -> tuple[dict[str, str], list[str]]:
+    tagged: list[tuple[pd.Series, str, str]] = []
+    for _, row in catalog.iterrows():
+        genres = set(_parse_clean_genres(row.get("genres")))
+        if not genres.intersection(KPOP_STRONG_GENRES):
+            continue
+        artist = str(row.get("main_artist") or row.get("artists") or "").strip()
+        primary = _kpop_primary_artist_key(artist)
+        if not primary:
+            continue
+        tagged.append((row, artist, primary))
+
+    trusted_primary: set[str] = set()
+    canonical: dict[str, str] = {}
+    best_score: dict[str, float] = {}
+    for row, artist, primary in tagged:
+        isrc = str(row.get("isrc") or "").strip().upper()
+        country_values = {
+            str(row.get(field) or "").strip().casefold()
+            for field in ("country", "artist_country", "release_country", "market")
+        }
+        korean_metadata = bool(
+            isrc.startswith("KR")
+            or country_values.intersection({"kr", "kor", "south korea", "republic of korea"})
+            or re.search(r"[가-힣]", artist)
+        )
+        if not korean_metadata:
+            continue
+        trusted_primary.add(primary)
+        score = _catalog_score(row)
+        if primary not in canonical or score > best_score.get(primary, -1.0):
+            canonical[primary] = artist
+            best_score[primary] = score
+
+    aliases: dict[str, str] = {}
+    for row, artist, primary in tagged:
+        if primary not in trusted_primary:
+            continue
+        name = canonical[primary]
+        for alias in _kpop_artist_aliases(artist) | _kpop_artist_aliases(name):
+            aliases.setdefault(alias, name)
+
+    ranked_primary = sorted(trusted_primary, key=lambda value: best_score.get(value, 0.0), reverse=True)
+    return aliases, [canonical[value] for value in ranked_primary]
+
+
+def _match_trusted_kpop_artist(value: Any, trusted_aliases: dict[str, str]) -> str | None:
+    for alias in _kpop_artist_aliases(value):
+        if alias in trusted_aliases:
+            return trusted_aliases[alias]
+    return None
+
+
+def _kpop_title_key(value: Any) -> str:
+    text = html.unescape(str(value or "")).strip(" \t'\"“”‘’")
+    text = re.sub(r"\s*\((?:feat\.?|ft\.?)\s+[^)]*\)", "", text, flags=re.I)
+    parenthetical = [
+        part.strip()
+        for part in re.findall(r"\(([^)]{2,})\)", text)
+        if re.search(r"[A-Za-z]", part)
+        and not re.search(r"\b(?:official|version|ver\.?|remix|live|performance)\b", part, re.I)
+    ]
+    outside = re.sub(r"\([^)]*\)", " ", text)
+    if re.search(r"[가-힣]", outside) and parenthetical:
+        text = parenthetical[0]
+    else:
+        text = outside
+    text = re.sub(r"\b(?:official\s*)?(?:m/?v|music video)\b.*$", "", text, flags=re.I)
+    return norm(text)
+
+
+def _dedupe_kpop_rows(rows: list[SongRow], target: int = 10_000) -> list[SongRow]:
+    ordered = sorted(
+        rows,
+        key=lambda row: int(row.view_count or row.metric_value or 0),
+        reverse=True,
+    )
+    out: list[SongRow] = []
+    seen_songs: set[tuple[str, str]] = set()
+    seen_videos: set[str] = set()
+    for row in ordered:
+        song_key = (_kpop_title_key(row.title), _kpop_primary_artist_key(row.main_artist))
+        video_id = str((row.extra or {}).get("youtube_video_id") or "").strip()
+        if not all(song_key) or song_key in seen_songs or (video_id and video_id in seen_videos):
+            continue
+        seen_songs.add(song_key)
+        if video_id:
+            seen_videos.add(video_id)
+        out.append(row)
+        if len(out) >= target:
+            break
+    for rank, row in enumerate(out, 1):
+        row.rank = rank
+    return out
 
 
 def _parse_kpop_video_identity(raw_title: str, channel_title: str) -> tuple[str, str]:
@@ -675,25 +840,39 @@ def _parse_kpop_video_identity(raw_title: str, channel_title: str) -> tuple[str,
         artist, song = core.split(" – ", 1)
     elif " — " in core:
         artist, song = core.split(" — ", 1)
+    elif " _ " in core:
+        artist, song = core.split(" _ ", 1)
     else:
-        quoted = re.match(r"^(.+?)\s+['\"“](.+?)['\"”]\s*$", core)
+        quoted = re.match(r"^(.+?)\s+['\"“‘](.+?)['\"”’]\s*$", core)
         if quoted:
             artist, song = quoted.group(1), quoted.group(2)
         else:
             artist = re.sub(r"\s+(?:official|오피셜)$", "", channel_title, flags=re.I).strip()
             song = core or title
-    artist = re.sub(r"^\[(?:mv|m/v)\]\s*", "", artist, flags=re.I).strip(" \t-–—|:'\"")
-    song = song.strip(" \t-–—|:'\"")
+    artist = re.sub(r"^\[(?:mv|m/v)\]\s*", "", artist, flags=re.I).strip(" \t-–—|:'\"“”‘’")
+    song = song.strip(" \t-–—|:'\"“”‘’")
     return song or title, artist or channel_title or "Unknown K-pop artist"
 
 
-def _youtube_kpop_rows(status: Any, threshold: int) -> list[SongRow]:
+def _youtube_kpop_rows(
+    status: Any,
+    threshold: int,
+    trusted_aliases: dict[str, str],
+    trusted_artists: list[str],
+) -> list[SongRow]:
     key = os.getenv("YOUTUBE_API_KEY", "").strip()
     if not key:
         status.warnings.append("K-pop YouTube discovery skipped: missing YOUTUBE_API_KEY")
         return []
 
     pages = max(1, min(_safe_int(os.getenv("BEATHIT_KPOP_SEARCH_PAGES")) or 4, 8))
+    artist_search_limit = max(
+        0,
+        min(_safe_int(os.getenv("BEATHIT_KPOP_ARTIST_SEARCHES")) or 40, 60),
+    )
+    search_plan = [(query, pages) for query in KPOP_SEARCH_QUERIES]
+    search_plan.extend((f'"{artist}" official MV', 1) for artist in trusted_artists[:artist_search_limit])
+
     discovered: dict[str, dict[str, Any]] = {}
     search_calls = 0
     with httpx.Client(
@@ -701,9 +880,9 @@ def _youtube_kpop_rows(status: Any, threshold: int) -> list[SongRow]:
         follow_redirects=True,
         headers={"User-Agent": "BeatHit-Dataset/1.0"},
     ) as client:
-        for query in KPOP_SEARCH_QUERIES:
+        for query, query_pages in search_plan:
             page_token: str | None = None
-            for page in range(pages):
+            for page in range(query_pages):
                 params = {
                     "part": "snippet",
                     "q": query,
@@ -765,23 +944,24 @@ def _youtube_kpop_rows(status: Any, threshold: int) -> list[SongRow]:
                     continue
                 raw_title = html.unescape(str(snippet.get("title") or "")).strip()
                 channel_title = html.unescape(str(snippet.get("channelTitle") or "")).strip()
-                description = html.unescape(str(snippet.get("description") or ""))
-                tags = " ".join(str(value) for value in (snippet.get("tags") or []))
-                evidence = f"{raw_title} {channel_title} {description} {tags}"
                 if KPOP_REJECT_TITLE.search(raw_title):
                     continue
-                official = bool(
-                    KPOP_OFFICIAL_MARKER.search(raw_title)
-                    or KPOP_LABEL_CHANNEL.search(channel_title)
-                )
-                kpop_evidence = bool(
-                    re.search(r"\b(?:k-?pop|korean pop)\b|[가-힣]", evidence, re.I)
-                    or KPOP_LABEL_CHANNEL.search(channel_title)
-                )
-                if not official or not kpop_evidence:
+
+                title, parsed_artist = _parse_kpop_video_identity(raw_title, channel_title)
+                artist = _match_trusted_kpop_artist(parsed_artist, trusted_aliases)
+                if artist is None:
                     continue
 
-                title, artist = _parse_kpop_video_identity(raw_title, channel_title)
+                channel_matches_artist = bool(
+                    _kpop_artist_aliases(channel_title).intersection(_kpop_artist_aliases(artist))
+                )
+                official = bool(
+                    KPOP_LABEL_CHANNEL.search(channel_title)
+                    or channel_matches_artist
+                )
+                if not official or not KPOP_OFFICIAL_MARKER.search(raw_title):
+                    continue
+
                 rows.append(
                     SongRow(
                         title=title,
@@ -796,9 +976,9 @@ def _youtube_kpop_rows(status: Any, threshold: int) -> list[SongRow]:
                         source_url=f"https://www.youtube.com/watch?v={video_id}",
                         retrieved_at=TODAY,
                         source_notes=(
-                            "Discovered with the official YouTube Data API, filtered to music videos "
-                            "with K-pop evidence and official-MV/channel evidence, and qualified by "
-                            "an observed view count strictly above 100,000,000."
+                            "Discovered with the official YouTube Data API and retained only when "
+                            "the parsed artist matches a catalog-verified K-pop artist and the upload "
+                            "has official-MV, official-label, or artist-channel evidence."
                         ),
                         extra={
                             "culture_category": "kpop",
@@ -808,15 +988,18 @@ def _youtube_kpop_rows(status: Any, threshold: int) -> list[SongRow]:
                             "youtube_original_title": raw_title,
                             "youtube_discovery_query": (discovered.get(video_id) or {}).get("query"),
                             "youtube_view_threshold_strictly_greater_than": threshold,
-                            "selection": "official YouTube API K-pop discovery fallback",
+                            "kpop_artist_verified": True,
+                            "verified_kpop_artist": artist,
+                            "selection": "official YouTube API discovery restricted to verified K-pop artists",
                         },
                     )
                 )
 
     status.sources["youtube_kpop_discovery"] = {
         "source": "YouTube Data API v3 search.list + videos.list",
-        "queries": KPOP_SEARCH_QUERIES,
-        "pages_per_query": pages,
+        "queries": [query for query, _ in search_plan],
+        "generic_pages_per_query": pages,
+        "artist_specific_queries": min(artist_search_limit, len(trusted_artists)),
         "search_calls": search_calls,
         "unique_video_candidates": len(discovered),
         "qualified_rows": len(rows),
@@ -827,12 +1010,20 @@ def _youtube_kpop_rows(status: Any, threshold: int) -> list[SongRow]:
 
 
 def build_kpop_youtube_100m(catalog: pd.DataFrame, status: Any) -> list[SongRow]:
-    """Build K-pop tracks with observed YouTube views strictly above 100M."""
+    """Build verified K-pop tracks with observed YouTube views strictly above 100M."""
     threshold = 100_000_000
+    trusted_aliases, trusted_artists = _build_trusted_kpop_artists(catalog)
+
     rows: list[SongRow] = []
     for _, row in catalog.iterrows():
-        row_genres = _parse_genres(row.get("genres"))
-        if not _genre_matches(row_genres, ["k-pop", "korean pop", "k-pop boy group", "k-pop girl group"]):
+        row_genres = _parse_clean_genres(row.get("genres"))
+        if not set(row_genres).intersection(KPOP_STRONG_GENRES):
+            continue
+        canonical_artist = _match_trusted_kpop_artist(
+            row.get("main_artist") or row.get("artists"),
+            trusted_aliases,
+        )
+        if canonical_artist is None:
             continue
         views = _safe_int(row.get("youtube_views"))
         if views is None or views <= threshold:
@@ -840,30 +1031,35 @@ def build_kpop_youtube_100m(catalog: pd.DataFrame, status: Any) -> list[SongRow]
         url = str(row.get("youtube_views_source_url") or row.get("source_url") or "").strip()
         if not url:
             continue
-        rows.append(
-            _catalog_song(
-                row,
-                force_metric=("youtube_views", float(views), "views", url),
-                extra={
-                    "culture_category": "kpop",
-                    "youtube_view_threshold_strictly_greater_than": threshold,
-                    "matched_source_genres": row_genres,
-                },
-            )
+        song = _catalog_song(
+            row,
+            force_metric=("youtube_views", float(views), "views", url),
+            extra={
+                "culture_category": "kpop",
+                "youtube_view_threshold_strictly_greater_than": threshold,
+                "matched_source_genres": row_genres,
+                "kpop_artist_verified": True,
+                "verified_kpop_artist": canonical_artist,
+                "selection": "catalog K-pop tag plus Korean ISRC, Korean source-country metadata, or Korean artist identity",
+            },
         )
+        song.main_artist = canonical_artist
+        rows.append(song)
 
     catalog_rows = len(rows)
-    rows.extend(_youtube_kpop_rows(status, threshold))
-    rows = _dedupe_rank(rows, 10_000)
+    rows.extend(_youtube_kpop_rows(status, threshold, trusted_aliases, trusted_artists))
+    rows = _dedupe_kpop_rows(rows, 10_000)
     write_rows(rows, DATA / "kpop" / "kpop_youtube_over_100m.csv")
     st = status.datasets["kpop"]
     st.rows = len(rows)
     st.complete = False
     st.metric_coverage = _metric_counts(rows)
     st.notes = [
-        "Catalog-tagged K-pop candidates are merged with bounded official YouTube Data API discovery.",
-        "Every row has an observed YouTube view count strictly above 100,000,000; covers, reactions, lyric videos, remixes, teasers, and dance-practice videos are rejected.",
-        f"catalog_qualified={catalog_rows}; final_deduplicated_rows={len(rows)}",
+        "Catalog rows require an exact cleaned K-pop genre plus Korean ISRC, Korean source-country metadata, or Korean artist identity.",
+        "YouTube discovery accepts only parsed artists already verified from the catalog; generic search results such as Western pop videos are rejected.",
+        "Artist aliases and Korean/Latin title variants are canonicalized before deduplication.",
+        "Every retained row has an observed YouTube view count strictly above 100,000,000.",
+        f"trusted_artists={len(trusted_artists)}; catalog_qualified={catalog_rows}; final_deduplicated_rows={len(rows)}",
         "Not marked exhaustive because bounded YouTube search cannot prove enumeration of every K-pop upload.",
     ]
     status.save()
@@ -951,60 +1147,199 @@ LIMIT {int(limit)}
     return games
 
 
+GAME_STRONG_GENRES = {
+    "video game music",
+    "game soundtrack",
+    "video game soundtrack",
+    "vgm",
+    "indie game soundtrack",
+    "japanese vgm",
+}
+GAME_SOUNDTRACK_MARKER = re.compile(
+    r"\b(?:original\s+(?:video\s+)?game\s+soundtrack|"
+    r"(?:video\s+)?game\s+soundtrack|original\s+game\s+score)\b",
+    re.I,
+)
+GAME_MEDIA_REJECT = re.compile(
+    r"\b(?:motion picture|original film|film soundtrack|movie soundtrack|"
+    r"television soundtrack|tv soundtrack|original series soundtrack|"
+    r"broadway|stage musical)\b",
+    re.I,
+)
+GAME_ARRANGEMENT_REJECT = re.compile(
+    r"\b(?:tribute|piano collections?|music box|lullaby|karaoke|cover album|"
+    r"lo-?fi|remix album|orchestral arrangements?|reimagined)\b",
+    re.I,
+)
+GAME_LICENSED_COMPILATION = re.compile(r"\bmusic from the video game\b", re.I)
+GAME_FRANCHISE_ARTISTS = {
+    "league of legends": "League of Legends",
+    "valorant": "VALORANT",
+}
+
+
+def _game_genre_hit(genres: Iterable[str]) -> bool:
+    normalized = {str(value).strip().casefold() for value in genres if str(value).strip()}
+    return bool(normalized.intersection(GAME_STRONG_GENRES))
+
+
+def _game_track_key(row: pd.Series) -> str:
+    return str(row.get("track_id") or "").strip() or (
+        f"{norm(str(row.get('title') or ''))}|{norm(str(row.get('main_artist') or ''))}"
+    )
+
+
+def _game_song_key(row: pd.Series) -> tuple[str, str]:
+    return (
+        norm(str(row.get("title") or "")),
+        norm(str(row.get("main_artist") or row.get("artists") or "")),
+    )
+
+
 def _infer_game_title(row: pd.Series) -> str | None:
     album = html.unescape(str(row.get("album_name") or "")).strip()
-    if not album:
+    title = html.unescape(str(row.get("title") or "")).strip()
+    artist = html.unescape(str(row.get("main_artist") or row.get("artists") or "")).strip()
+    text = f"{album} | {title}"
+
+    if not album or GAME_MEDIA_REJECT.search(text) or GAME_ARRANGEMENT_REJECT.search(text):
         return None
+
+    artist_game = GAME_FRANCHISE_ARTISTS.get(norm(artist))
+    if artist_game and not GAME_SOUNDTRACK_MARKER.search(album):
+        return artist_game
+
+    candidate = album
     candidate = re.sub(
-        r"\s*(?:[-–—:]\s*)?(?:the\s+)?(?:original\s+)?"
-        r"(?:(?:video\s+)?game\s+)?(?:soundtrack|ost|score)"
-        r"(?:\s+(?:expanded|deluxe|complete|remastered|edition|volume|vol\.?)\b.*)?$",
-        "",
-        album,
-        flags=re.I,
-    ).strip(" \t-–—:|")
-    candidate = re.sub(
-        r"^(?:the\s+)?(?:original\s+)?(?:(?:video\s+)?game\s+)?"
-        r"(?:soundtrack|ost|score)\s*(?:for|from)?\s*",
+        r"\s*(?:,|[-–—:])?\s*(?:volume|vol\.?|part|pt\.?)\s*\d+\s*$",
         "",
         candidate,
         flags=re.I,
-    ).strip(" \t-–—:|")
-    if not candidate or norm(candidate) in {"original soundtrack", "soundtrack", "ost", "score"}:
+    )
+    candidate = re.sub(
+        r"\s*[-–—:]\s*volume\s+(?:alpha|beta|\d+)\s*$",
+        "",
+        candidate,
+        flags=re.I,
+    )
+    candidate = re.sub(
+        r"\s*[\[(]\s*(?:the\s+)?(?:original\s+)?"
+        r"(?:(?:video\s+)?game\s+)?(?:soundtrack|ost|score)"
+        r"(?:[^\])}]*)?[\])}]\s*$",
+        "",
+        candidate,
+        flags=re.I,
+    )
+    candidate = re.sub(
+        r"\s*(?:[-–—:]\s*)?(?:the\s+)?(?:original\s+)?"
+        r"(?:(?:video\s+)?game\s+)?(?:soundtrack|ost|score)"
+        r"(?:\s+(?:expanded|deluxe|complete|remastered|edition)\b.*)?$",
+        "",
+        candidate,
+        flags=re.I,
+    )
+    candidate = re.sub(
+        r"\s*[\[(]\s*(?:the\s+)?(?:complete|deluxe|remastered)\s+edition\s*[\])}]\s*$",
+        "",
+        candidate,
+        flags=re.I,
+    )
+    candidate = candidate.strip(" \t-–—:|,()[]{}")
+
+    # Album subtitles usually describe a soundtrack volume, not a separate game.
+    if " - " in candidate:
+        left, right = candidate.split(" - ", 1)
+        if re.search(
+            r"\b(?:the\s+\w+ing|volume|vol\.?|chapter|part|music|selections?)\b",
+            right,
+            re.I,
+        ):
+            candidate = left.strip()
+
+    if artist_game and (not candidate or norm(candidate) == norm(title)):
+        candidate = artist_game
+
+    if (
+        not candidate
+        or norm(candidate) in {"original soundtrack", "soundtrack", "ost", "score"}
+        or (norm(candidate) == norm(title) and not artist_game and not GAME_SOUNDTRACK_MARKER.search(album))
+    ):
         return None
     return candidate
 
 
 def build_video_game_music(catalog: pd.DataFrame, status: Any) -> list[SongRow]:
-    """Choose one recognizable source-backed soundtrack recording for each ranked game."""
+    """Build a popularity-ranked list of source-backed video-game soundtrack recordings."""
     target = 1_000
     games = _fetch_top_games(status, target)
 
-    candidates: list[tuple[pd.Series, str, str, bool]] = []
+    candidates: list[tuple[pd.Series, str, str, bool, str]] = []
     token_index: dict[str, set[int]] = defaultdict(set)
-    stop = {"the", "and", "for", "with", "from", "game", "edition", "remastered", "original", "soundtrack", "score"}
+    stop = {
+        "the", "and", "for", "with", "from", "game", "edition", "remastered",
+        "original", "soundtrack", "score", "music", "volume",
+    }
 
     for _, row in catalog.iterrows():
-        row_genres = _parse_genres(row.get("genres"))
-        genre_hit = _genre_matches(
-            row_genres,
-            ["video game music", "game soundtrack", "video game soundtrack", "vgm", "chiptune"],
-        )
-        album_norm = norm(str(row.get("album_name") or ""))
-        title_norm = norm(str(row.get("title") or ""))
-        text = f"{row.get('album_name', '')} | {row.get('title', '')}"
-        soundtrack_hit = bool(
-            re.search(r"\b(?:original game soundtrack|video game soundtrack|game soundtrack|ost|score)\b", text, re.I)
-        )
-        if not genre_hit and not soundtrack_hit:
+        row_genres = _parse_clean_genres(row.get("genres"))
+        genre_hit = _game_genre_hit(row_genres)
+        album = str(row.get("album_name") or "")
+        title = str(row.get("title") or "")
+        text = f"{album} | {title}"
+        if GAME_MEDIA_REJECT.search(text) or GAME_ARRANGEMENT_REJECT.search(text):
             continue
+        if GAME_LICENSED_COMPILATION.search(album) and not genre_hit:
+            continue
+        if not genre_hit and not GAME_SOUNDTRACK_MARKER.search(album):
+            continue
+
+        game_title = _infer_game_title(row)
+        if not game_title:
+            continue
+
+        album_norm = norm(album)
+        title_norm = norm(title)
+        game_norm = norm(game_title)
         position = len(candidates)
-        candidates.append((row, album_norm, title_norm, genre_hit))
-        for token in set(re.findall(r"[a-z0-9]{4,}", f"{album_norm} {title_norm}")) - stop:
+        candidates.append((row, album_norm, title_norm, genre_hit, game_title))
+        for token in (
+            set(re.findall(r"[a-z0-9]{4,}", f"{game_norm} {album_norm} {title_norm}")) - stop
+        ):
             token_index[token].add(position)
 
     selected: list[SongRow] = []
     used_tracks: set[str] = set()
+    used_songs: set[tuple[str, str]] = set()
+    per_game: dict[str, int] = defaultdict(int)
+
+    def append_song(
+        row: pd.Series,
+        game_title: str,
+        *,
+        selection: str,
+        extra: dict[str, Any],
+    ) -> bool:
+        track_key = _game_track_key(row)
+        song_key = _game_song_key(row)
+        game_key = norm(game_title)
+        if not game_key or track_key in used_tracks or song_key in used_songs:
+            return False
+        used_tracks.add(track_key)
+        used_songs.add(song_key)
+        per_game[game_key] += 1
+        song = _catalog_song(
+            row,
+            extra={
+                "culture_category": "video_game_music",
+                "video_game": game_title,
+                "selection": selection,
+                **extra,
+            },
+        )
+        song.screen_work = game_title
+        selected.append(song)
+        return True
+
     for game in games:
         game_norm = norm(game["game_title"])
         tokens = [token for token in re.findall(r"[a-z0-9]{4,}", game_norm) if token not in stop]
@@ -1019,104 +1354,104 @@ def build_video_game_music(catalog: pd.DataFrame, status: Any) -> list[SongRow]:
             if intersection:
                 pool = intersection
 
-        best_row: pd.Series | None = None
+        best: tuple[pd.Series, float] | None = None
         best_score = -1.0
-        best_match = 0.0
         for position in list(pool)[:1_000]:
-            row, album_norm, title_norm, genre_hit = candidates[position]
-            exact = game_norm == album_norm or game_norm == title_norm
-            contained = bool(game_norm and (game_norm in album_norm or game_norm in title_norm))
+            row, album_norm, title_norm, genre_hit, inferred_game = candidates[position]
+            inferred_norm = norm(inferred_game)
+            exact = game_norm == inferred_norm
+            contained = bool(
+                game_norm
+                and (
+                    game_norm in inferred_norm
+                    or inferred_norm in game_norm
+                    or game_norm in album_norm
+                )
+            )
             similarity = max(
-                fuzz.ratio(game_norm, album_norm) if album_norm else 0,
-                fuzz.ratio(game_norm, title_norm) if title_norm else 0,
+                fuzz.ratio(game_norm, inferred_norm) if inferred_norm else 0,
                 fuzz.partial_ratio(game_norm, album_norm) if album_norm else 0,
             )
             if not exact and not contained and similarity < 88:
                 continue
-            if not genre_hit and not re.search(
-                r"\b(?:soundtrack|ost|score)\b",
-                str(row.get("album_name") or ""),
-                re.I,
-            ):
-                continue
-
-            track_key = str(row.get("track_id") or "").strip() or (
-                f"{norm(str(row.get('title') or ''))}|{norm(str(row.get('main_artist') or ''))}"
-            )
-            if track_key in used_tracks:
-                continue
             combined = _catalog_score(row) + similarity * 0.35 + game["sitelinks"] * 0.002
             if combined > best_score:
                 best_score = combined
-                best_row = row
-                best_match = float(similarity)
+                best = (row, float(similarity))
 
-        if best_row is None:
+        if best is None:
             continue
-
-        track_key = str(best_row.get("track_id") or "").strip() or (
-            f"{norm(str(best_row.get('title') or ''))}|{norm(str(best_row.get('main_artist') or ''))}"
-        )
-        used_tracks.add(track_key)
-        song = _catalog_song(
-            best_row,
+        row, best_match = best
+        append_song(
+            row,
+            game["game_title"],
+            selection="highest-popularity confident soundtrack match for this ranked game",
             extra={
-                "culture_category": "video_game_music",
-                "video_game": game["game_title"],
                 "game_rank": game["game_rank"],
                 "game_popularity_proxy": "wikimedia_sitelinks",
                 "game_sitelinks": game["sitelinks"],
                 "game_wikidata_id": game["wikidata_id"],
                 "game_wikidata_url": game["wikidata_url"],
                 "game_soundtrack_match_score": best_match,
-                "selection": "highest-popularity confident soundtrack match for this ranked game",
             },
         )
-        song.screen_work = game["game_title"]
-        selected.append(song)
         if len(selected) >= target:
             break
 
-    # If Wikidata is unavailable, or confident ranked-game matching leaves gaps, use only
-    # catalog rows explicitly tagged as video-game music/game soundtracks. Keep one recording
-    # per inferred game/album and rank this fallback by song-level popularity evidence.
-    fallback_added = 0
-    used_games = {norm(str(row.screen_work or "")) for row in selected if row.screen_work}
-    fallback_candidates = sorted(candidates, key=lambda item: _catalog_score(item[0]), reverse=True)
-    for row, album_norm, title_norm, genre_hit in fallback_candidates:
+    fallback_candidates = sorted(
+        candidates,
+        key=lambda item: _catalog_score(item[0]),
+        reverse=True,
+    )
+    fallback_unique = 0
+    fallback_additional = 0
+
+    # First preserve breadth: one highest-popularity recording for each confidently inferred game.
+    for row, album_norm, title_norm, genre_hit, game_title in fallback_candidates:
         if len(selected) >= target:
             break
-        text = f"{row.get('album_name', '')} | {row.get('title', '')}"
-        explicit_game_soundtrack = bool(
-            genre_hit
-            or re.search(r"\b(?:video game soundtrack|game soundtrack|original game soundtrack)\b", text, re.I)
-        )
-        if not explicit_game_soundtrack:
+        game_key = norm(game_title)
+        if per_game.get(game_key, 0) >= 1:
             continue
-        track_key = str(row.get("track_id") or "").strip() or (
-            f"{norm(str(row.get('title') or ''))}|{norm(str(row.get('main_artist') or ''))}"
-        )
-        game_title = _infer_game_title(row)
-        game_key = norm(game_title or "")
-        if track_key in used_tracks or not game_key or game_key in used_games:
-            continue
-        used_tracks.add(track_key)
-        used_games.add(game_key)
-        fallback_added += 1
-        song = _catalog_song(
+        if append_song(
             row,
+            game_title,
+            selection="highest-popularity explicit video-game soundtrack candidate for inferred game",
             extra={
-                "culture_category": "video_game_music",
-                "video_game": game_title,
-                "catalog_fallback_rank": fallback_added,
-                "selection": "highest-popularity explicit video-game soundtrack candidate for inferred game",
+                "catalog_fallback_rank": fallback_unique + 1,
                 "wikidata_available": bool(games),
+                "fallback_stage": "one_per_game",
             },
-        )
-        song.screen_work = game_title
-        selected.append(song)
+        ):
+            fallback_unique += 1
 
-    selected.sort(key=lambda row: int((row.extra or {}).get("game_rank") or 10**9))
+    # Then fill the requested song list with additional recognizable tracks, capped per game.
+    for row, album_norm, title_norm, genre_hit, game_title in fallback_candidates:
+        if len(selected) >= target:
+            break
+        game_key = norm(game_title)
+        if per_game.get(game_key, 0) >= 4:
+            continue
+        if append_song(
+            row,
+            game_title,
+            selection="additional high-popularity original game-soundtrack recording",
+            extra={
+                "catalog_fallback_rank": fallback_unique + fallback_additional + 1,
+                "wikidata_available": bool(games),
+                "fallback_stage": "additional_tracks",
+                "per_game_track_cap": 4,
+            },
+        ):
+            fallback_additional += 1
+
+    selected.sort(
+        key=lambda row: (
+            0 if (row.extra or {}).get("game_rank") is not None else 1,
+            int((row.extra or {}).get("game_rank") or 10**9),
+            int((row.extra or {}).get("catalog_fallback_rank") or 10**9),
+        )
+    )
     for rank, row in enumerate(selected, 1):
         row.rank = rank
     write_rows(selected, DATA / "video_games" / "video_game_music_1000.csv")
@@ -1126,10 +1461,10 @@ def build_video_game_music(catalog: pd.DataFrame, status: Any) -> list[SongRow]:
     st.complete = len(selected) == target
     st.metric_coverage = _metric_counts(selected)
     st.notes = [
-        "Primary path ranks games by Wikidata Wikimedia-sitelink count and selects one confident soundtrack match per game.",
-        "If Wikidata fails or leaves gaps, explicitly tagged video-game soundtrack albums are used as a non-empty source-backed fallback, with one recording per inferred game.",
-        "Generic movie/television OST rows are not accepted by the fallback unless source metadata explicitly identifies video-game music.",
-        f"ranked_games={len(games)}; soundtrack_candidates={len(candidates)}; fallback_added={fallback_added}; matched_games={len(selected)}",
+        "Movie/television soundtracks, licensed-song compilations, tribute albums, piano collections, music-box albums, cover albums, and generic remix albums are rejected.",
+        "Game names are normalized from soundtrack album metadata; known franchise-artist singles such as League of Legends are mapped to their game.",
+        "Fallback selection first maximizes distinct games, then allows up to four high-popularity original soundtrack tracks per game to approach the 1,000-song target.",
+        f"ranked_games={len(games)}; soundtrack_candidates={len(candidates)}; unique_games={len(per_game)}; fallback_unique={fallback_unique}; fallback_additional={fallback_additional}; rows={len(selected)}",
     ]
     status.save()
     return selected
