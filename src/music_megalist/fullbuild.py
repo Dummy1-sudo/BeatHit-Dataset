@@ -2251,17 +2251,57 @@ def _vocadb_all(status:BuildStatus,max_songs:int|None=None)->tuple[list[dict],bo
     # Fetch VocaDB original songs that have at least one YouTube PV.
     # Spotify is not consulted anywhere in this pipeline.
     if max_songs is None:
-        max_songs=max(
-            1_000,
-            min(_safe_int(os.getenv("BEATHIT_VOCADB_SCAN_LIMIT")) or 100_000,250_000),
-        )
+        requested_limit=_safe_int(os.getenv("BEATHIT_VOCADB_SCAN_LIMIT")) or 350_000
+        # The old workflow default of 100k covered only part of VocaDB. Always scan deeply enough
+        # to cover the current corpus, while retaining a bounded emergency ceiling.
+        max_songs=max(350_000,min(requested_limit,500_000))
 
+    checkpoint_path=CACHE/"vocadb_original_youtube_scan.jsonl"
+    checkpoint_meta_path=CACHE/"vocadb_original_youtube_scan.meta.json"
+    CACHE.mkdir(parents=True,exist_ok=True)
     out=[]
     start=0
     size=50
     exhaustive=False
     total_seen=None
     pages=0
+    resumed_from=0
+
+    # Preserve accepted VocaDB pages so a later workflow can continue the long scan instead of
+    # repeating it. The source offset is stored separately because local validation can reject rows.
+    if checkpoint_path.exists():
+        try:
+            cached=[]
+            expected_start=0
+            with checkpoint_path.open("r",encoding="utf-8") as handle:
+                for line in handle:
+                    if not line.strip():
+                        continue
+                    page=json.loads(line)
+                    page_start=_safe_int(page.get("start"))
+                    source_rows=_safe_int(page.get("source_rows"))
+                    accepted=page.get("accepted") or []
+                    if page_start!=expected_start or source_rows is None or source_rows<=0 or not isinstance(accepted,list):
+                        raise ValueError("non-contiguous or invalid checkpoint page")
+                    cached.extend(item for item in accepted if isinstance(item,dict))
+                    expected_start+=source_rows
+                    pages+=1
+            out=cached
+            start=expected_start
+            resumed_from=start
+            if checkpoint_meta_path.exists():
+                meta=json.loads(checkpoint_meta_path.read_text(encoding="utf-8"))
+                total_seen=_safe_int(meta.get("api_reported_total"))
+                exhaustive=bool(meta.get("exhaustive")) and bool(total_seen is not None and start>=total_seen)
+            _progress(
+                f"Vocaloid VocaDB CHECKPOINT pages={pages} source_offset={start} "
+                f"accepted_candidates={len(out)} exhaustive={exhaustive}"
+            )
+        except Exception as exc:
+            status.warnings.append(f"VocaDB checkpoint discarded: {exc}")
+            checkpoint_path.unlink(missing_ok=True)
+            checkpoint_meta_path.unlink(missing_ok=True)
+            out=[];start=0;pages=0;total_seen=None;exhaustive=False;resumed_from=0
 
     _progress(f"Vocaloid VocaDB START scan_limit={max_songs}")
     with httpx.Client(
@@ -2269,7 +2309,7 @@ def _vocadb_all(status:BuildStatus,max_songs:int|None=None)->tuple[list[dict],bo
         follow_redirects=True,
         headers={"User-Agent":"BeatHit-Dataset/1.0 (contact via GitHub repository)"},
     ) as client:
-        while start<max_songs:
+        while start<max_songs and not exhaustive:
             params={
                 "songTypes":"Original",
                 "onlyWithPvs":"true",
@@ -2280,7 +2320,7 @@ def _vocadb_all(status:BuildStatus,max_songs:int|None=None)->tuple[list[dict],bo
                 "fields":"Artists,Names,PVs",
                 "lang":"Default",
             }
-            if start==0:
+            if total_seen is None:
                 params["getTotalCount"]="true"
 
             try:
@@ -2306,9 +2346,26 @@ def _vocadb_all(status:BuildStatus,max_songs:int|None=None)->tuple[list[dict],bo
                     continue
                 accepted_page.append(item)
 
+            page_start=start
+            with checkpoint_path.open("a",encoding="utf-8") as handle:
+                handle.write(
+                    json.dumps(
+                        {"start":page_start,"source_rows":len(items),"accepted":accepted_page},
+                        ensure_ascii=False,
+                        separators=(",",":"),
+                    )+"\n"
+                )
             out.extend(accepted_page)
             start+=len(items)
             pages+=1
+            checkpoint_meta_path.write_text(
+                json.dumps(
+                    {"api_reported_total":total_seen,"source_offset":start,"exhaustive":False},
+                    ensure_ascii=False,
+                    indent=2,
+                )+"\n",
+                encoding="utf-8",
+            )
             _progress(
                 f"Vocaloid VocaDB page={pages} source_rows={len(items)} "
                 f"accepted_originals={len(accepted_page)} total_candidates={len(out)} "
@@ -2323,6 +2380,14 @@ def _vocadb_all(status:BuildStatus,max_songs:int|None=None)->tuple[list[dict],bo
                 break
             time.sleep(.20)
 
+    checkpoint_meta_path.write_text(
+        json.dumps(
+            {"api_reported_total":total_seen,"source_offset":start,"exhaustive":exhaustive},
+            ensure_ascii=False,
+            indent=2,
+        )+"\n",
+        encoding="utf-8",
+    )
     status.sources["vocadb_original_youtube_scan"]={
         "url":"https://vocadb.net/api/songs",
         "rows":len(out),
@@ -2330,6 +2395,8 @@ def _vocadb_all(status:BuildStatus,max_songs:int|None=None)->tuple[list[dict],bo
         "api_reported_total":total_seen,
         "pages":pages,
         "exhaustive":exhaustive,
+        "resumed_from_source_offset":resumed_from,
+        "checkpoint":str(checkpoint_path.relative_to(ROOT)),
         "filters":{
             "songTypes":"Original",
             "onlyWithPvs":True,
@@ -2415,7 +2482,10 @@ def _vocadb_song_credit(item:dict)->tuple[str,list[str],dict]:
 
     synth_types={
         "vocaloid","utau","cevio","synthesizerv","neutrino","voisona",
-        "newtype","voiceroid","othervoicesynthesizer",
+        "newtype","voiceroid","othervoicesynthesizer","acevirtualsinger",
+        "sharpkey","deepvocal","voicevox","nnsvs","vocalsharp","xstudio",
+        "muta","aisinger","virtualsinger","voiceroidplus","cevioai",
+        "synthesizervai",
     }
     producer_roles={"composer","arranger","voicemanipulator"}
     vocalist_roles={"vocalist","chorus","vocaldataprovider"}
@@ -3083,9 +3153,19 @@ def _reuse_complete_output(
     return rows
 
 
-def full_build(*,skip_zenodo:bool=False,only:list[str]|None=None,reuse_complete:bool=False)->BuildStatus:
+def full_build(
+    *,
+    skip_zenodo:bool=False,
+    only:list[str]|None=None,
+    reuse_complete:bool=False,
+    force:list[str]|None=None,
+)->BuildStatus:
     status=BuildStatus(started_at=_now())
-    _progress(f"FULL BUILD START only={only or 'ALL'} skip_zenodo={skip_zenodo} reuse_complete={reuse_complete}")
+    force_set=set(force or [])
+    _progress(
+        f"FULL BUILD START only={only or 'ALL'} skip_zenodo={skip_zenodo} "
+        f"reuse_complete={reuse_complete} force={sorted(force_set)}"
+    )
     for name,target in FIXED_TARGETS.items():status.datasets[name]=DatasetStatus(target=target)
     status.datasets["vocaloid"]=DatasetStatus(target="all VocaDB Original songs with an official Original YouTube PV >=100,000,000 views; cap 10,000")
     status.datasets["kpop"]=DatasetStatus(target="all source-tagged K-pop songs with observed YouTube views strictly above 100,000,000")
@@ -3114,7 +3194,7 @@ def full_build(*,skip_zenodo:bool=False,only:list[str]|None=None,reuse_complete:
         if name not in wanted:
             _progress(f"SKIP builder={name}")
             return
-        if reuse_complete:
+        if reuse_complete and name not in force_set:
             existing = _reuse_complete_output(name, status, previous)
             if existing is not None:
                 built[name] = existing
@@ -3216,8 +3296,14 @@ def main(argv:list[str]|None=None)->int:
     ap.add_argument("--skip-zenodo",action="store_true",help="Skip the 931MB 0.9M-track source and use smaller fallbacks")
     ap.add_argument("--only",nargs="*",choices=list(FIXED_TARGETS)+["vocaloid","kpop","countries"],help="Build only selected categories")
     ap.add_argument("--reuse-complete",action="store_true",help="Reuse existing complete, individually validated outputs instead of rebuilding them")
+    ap.add_argument(
+        "--force",
+        nargs="*",
+        choices=list(FIXED_TARGETS)+["vocaloid","kpop","countries"],
+        help="Rebuild selected categories even when --reuse-complete could reuse them",
+    )
     a=ap.parse_args(argv)
-    st=full_build(skip_zenodo=a.skip_zenodo,only=a.only,reuse_complete=a.reuse_complete)
+    st=full_build(skip_zenodo=a.skip_zenodo,only=a.only,reuse_complete=a.reuse_complete,force=a.force)
     print(REPORT)
     incomplete=[k for k,v in st.datasets.items() if k!="megalist" and not v.complete]
     if incomplete:

@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import html
 import json
 import math
+import os
 import re
 import time
 from collections import defaultdict
@@ -19,9 +21,12 @@ from .models import SongRow
 
 ROOT = Path(__file__).resolve().parents[2]
 DATA = ROOT / "data"
+CACHE = ROOT / ".cache" / "full_build"
 TODAY = date.today().isoformat()
 LISTENBRAINZ_API = "https://api.listenbrainz.org/1"
 WIKIDATA_SPARQL = "https://query.wikidata.org/sparql"
+WIKIDATA_SPARQL_FALLBACK = "https://query.wikidata.org/bigdata/namespace/wdq/sparql"
+YOUTUBE_API = "https://www.googleapis.com/youtube/v3"
 
 TAG_LISTS = {
     "internet_native": [
@@ -64,9 +69,11 @@ TAG_LISTS = {
         "cartoon music", "sesame street",
     ],
     "unserious": [
-        "novelty", "comedy", "comedy rock", "musical comedy", "parody", "meme",
-        "internet meme", "nerdcore", "children's music", "cartoon music",
-        "party novelty", "viral", "funny", "satire", "denpa",
+        "novelty", "novelty song", "comedy", "comedy rock", "musical comedy",
+        "comedy rap", "comedy hip hop", "parody", "song parody", "meme",
+        "internet meme", "party novelty", "funny", "humorous", "satire",
+        "absurdist", "silly music", "filk", "geek rock", "children's novelty",
+        "denpa song",
     ],
 }
 
@@ -87,6 +94,28 @@ TAG_OUTPUTS = {
     "children_childhood": DATA / "children_childhood" / "children_childhood_100.csv",
     "unserious": DATA / "unserious" / "unserious_1000.csv",
 }
+
+UNSERIOUS_TITLE_PHRASES = (
+    "pink fluffy unicorn",
+    "nyan cat",
+    "trololo",
+    "what does the fox say",
+    "peanut butter jelly",
+    "badger badger",
+    "llama song",
+    "narwhals",
+    "duck song",
+    "gummy bear",
+    "crazy frog",
+    "banana phone",
+    "hamster dance",
+    "hamsterdance",
+    "ultimate showdown",
+    "potato song",
+    "poop song",
+    "fart song",
+    "skibidi",
+)
 
 REQUIRED_SPECIAL = [
     {
@@ -120,6 +149,14 @@ REQUIRED_SPECIAL = [
         "source_url": "https://www.youtube.com/watch?v=eWM2joNb9NE",
         "categories": ["special_required", "unserious", "internet_native"],
         "note": "Explicit required internet novelty-song inclusion.",
+    },
+    {
+        "title": "Basique",
+        "main_artist": "Orelsan",
+        "languages": ["fr"],
+        "source_url": "https://www.youtube.com/watch?v=2bjk26RwjyU",
+        "categories": ["unserious"],
+        "note": "Explicit user-requested inclusion for its absurd, deadpan comedic observations.",
     },
 ]
 
@@ -240,6 +277,11 @@ def _genre_matches(genres: Iterable[str], terms: Iterable[str]) -> bool:
             if len(term) >= 4 and f" {term} " in padded:
                 return True
     return False
+
+
+def _unserious_title_match(value: Any) -> bool:
+    text = norm(str(value or ""))
+    return any(norm(phrase) in text for phrase in UNSERIOUS_TITLE_PHRASES)
 
 
 def _catalog_score(row: pd.Series) -> float:
@@ -486,8 +528,11 @@ def _build_tag_list(catalog: pd.DataFrame, status: Any, name: str) -> list[SongR
     candidates: list[tuple[float, pd.Series, list[str]]] = []
     for _, row in catalog.iterrows():
         row_genres = _parse_genres(row.get("genres"))
-        if _genre_matches(row_genres, tags):
-            candidates.append((_catalog_score(row), row, row_genres))
+        genre_match = _genre_matches(row_genres, tags)
+        title_match = name == "unserious" and _unserious_title_match(row.get("title"))
+        if genre_match or title_match:
+            score = _catalog_score(row) + (10.0 if title_match else 0.0)
+            candidates.append((score, row, row_genres))
     candidates.sort(key=lambda item: item[0], reverse=True)
 
     for _, row, row_genres in candidates:
@@ -504,7 +549,14 @@ def _build_tag_list(catalog: pd.DataFrame, status: Any, name: str) -> list[SongR
                 extra={
                     "culture_category": name,
                     "matched_source_genres": row_genres,
-                    "selection": "source genre/tag membership plus source-backed popularity ranking",
+                    "matched_unserious_title_phrase": (
+                        _unserious_title_match(row.get("title")) if name == "unserious" else False
+                    ),
+                    "selection": (
+                        "strict novelty/comedy tag or known absurd novelty-title pattern; source-backed popularity ranking"
+                        if name == "unserious"
+                        else "source genre/tag membership plus source-backed popularity ranking"
+                    ),
                 },
             )
         )
@@ -520,11 +572,19 @@ def _build_tag_list(catalog: pd.DataFrame, status: Any, name: str) -> list[SongR
     st.rows = len(rows)
     st.complete = len(rows) == target
     st.metric_coverage = _metric_counts(rows)
-    st.notes = [
-        "Source-backed catalog genres/tags first; ListenBrainz tag-radio fallback second.",
-        "No fabricated quota padding. Unknown song language is stored as ['und'], not guessed from title text.",
-        f"catalog_candidates={len(candidates)}; target={target}",
-    ]
+    if name == "unserious":
+        st.notes = [
+            "Strict novelty/comedy/parody/meme tags plus a bounded set of known absurd novelty-title patterns.",
+            "Broad viral, children's music, cartoon music, nerdcore, and denpa tags do not qualify by themselves.",
+            "Explicit inclusions include Pink Fluffy Unicorns Dancing on Rainbows and Orelsan's Basique.",
+            f"catalog_candidates={len(candidates)}; target={target}",
+        ]
+    else:
+        st.notes = [
+            "Source-backed catalog genres/tags first; ListenBrainz tag-radio fallback second.",
+            "No fabricated quota padding. Unknown song language is stored as ['und'], not guessed from title text.",
+            f"catalog_candidates={len(candidates)}; target={target}",
+        ]
     status.save()
     return rows
 
@@ -569,8 +629,205 @@ def build_required_special(catalog: pd.DataFrame, status: Any) -> list[SongRow]:
     return rows
 
 
+KPOP_SEARCH_QUERIES = [
+    "K-pop official MV",
+    "K-pop girl group official MV",
+    "K-pop boy group official MV",
+    "K-pop soloist official MV",
+    "Korean pop official music video",
+    "K-pop 2000s official MV",
+    "K-pop 2010s official MV",
+    "K-pop 2020s official MV",
+    "K-pop debut official MV",
+    "K-pop viral official MV",
+]
+KPOP_REJECT_TITLE = re.compile(
+    r"\b(?:reaction|dance practice|dance cover|cover|lyrics?|karaoke|sped up|slowed|"
+    r"nightcore|remix|teaser|trailer|shorts?|fanmade|fancam|instrumental)\b",
+    re.I,
+)
+KPOP_OFFICIAL_MARKER = re.compile(
+    r"(?:\bofficial\b.*\b(?:m/?v|music video|video)\b|\b(?:m/?v|music video)\b)",
+    re.I,
+)
+KPOP_LABEL_CHANNEL = re.compile(
+    r"(?:HYBE LABELS|SMTOWN|JYP Entertainment|YG ENTERTAINMENT|"
+    r"1theK|Mnet K-POP|Stone Music Entertainment|STARSHIP|KQ ENTERTAINMENT|"
+    r"CUBE ENTERTAINMENT|RBW|PLEDIS|SOURCE MUSIC|ADOR|BELIFT|BIGHIT MUSIC)",
+    re.I,
+)
+
+
+def _parse_kpop_video_identity(raw_title: str, channel_title: str) -> tuple[str, str]:
+    title = html.unescape(str(raw_title or "")).strip()
+    title = re.sub(r"^\s*(?:\[(?:mv|m/v|official(?:\s+video)?)\]\s*)+", "", title, flags=re.I)
+    core = re.sub(
+        r"\s*(?:\[(?:official[^\]]*|m/?v|music video)[^\]]*\]|"
+        r"\((?:official[^)]*|m/?v|music video)[^)]*\)|"
+        r"\b(?:official\s*)?(?:m/?v|music video|performance video)\b.*)$",
+        "",
+        title,
+        flags=re.I,
+    ).strip(" \t-–—|:")
+    if " - " in core:
+        artist, song = core.split(" - ", 1)
+    elif " – " in core:
+        artist, song = core.split(" – ", 1)
+    elif " — " in core:
+        artist, song = core.split(" — ", 1)
+    else:
+        quoted = re.match(r"^(.+?)\s+['\"“](.+?)['\"”]\s*$", core)
+        if quoted:
+            artist, song = quoted.group(1), quoted.group(2)
+        else:
+            artist = re.sub(r"\s+(?:official|오피셜)$", "", channel_title, flags=re.I).strip()
+            song = core or title
+    artist = re.sub(r"^\[(?:mv|m/v)\]\s*", "", artist, flags=re.I).strip(" \t-–—|:'\"")
+    song = song.strip(" \t-–—|:'\"")
+    return song or title, artist or channel_title or "Unknown K-pop artist"
+
+
+def _youtube_kpop_rows(status: Any, threshold: int) -> list[SongRow]:
+    key = os.getenv("YOUTUBE_API_KEY", "").strip()
+    if not key:
+        status.warnings.append("K-pop YouTube discovery skipped: missing YOUTUBE_API_KEY")
+        return []
+
+    pages = max(1, min(_safe_int(os.getenv("BEATHIT_KPOP_SEARCH_PAGES")) or 4, 8))
+    discovered: dict[str, dict[str, Any]] = {}
+    search_calls = 0
+    with httpx.Client(
+        timeout=60,
+        follow_redirects=True,
+        headers={"User-Agent": "BeatHit-Dataset/1.0"},
+    ) as client:
+        for query in KPOP_SEARCH_QUERIES:
+            page_token: str | None = None
+            for page in range(pages):
+                params = {
+                    "part": "snippet",
+                    "q": query,
+                    "type": "video",
+                    "videoCategoryId": "10",
+                    "order": "viewCount",
+                    "maxResults": "50",
+                    "regionCode": "KR",
+                    "safeSearch": "none",
+                    "key": key,
+                }
+                if page_token:
+                    params["pageToken"] = page_token
+                try:
+                    response = client.get(f"{YOUTUBE_API}/search", params=params)
+                    response.raise_for_status()
+                    data = response.json()
+                    search_calls += 1
+                except Exception as exc:
+                    status.warnings.append(f"K-pop YouTube search {query!r} page={page + 1}: {exc}")
+                    break
+                for item in data.get("items", []) or []:
+                    video_id = str((item.get("id") or {}).get("videoId") or "").strip()
+                    if video_id:
+                        discovered.setdefault(
+                            video_id,
+                            {"query": query, "search_snippet": item.get("snippet") or {}},
+                        )
+                page_token = str(data.get("nextPageToken") or "").strip() or None
+                if not page_token:
+                    break
+                time.sleep(0.05)
+
+        rows: list[SongRow] = []
+        video_ids = list(discovered)
+        for start in range(0, len(video_ids), 50):
+            batch = video_ids[start:start + 50]
+            try:
+                response = client.get(
+                    f"{YOUTUBE_API}/videos",
+                    params={
+                        "part": "snippet,statistics",
+                        "id": ",".join(batch),
+                        "key": key,
+                    },
+                )
+                response.raise_for_status()
+                items = response.json().get("items", []) or []
+            except Exception as exc:
+                status.warnings.append(f"K-pop YouTube statistics batch={start // 50 + 1}: {exc}")
+                continue
+
+            for item in items:
+                video_id = str(item.get("id") or "").strip()
+                snippet = item.get("snippet") or {}
+                statistics = item.get("statistics") or {}
+                views = _safe_int(statistics.get("viewCount"))
+                if views is None or views <= threshold:
+                    continue
+                raw_title = html.unescape(str(snippet.get("title") or "")).strip()
+                channel_title = html.unescape(str(snippet.get("channelTitle") or "")).strip()
+                description = html.unescape(str(snippet.get("description") or ""))
+                tags = " ".join(str(value) for value in (snippet.get("tags") or []))
+                evidence = f"{raw_title} {channel_title} {description} {tags}"
+                if KPOP_REJECT_TITLE.search(raw_title):
+                    continue
+                official = bool(
+                    KPOP_OFFICIAL_MARKER.search(raw_title)
+                    or KPOP_LABEL_CHANNEL.search(channel_title)
+                )
+                kpop_evidence = bool(
+                    re.search(r"\b(?:k-?pop|korean pop)\b|[가-힣]", evidence, re.I)
+                    or KPOP_LABEL_CHANNEL.search(channel_title)
+                )
+                if not official or not kpop_evidence:
+                    continue
+
+                title, artist = _parse_kpop_video_identity(raw_title, channel_title)
+                rows.append(
+                    SongRow(
+                        title=title,
+                        main_artist=artist,
+                        genres=["k-pop"],
+                        languages=["und"],
+                        metric_name="youtube_views",
+                        metric_value=float(views),
+                        metric_unit="views",
+                        view_count=views,
+                        overall_popularity_score=math.log10(views + 1) * 10,
+                        source_url=f"https://www.youtube.com/watch?v={video_id}",
+                        retrieved_at=TODAY,
+                        source_notes=(
+                            "Discovered with the official YouTube Data API, filtered to music videos "
+                            "with K-pop evidence and official-MV/channel evidence, and qualified by "
+                            "an observed view count strictly above 100,000,000."
+                        ),
+                        extra={
+                            "culture_category": "kpop",
+                            "youtube_video_id": video_id,
+                            "youtube_channel_id": snippet.get("channelId"),
+                            "youtube_channel_title": channel_title,
+                            "youtube_original_title": raw_title,
+                            "youtube_discovery_query": (discovered.get(video_id) or {}).get("query"),
+                            "youtube_view_threshold_strictly_greater_than": threshold,
+                            "selection": "official YouTube API K-pop discovery fallback",
+                        },
+                    )
+                )
+
+    status.sources["youtube_kpop_discovery"] = {
+        "source": "YouTube Data API v3 search.list + videos.list",
+        "queries": KPOP_SEARCH_QUERIES,
+        "pages_per_query": pages,
+        "search_calls": search_calls,
+        "unique_video_candidates": len(discovered),
+        "qualified_rows": len(rows),
+        "threshold": threshold,
+        "ok": bool(rows),
+    }
+    return rows
+
+
 def build_kpop_youtube_100m(catalog: pd.DataFrame, status: Any) -> list[SongRow]:
-    """Build source-tagged K-pop tracks with observed YouTube views strictly >100M."""
+    """Build K-pop tracks with observed YouTube views strictly above 100M."""
     threshold = 100_000_000
     rows: list[SongRow] = []
     for _, row in catalog.iterrows():
@@ -595,6 +852,8 @@ def build_kpop_youtube_100m(catalog: pd.DataFrame, status: Any) -> list[SongRow]
             )
         )
 
+    catalog_rows = len(rows)
+    rows.extend(_youtube_kpop_rows(status, threshold))
     rows = _dedupe_rank(rows, 10_000)
     write_rows(rows, DATA / "kpop" / "kpop_youtube_over_100m.csv")
     st = status.datasets["kpop"]
@@ -602,8 +861,10 @@ def build_kpop_youtube_100m(catalog: pd.DataFrame, status: Any) -> list[SongRow]
     st.complete = False
     st.metric_coverage = _metric_counts(rows)
     st.notes = [
-        "Every materialized row is source-tagged K-pop with an observed YouTube view count strictly above 100,000,000.",
-        "Not marked exhaustive because the acquired catalog is not a complete enumeration of all YouTube music videos.",
+        "Catalog-tagged K-pop candidates are merged with bounded official YouTube Data API discovery.",
+        "Every row has an observed YouTube view count strictly above 100,000,000; covers, reactions, lyric videos, remixes, teasers, and dance-practice videos are rejected.",
+        f"catalog_qualified={catalog_rows}; final_deduplicated_rows={len(rows)}",
+        "Not marked exhaustive because bounded YouTube search cannot prove enumeration of every K-pop upload.",
     ]
     status.save()
     return rows
@@ -619,27 +880,49 @@ SELECT ?game ?gameLabel ?sitelinks WHERE {{
 ORDER BY DESC(?sitelinks)
 LIMIT {int(limit)}
 """
-    try:
-        with httpx.Client(
-            timeout=120,
-            follow_redirects=True,
-            headers={"User-Agent": "BeatHit-Dataset/1.0 (source-backed music research)"},
-        ) as client:
-            response = client.get(
-                WIKIDATA_SPARQL,
-                params={"query": query, "format": "json"},
-                headers={"Accept": "application/sparql-results+json"},
-            )
-            response.raise_for_status()
-            bindings = response.json().get("results", {}).get("bindings", [])
-    except Exception as exc:
-        status.warnings.append(f"Wikidata top video games: {exc}")
+    bindings: list[dict[str, Any]] = []
+    successful_endpoint = ""
+    errors: list[str] = []
+    attempts = [
+        ("POST", WIKIDATA_SPARQL),
+        ("POST", WIKIDATA_SPARQL_FALLBACK),
+        ("GET", WIKIDATA_SPARQL),
+    ]
+    with httpx.Client(
+        timeout=120,
+        follow_redirects=True,
+        headers={"User-Agent": "BeatHit-Dataset/1.0 (source-backed music research)"},
+    ) as client:
+        for method, endpoint in attempts:
+            try:
+                if method == "POST":
+                    response = client.post(
+                        endpoint,
+                        data={"query": query, "format": "json"},
+                        headers={"Accept": "application/sparql-results+json"},
+                    )
+                else:
+                    response = client.get(
+                        endpoint,
+                        params={"query": query, "format": "json"},
+                        headers={"Accept": "application/sparql-results+json"},
+                    )
+                response.raise_for_status()
+                bindings = response.json().get("results", {}).get("bindings", [])
+                if bindings:
+                    successful_endpoint = f"{method} {endpoint}"
+                    break
+            except Exception as exc:
+                errors.append(f"{method} {endpoint}: {exc}")
+
+    if not bindings:
+        status.warnings.append("Wikidata top video games failed: " + " | ".join(errors))
         status.sources["wikidata_top_video_games"] = {
-            "url": WIKIDATA_SPARQL,
+            "url": [WIKIDATA_SPARQL, WIKIDATA_SPARQL_FALLBACK],
             "rows": 0,
             "ranking_proxy": "wikimedia_sitelinks",
             "ok": False,
-            "error": str(exc),
+            "errors": errors,
         }
         return []
 
@@ -660,12 +943,36 @@ LIMIT {int(limit)}
             )
 
     status.sources["wikidata_top_video_games"] = {
-        "url": WIKIDATA_SPARQL,
+        "url": successful_endpoint,
         "rows": len(games),
         "ranking_proxy": "wikimedia_sitelinks",
         "ok": bool(games),
     }
     return games
+
+
+def _infer_game_title(row: pd.Series) -> str | None:
+    album = html.unescape(str(row.get("album_name") or "")).strip()
+    if not album:
+        return None
+    candidate = re.sub(
+        r"\s*(?:[-–—:]\s*)?(?:the\s+)?(?:original\s+)?"
+        r"(?:(?:video\s+)?game\s+)?(?:soundtrack|ost|score)"
+        r"(?:\s+(?:expanded|deluxe|complete|remastered|edition|volume|vol\.?)\b.*)?$",
+        "",
+        album,
+        flags=re.I,
+    ).strip(" \t-–—:|")
+    candidate = re.sub(
+        r"^(?:the\s+)?(?:original\s+)?(?:(?:video\s+)?game\s+)?"
+        r"(?:soundtrack|ost|score)\s*(?:for|from)?\s*",
+        "",
+        candidate,
+        flags=re.I,
+    ).strip(" \t-–—:|")
+    if not candidate or norm(candidate) in {"original soundtrack", "soundtrack", "ost", "score"}:
+        return None
+    return candidate
 
 
 def build_video_game_music(catalog: pd.DataFrame, status: Any) -> list[SongRow]:
@@ -770,6 +1077,45 @@ def build_video_game_music(catalog: pd.DataFrame, status: Any) -> list[SongRow]:
         if len(selected) >= target:
             break
 
+    # If Wikidata is unavailable, or confident ranked-game matching leaves gaps, use only
+    # catalog rows explicitly tagged as video-game music/game soundtracks. Keep one recording
+    # per inferred game/album and rank this fallback by song-level popularity evidence.
+    fallback_added = 0
+    used_games = {norm(str(row.screen_work or "")) for row in selected if row.screen_work}
+    fallback_candidates = sorted(candidates, key=lambda item: _catalog_score(item[0]), reverse=True)
+    for row, album_norm, title_norm, genre_hit in fallback_candidates:
+        if len(selected) >= target:
+            break
+        text = f"{row.get('album_name', '')} | {row.get('title', '')}"
+        explicit_game_soundtrack = bool(
+            genre_hit
+            or re.search(r"\b(?:video game soundtrack|game soundtrack|original game soundtrack)\b", text, re.I)
+        )
+        if not explicit_game_soundtrack:
+            continue
+        track_key = str(row.get("track_id") or "").strip() or (
+            f"{norm(str(row.get('title') or ''))}|{norm(str(row.get('main_artist') or ''))}"
+        )
+        game_title = _infer_game_title(row)
+        game_key = norm(game_title or "")
+        if track_key in used_tracks or not game_key or game_key in used_games:
+            continue
+        used_tracks.add(track_key)
+        used_games.add(game_key)
+        fallback_added += 1
+        song = _catalog_song(
+            row,
+            extra={
+                "culture_category": "video_game_music",
+                "video_game": game_title,
+                "catalog_fallback_rank": fallback_added,
+                "selection": "highest-popularity explicit video-game soundtrack candidate for inferred game",
+                "wikidata_available": bool(games),
+            },
+        )
+        song.screen_work = game_title
+        selected.append(song)
+
     selected.sort(key=lambda row: int((row.extra or {}).get("game_rank") or 10**9))
     for rank, row in enumerate(selected, 1):
         row.rank = rank
@@ -780,9 +1126,10 @@ def build_video_game_music(catalog: pd.DataFrame, status: Any) -> list[SongRow]:
     st.complete = len(selected) == target
     st.metric_coverage = _metric_counts(selected)
     st.notes = [
-        "Game popularity is ranked by Wikidata Wikimedia-sitelink count, a transparent cross-language recognition proxy.",
-        "One highest-popularity confident soundtrack match per game; unmatched games are omitted rather than fabricated.",
-        f"ranked_games={len(games)}; soundtrack_candidates={len(candidates)}; matched_games={len(selected)}",
+        "Primary path ranks games by Wikidata Wikimedia-sitelink count and selects one confident soundtrack match per game.",
+        "If Wikidata fails or leaves gaps, explicitly tagged video-game soundtrack albums are used as a non-empty source-backed fallback, with one recording per inferred game.",
+        "Generic movie/television OST rows are not accepted by the fallback unless source metadata explicitly identifies video-game music.",
+        f"ranked_games={len(games)}; soundtrack_candidates={len(candidates)}; fallback_added={fallback_added}; matched_games={len(selected)}",
     ]
     status.save()
     return selected
