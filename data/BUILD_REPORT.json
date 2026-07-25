@@ -1,6 +1,6 @@
 {
-  "started_at": "2026-07-25T01:59:41.815797+00:00",
-  "finished_at": "2026-07-25T05:35:03.629153+00:00",
+  "started_at": "2026-07-25T11:03:06.483801+00:00",
+  "finished_at": "2026-07-25T15:50:23.251232+00:00",
   "sources": {
     "spotify_zenodo_0_9m": {
       "url": "https://zenodo.org/records/11453410/files/tracks.csv?download=1",
@@ -56,7 +56,7 @@
     },
     "kworb_live_spotify": {
       "url": "https://kworb.net/spotify/songs.html",
-      "rows": 2484,
+      "rows": 2483,
       "retrieved_at": "2026-07-25",
       "ok": true
     },
@@ -86,11 +86,13 @@
     },
     "vocadb_original_youtube_scan": {
       "url": "https://vocadb.net/api/songs",
-      "rows": 82203,
-      "requested_limit": 100000,
-      "api_reported_total": 289777,
-      "pages": 2000,
-      "exhaustive": false,
+      "rows": 260777,
+      "requested_limit": 350000,
+      "api_reported_total": 289852,
+      "pages": 5798,
+      "exhaustive": true,
+      "resumed_from_source_offset": 0,
+      "checkpoint": ".cache/full_build/vocadb_original_youtube_scan.jsonl",
       "filters": {
         "songTypes": "Original",
         "onlyWithPvs": true,
@@ -101,25 +103,53 @@
     },
     "vocaloid_youtube_view_counts": {
       "source": "YouTube Data API v3 videos.list(part=statistics)",
-      "requested": 66373,
-      "resolved": 65512,
-      "unresolved": 861,
+      "requested": 184519,
+      "resolved": 177951,
+      "unresolved": 6568,
       "ok": false,
       "threshold": 100000000,
       "note": "Official YouTube API only; no Return YouTube Dislike, yt-dlp, or Spotify fallback."
     },
     "youtube_view_counts": {
       "source": "YouTube Data API v3",
-      "requested": 41405,
-      "resolved": 41361,
+      "requested": 41427,
+      "resolved": 41386,
       "ok": true
     },
     "wikidata_top_video_games": {
-      "url": "https://query.wikidata.org/sparql",
+      "url": [
+        "https://query.wikidata.org/sparql",
+        "https://query.wikidata.org/bigdata/namespace/wdq/sparql"
+      ],
       "rows": 0,
       "ranking_proxy": "wikimedia_sitelinks",
       "ok": false,
-      "error": "Client error '403 Forbidden' for url 'https://query.wikidata.org/sparql?query=%0ASELECT+%3Fgame+%3FgameLabel+%3Fsitelinks+WHERE+%7B%0A++%3Fgame+wdt%3AP31%2Fwdt%3AP279%2A+wd%3AQ7889+%3B%0A++++++++wikibase%3Asitelinks+%3Fsitelinks+.%0A++SERVICE+wikibase%3Alabel+%7B+bd%3AserviceParam+wikibase%3Alanguage+%22en%22.+%7D%0A%7D%0AORDER+BY+DESC%28%3Fsitelinks%29%0ALIMIT+1000%0A&format=json'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/403"
+      "errors": [
+        "POST https://query.wikidata.org/sparql: Client error '403 Forbidden' for url 'https://query.wikidata.org/sparql'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/403",
+        "POST https://query.wikidata.org/bigdata/namespace/wdq/sparql: Client error '403 Forbidden' for url 'https://query.wikidata.org/bigdata/namespace/wdq/sparql'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/403",
+        "GET https://query.wikidata.org/sparql: Client error '403 Forbidden' for url 'https://query.wikidata.org/sparql?query=%0ASELECT+%3Fgame+%3FgameLabel+%3Fsitelinks+WHERE+%7B%0A++%3Fgame+wdt%3AP31%2Fwdt%3AP279%2A+wd%3AQ7889+%3B%0A++++++++wikibase%3Asitelinks+%3Fsitelinks+.%0A++SERVICE+wikibase%3Alabel+%7B+bd%3AserviceParam+wikibase%3Alanguage+%22en%22.+%7D%0A%7D%0AORDER+BY+DESC%28%3Fsitelinks%29%0ALIMIT+1000%0A&format=json'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/403"
+      ]
+    },
+    "youtube_kpop_discovery": {
+      "source": "YouTube Data API v3 search.list + videos.list",
+      "queries": [
+        "K-pop official MV",
+        "K-pop girl group official MV",
+        "K-pop boy group official MV",
+        "K-pop soloist official MV",
+        "Korean pop official music video",
+        "K-pop 2000s official MV",
+        "K-pop 2010s official MV",
+        "K-pop 2020s official MV",
+        "K-pop debut official MV",
+        "K-pop viral official MV"
+      ],
+      "pages_per_query": 4,
+      "search_calls": 34,
+      "unique_video_candidates": 976,
+      "qualified_rows": 268,
+      "threshold": 100000000,
+      "ok": true
     }
   },
   "datasets": {
@@ -224,13 +254,17 @@
     },
     "video_game_music": {
       "target": 1000,
-      "rows": 0,
+      "rows": 388,
       "complete": false,
-      "metric_coverage": {},
+      "metric_coverage": {
+        "spotify_popularity": 387,
+        "spotify_streams_snapshot": 1
+      },
       "notes": [
-        "Game popularity is ranked by Wikidata Wikimedia-sitelink count, a transparent cross-language recognition proxy.",
-        "One highest-popularity confident soundtrack match per game; unmatched games are omitted rather than fabricated.",
-        "ranked_games=0; soundtrack_candidates=1127; matched_games=0"
+        "Primary path ranks games by Wikidata Wikimedia-sitelink count and selects one confident soundtrack match per game.",
+        "If Wikidata fails or leaves gaps, explicitly tagged video-game soundtrack albums are used as a non-empty source-backed fallback, with one recording per inferred game.",
+        "Generic movie/television OST rows are not accepted by the fallback unless source metadata explicitly identifies video-game music.",
+        "ranked_games=0; soundtrack_candidates=1126; fallback_added=388; matched_games=388"
       ]
     },
     "internet_native": {
@@ -255,8 +289,8 @@
       "complete": true,
       "metric_coverage": {
         "spotify_chart_streams_snapshot": 191,
-        "spotify_popularity": 518,
-        "spotify_streams": 185,
+        "spotify_popularity": 519,
+        "spotify_streams": 184,
         "spotify_streams_snapshot": 106
       },
       "notes": [
@@ -318,16 +352,17 @@
       "rows": 1000,
       "complete": true,
       "metric_coverage": {
-        "curated_required_seed": 3,
-        "spotify_chart_streams_snapshot": 38,
-        "spotify_popularity": 917,
-        "spotify_streams": 26,
-        "spotify_streams_snapshot": 16
+        "curated_required_seed": 4,
+        "spotify_chart_streams_snapshot": 2,
+        "spotify_popularity": 985,
+        "spotify_streams": 1,
+        "spotify_streams_snapshot": 8
       },
       "notes": [
-        "Source-backed catalog genres/tags first; ListenBrainz tag-radio fallback second.",
-        "No fabricated quota padding. Unknown song language is stored as ['und'], not guessed from title text.",
-        "catalog_candidates=1820; target=1000"
+        "Strict novelty/comedy/parody/meme tags plus a bounded set of known absurd novelty-title patterns.",
+        "Broad viral, children's music, cartoon music, nerdcore, and denpa tags do not qualify by themselves.",
+        "Explicit inclusions include Pink Fluffy Unicorns Dancing on Rainbows and Orelsan's Basique.",
+        "catalog_candidates=1257; target=1000"
       ]
     },
     "special_required": {
@@ -353,19 +388,21 @@
         "VocaDB-only classification and metadata; YouTube Data API view counts only.",
         "SongType must equal Original. Qualifying PV must be service=Youtube, pvType=Original, enabled, and individually >=100,000,000 views.",
         "No Spotify matching, title collision matching, remix, mashup, cover, remaster, MusicPV entry, reprint, or third-party view-count fallback.",
-        "vocadb_exhaustive=False; unresolved_youtube_video_ids=861"
+        "vocadb_exhaustive=True; unresolved_youtube_video_ids=6568"
       ]
     },
     "kpop": {
       "target": "all source-tagged K-pop songs with observed YouTube views strictly above 100,000,000",
-      "rows": 70,
+      "rows": 316,
       "complete": false,
       "metric_coverage": {
-        "youtube_views": 70
+        "youtube_views": 316
       },
       "notes": [
-        "Every materialized row is source-tagged K-pop with an observed YouTube view count strictly above 100,000,000.",
-        "Not marked exhaustive because the acquired catalog is not a complete enumeration of all YouTube music videos."
+        "Catalog-tagged K-pop candidates are merged with bounded official YouTube Data API discovery.",
+        "Every row has an observed YouTube view count strictly above 100,000,000; covers, reactions, lyric videos, remixes, teasers, and dance-practice videos are rejected.",
+        "catalog_qualified=70; final_deduplicated_rows=316",
+        "Not marked exhaustive because bounded YouTube search cannot prove enumeration of every K-pop upload."
       ]
     },
     "countries": {
@@ -383,18 +420,18 @@
     },
     "megalist": {
       "target": "deduplicated union of all requested lists",
-      "rows": 93619,
+      "rows": 94026,
       "complete": false,
       "metric_coverage": {
         "anime_popularity_proxy": 794,
         "cross_platform_track_score": 2,
         "curated_required_seed": 4,
-        "spotify_chart_streams_snapshot": 2832,
-        "spotify_popularity": 54238,
-        "spotify_regional_chart_streams_sum": 27709,
-        "spotify_streams": 2690,
-        "spotify_streams_snapshot": 3331,
-        "youtube_views": 2019
+        "spotify_chart_streams_snapshot": 2833,
+        "spotify_popularity": 54428,
+        "spotify_regional_chart_streams_sum": 27688,
+        "spotify_streams": 2689,
+        "spotify_streams_snapshot": 3332,
+        "youtube_views": 2256
       },
       "notes": [
         "Megalist is a deduplicated union of materialized rows; completeness is false because one or more upstream requested lists are incomplete."
@@ -410,6 +447,12 @@
     "Jikan themes MAL 40028: HTTP 429 rate limited; skipping optional fallback",
     "vtuber_original existing output could not be checked: No module named 'music_megalist.validation'",
     "vtuber_non_original existing output could not be checked: No module named 'music_megalist.validation'",
-    "Wikidata top video games: Client error '403 Forbidden' for url 'https://query.wikidata.org/sparql?query=%0ASELECT+%3Fgame+%3FgameLabel+%3Fsitelinks+WHERE+%7B%0A++%3Fgame+wdt%3AP31%2Fwdt%3AP279%2A+wd%3AQ7889+%3B%0A++++++++wikibase%3Asitelinks+%3Fsitelinks+.%0A++SERVICE+wikibase%3Alabel+%7B+bd%3AserviceParam+wikibase%3Alanguage+%22en%22.+%7D%0A%7D%0AORDER+BY+DESC%28%3Fsitelinks%29%0ALIMIT+1000%0A&format=json'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/403"
+    "Wikidata top video games failed: POST https://query.wikidata.org/sparql: Client error '403 Forbidden' for url 'https://query.wikidata.org/sparql'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/403 | POST https://query.wikidata.org/bigdata/namespace/wdq/sparql: Client error '403 Forbidden' for url 'https://query.wikidata.org/bigdata/namespace/wdq/sparql'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/403 | GET https://query.wikidata.org/sparql: Client error '403 Forbidden' for url 'https://query.wikidata.org/sparql?query=%0ASELECT+%3Fgame+%3FgameLabel+%3Fsitelinks+WHERE+%7B%0A++%3Fgame+wdt%3AP31%2Fwdt%3AP279%2A+wd%3AQ7889+%3B%0A++++++++wikibase%3Asitelinks+%3Fsitelinks+.%0A++SERVICE+wikibase%3Alabel+%7B+bd%3AserviceParam+wikibase%3Alanguage+%22en%22.+%7D%0A%7D%0AORDER+BY+DESC%28%3Fsitelinks%29%0ALIMIT+1000%0A&format=json'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/403",
+    "internet_native existing output could not be checked: No module named 'music_megalist.validation'",
+    "electronic_subcultures existing output could not be checked: No module named 'music_megalist.validation'",
+    "alternative_extreme existing output could not be checked: No module named 'music_megalist.validation'",
+    "jazz_depth existing output could not be checked: No module named 'music_megalist.validation'",
+    "children_childhood existing output could not be checked: No module named 'music_megalist.validation'",
+    "special_required existing output could not be checked: No module named 'music_megalist.validation'"
   ]
 }
