@@ -1,0 +1,196 @@
+{
+  "fixed_targets": {
+    "anime/anime_songs.csv": {
+      "target": 1000,
+      "rows": 1000,
+      "complete": true
+    },
+    "worldwide/worldwide_51000.csv": {
+      "target": 51000,
+      "rows": 51000,
+      "complete": true
+    },
+    "classical/classical_10000.csv": {
+      "target": 10000,
+      "rows": 10000,
+      "complete": true
+    },
+    "vtuber_original/vtuber_original_10000.csv": {
+      "target": 1000,
+      "rows": 1000,
+      "complete": true
+    },
+    "emerging/emerging_10000.csv": {
+      "target": 10000,
+      "rows": 10000,
+      "complete": true
+    },
+    "genres/genres_10000.csv": {
+      "target": 10000,
+      "rows": 10000,
+      "complete": true
+    },
+    "screen_soundtracks/screen_soundtracks_10000.csv": {
+      "target": 10000,
+      "rows": 5660,
+      "complete": false
+    },
+    "vtuber_non_original/vtuber_non_original_10000.csv": {
+      "target": 1000,
+      "rows": 1000,
+      "complete": true
+    },
+    "video_games/video_game_music_1000.csv": {
+      "target": 1000,
+      "rows": 1000,
+      "complete": true
+    },
+    "internet_native/internet_native_1000.csv": {
+      "target": 1000,
+      "rows": 1000,
+      "complete": true
+    },
+    "electronic_subcultures/electronic_subcultures_1000.csv": {
+      "target": 1000,
+      "rows": 1000,
+      "complete": true
+    },
+    "alternative_extreme/alternative_extreme_1000.csv": {
+      "target": 1000,
+      "rows": 1000,
+      "complete": true
+    },
+    "jazz_depth/jazz_depth_1000.csv": {
+      "target": 1000,
+      "rows": 999,
+      "complete": false
+    },
+    "children_childhood/children_childhood_100.csv": {
+      "target": 100,
+      "rows": 100,
+      "complete": true
+    },
+    "unserious/unserious_1000.csv": {
+      "target": 1000,
+      "rows": 1000,
+      "complete": true
+    },
+    "special_required/special_required.csv": {
+      "target": 4,
+      "rows": 4,
+      "complete": true
+    }
+  },
+  "semantic_checks": {
+    "worldwide_buckets": {
+      "current": {
+        "target": 10000,
+        "rows": 10000,
+        "complete": true
+      },
+      "2020s": {
+        "target": 10000,
+        "rows": 10000,
+        "complete": true
+      },
+      "2010s": {
+        "target": 10000,
+        "rows": 10000,
+        "complete": true
+      },
+      "2000s": {
+        "target": 10000,
+        "rows": 10000,
+        "complete": true
+      },
+      "1990s": {
+        "target": 5000,
+        "rows": 5000,
+        "complete": true
+      },
+      "1980s": {
+        "target": 3000,
+        "rows": 3000,
+        "complete": true
+      },
+      "1970s": {
+        "target": 2000,
+        "rows": 2000,
+        "complete": true
+      },
+      "1960s": {
+        "target": 1000,
+        "rows": 1000,
+        "complete": true
+      }
+    },
+    "genre_diversity": {
+      "required_genres": 50,
+      "observed_genres": 50,
+      "complete": true
+    },
+    "spotify_country_top1000": {
+      "detected_markets": 76,
+      "complete_markets": 73,
+      "total_rows": 73590,
+      "target_per_country": 1000,
+      "source_exhausted_markets": 0,
+      "unsupported_index_links": 0,
+      "failures": 1,
+      "files_ok": true,
+      "complete": false
+    },
+    "vocaloid_threshold": {
+      "target": "VocaDB Original voice-synth songs with one official Original YouTube PV >=100,000,000 views; cap 10,000",
+      "rows": 15,
+      "invalid_rows": [],
+      "threshold_valid": true,
+      "corpus_completeness": "Read STATUS.json datasets.vocaloid.complete; threshold validity does not prove exhaustive source coverage."
+    },
+    "kpop_youtube_threshold": {
+      "target": "official videos above 100,000,000 views found by the fully scanned audited K-pop artist registry",
+      "rows": 269,
+      "invalid_rows": [],
+      "duplicate_title_artist_keys": 0,
+      "threshold_valid": true,
+      "corpus_completeness": "Read STATUS.json datasets.kpop.complete; completion is scoped to the audited artist registry, not every internet upload labeled K-pop."
+    },
+    "video_game_music_classification": {
+      "rows": 1000,
+      "invalid_rows": [],
+      "complete": true
+    },
+    "special_required": {
+      "required": [
+        "Beethoven Virus",
+        "Pink Fluffy Unicorns Dancing on Rainbows",
+        "SpongeBob SquarePants Theme",
+        "The Pi Song (100 Digits of π)"
+      ],
+      "missing": [],
+      "complete": true
+    },
+    "vtuber_original_classification": {
+      "rows": 1000,
+      "invalid_rows": [],
+      "complete": true
+    },
+    "vtuber_cover_classification": {
+      "rows": 1000,
+      "invalid_rows": [],
+      "complete": true
+    },
+    "megalist_languages": {
+      "rows": 94874,
+      "invalid_rows": [],
+      "complete": true
+    },
+    "megalist_deduplication": {
+      "rows": 94874,
+      "duplicate_title_main_artist_keys": 0,
+      "complete": true
+    }
+  },
+  "overall_complete": false,
+  "status_claims_all_requested_complete": false
+}
