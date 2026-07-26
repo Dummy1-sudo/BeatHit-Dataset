@@ -508,13 +508,13 @@
     },
     {
       "path": "data/video_games/video_game_music_1000.csv",
-      "bytes": 245061,
-      "sha256": "ff61e3f2e7789359e8a38189e14c90460bc7ee6753291382e932e873dfacc589"
+      "bytes": 1143224,
+      "sha256": "f0368d25fd8d43bf6aeca2dfd99b4e919d605d4323bfef0d30776cc96e55445d"
     },
     {
       "path": "data/vocaloid/vocaloid_youtube_100m.csv",
-      "bytes": 53980,
-      "sha256": "75c36dbe0929cd75a701a50a2ab9f467c5341a5b836a96f769bc68b474dbd832"
+      "bytes": 36840,
+      "sha256": "354ceb75bd12f683116a55480a9886c09edfdd311f5ad96dbdba19968d21e353"
     },
     {
       "path": "data/vtuber_non_original/vtuber_non_original_10000.csv",

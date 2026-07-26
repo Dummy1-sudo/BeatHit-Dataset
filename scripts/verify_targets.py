@@ -131,14 +131,18 @@ def main() -> None:
         try:
             official_total = int(e.get("official_youtube_total_views") or 0)
             resolved_pvs = int(e.get("official_youtube_resolved_pv_count") or 0)
+            highest_individual = int(e.get("highest_individual_official_pv_views") or 0)
         except Exception:
             official_total = 0
             resolved_pvs = 0
+            highest_individual = 0
         voice_synths = e.get("voice_synth_vocalists")
         voice_synth_types = e.get("voice_synth_types")
         official_pvs = e.get("official_youtube_pvs")
         pv_ids = []
         pv_sum = 0
+        selected_pv_views = 0
+        selected_video_id = str(e.get("youtube_video_id") or "").strip()
         if isinstance(official_pvs, list):
             for pv in official_pvs:
                 if not isinstance(pv, dict):
@@ -151,13 +155,16 @@ def main() -> None:
                 if video_id:
                     pv_ids.append(video_id)
                     pv_sum += views
+                    if video_id == selected_video_id:
+                        selected_pv_views = views
         valid = (
             r.get("metric_name") == "youtube_views"
             and r.get("metric_unit") == "views"
             and value >= 100_000_000
             and view_count == int(value)
-            and official_total == int(value)
-            and pv_sum == int(value)
+            and highest_individual == int(value)
+            and selected_pv_views == int(value)
+            and official_total == pv_sum
             and resolved_pvs == len(pv_ids)
             and len(pv_ids) == len(set(pv_ids))
             and isinstance(voice_synths, list)
@@ -167,12 +174,13 @@ def main() -> None:
             and str(e.get("vocadb_song_type") or "").casefold() == "original"
             and str(e.get("youtube_pv_type") or "").casefold() == "original"
             and str(e.get("youtube_pv_service") or "").casefold() == "youtube"
-            and bool(str(e.get("youtube_video_id") or "").strip())
+            and bool(selected_video_id)
+            and str(e.get("qualification_method") or "") == "single_official_original_youtube_pv"
         )
         if not valid:
             invalid_vocaloid.append(i)
     report["semantic_checks"]["vocaloid_threshold"] = {
-        "target": "VocaDB Original voice-synth songs whose distinct official Original YouTube PVs total >=100,000,000 views; cap 10,000",
+        "target": "VocaDB Original voice-synth songs with one official Original YouTube PV >=100,000,000 views; cap 10,000",
         "rows": len(vocaloid),
         "invalid_rows": invalid_vocaloid[:100],
         "threshold_valid": not invalid_vocaloid and len(vocaloid) <= 10_000,
@@ -205,12 +213,12 @@ def main() -> None:
         kpop_keys.append((norm(r.get("title") or ""), norm(verified_artist or r.get("main_artist") or "")))
     duplicate_kpop = len(kpop_keys) - len(set(kpop_keys))
     report["semantic_checks"]["kpop_youtube_threshold"] = {
-        "target": "verified K-pop artists with observed YouTube views strictly above 100,000,000",
+        "target": "official videos above 100,000,000 views found by the fully scanned audited K-pop artist registry",
         "rows": len(kpop),
         "invalid_rows": invalid_kpop[:100],
         "duplicate_title_artist_keys": duplicate_kpop,
         "threshold_valid": not invalid_kpop and duplicate_kpop == 0,
-        "corpus_completeness": "Read STATUS.json datasets.kpop.complete; bounded official-YouTube search is not claimed exhaustive.",
+        "corpus_completeness": "Read STATUS.json datasets.kpop.complete; completion is scoped to the audited artist registry, not every internet upload labeled K-pop.",
     }
 
     video_games = read_csv("video_games/video_game_music_1000.csv")
@@ -231,6 +239,7 @@ def main() -> None:
         "franchise_artist",
         "explicit_track_reference",
         "genre_album",
+        "listenbrainz_release_group_tag",
     }
     seen_game_songs = set()
     for i, r in enumerate(video_games, 1):
@@ -238,7 +247,16 @@ def main() -> None:
         screen_work = str(r.get("screen_work") or "").strip()
         evidence = f"{r.get('album') or ''} | {screen_work} | {r.get('genres') or ''}"
         association = str(e.get("game_association_kind") or "")
-        song_key = (norm(screen_work), norm(r.get("title") or ""), norm(r.get("main_artist") or ""))
+        game_song_key = (norm(screen_work), norm(r.get("title") or ""), norm(r.get("main_artist") or ""))
+        listenbrainz_evidence_valid = bool(
+            association != "listenbrainz_release_group_tag"
+            or (
+                str(r.get("musicbrainz_recording_mbid") or "").strip()
+                and str(e.get("listenbrainz_source_scope") or "") == "release-group"
+                and bool(e.get("listenbrainz_source_tags"))
+                and str(e.get("explicit_soundtrack_release") or "").strip()
+            )
+        )
         invalid = (
             not screen_work
             or str(e.get("culture_category") or "") != "video_game_music"
@@ -246,11 +264,12 @@ def main() -> None:
             or reject_game_text.search(evidence)
             or reject_screen_work.search(screen_work)
             or (association == "genre_album" and not str(e.get("game_wikidata_id") or "").strip())
-            or song_key in seen_game_songs
+            or not listenbrainz_evidence_valid
+            or game_song_key in seen_game_songs
         )
         if invalid:
             invalid_video_games.append(i)
-        seen_game_songs.add(song_key)
+        seen_game_songs.add(game_song_key)
     report["semantic_checks"]["video_game_music_classification"] = {
         "rows": len(video_games),
         "invalid_rows": invalid_video_games[:100],

@@ -22,7 +22,7 @@ def append_row(row: SongRow, path: str | Path) -> int:
         if isinstance(v, (list, dict)):
             d[k] = json.dumps(v, ensure_ascii=False, separators=(",", ":"))
     with path.open("a", encoding="utf-8", newline="") as f:
-        w = csv.DictWriter(f, fieldnames=FIELDS)
+        w = csv.DictWriter(f, fieldnames=FIELDS, lineterminator="\n")
         if needs_header:
             w.writeheader()
         w.writerow(d)
@@ -39,7 +39,7 @@ def write_rows(rows: Iterable[SongRow], path: str | Path) -> int:
                 f.write(row.model_dump_json() + "\n")
     else:
         with path.open("w", encoding="utf-8", newline="") as f:
-            w = csv.DictWriter(f, fieldnames=FIELDS)
+            w = csv.DictWriter(f, fieldnames=FIELDS, lineterminator="\n")
             w.writeheader()
             for row in rows:
                 d = row.model_dump()

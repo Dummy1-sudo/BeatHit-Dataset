@@ -11,7 +11,7 @@ on:
       restore_run_id:
         description: "Previous workflow run whose generated-output artifact should be restored"
         required: false
-        default: "30067726035"
+        default: ""
         type: string
   push:
     branches: [main]
@@ -60,6 +60,21 @@ jobs:
           restore-keys: |
             beathit-sources-v5-${{ runner.os }}-
 
+      - name: Restore resumable builder checkpoints
+        id: restore-builder-checkpoints
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            .cache/full_build/vocadb_original_youtube_scan.jsonl
+            .cache/full_build/vocadb_original_youtube_scan.meta.json
+            .cache/full_build/vocadb_youtube_view_counts.json
+            .cache/full_build/kpop_youtube_checkpoint.json
+            .cache/full_build/listenbrainz_video_game_music.json
+            .cache/full_build/wikidata_top_video_games.json
+          key: beathit-builder-checkpoints-v2-${{ runner.os }}-${{ github.run_id }}
+          restore-keys: |
+            beathit-builder-checkpoints-v2-${{ runner.os }}-
+
       - name: Restore generated outputs from previous run
         if: ${{ github.event_name == 'workflow_dispatch' && inputs.restore_run_id != '' }}
         uses: actions/download-artifact@v4
@@ -80,12 +95,26 @@ jobs:
           BEATHIT_RYD_WORKERS: '20'
           BEATHIT_YTDLP_FALLBACK: '0'
           BEATHIT_VOCADB_SCAN_LIMIT: ${{ vars.BEATHIT_VOCADB_SCAN_LIMIT || '350000' }}
-          BEATHIT_VOCALOID_VIEW_CACHE_DAYS: ${{ vars.BEATHIT_VOCALOID_VIEW_CACHE_DAYS || '3' }}
-          BEATHIT_KPOP_SEARCH_PAGES: ${{ vars.BEATHIT_KPOP_SEARCH_PAGES || '2' }}
-          BEATHIT_KPOP_ARTIST_SEARCHES: ${{ vars.BEATHIT_KPOP_ARTIST_SEARCHES || '35' }}
+          BEATHIT_VOCALOID_VIEW_CACHE_DAYS: ${{ vars.BEATHIT_VOCALOID_VIEW_CACHE_DAYS || '30' }}
+          BEATHIT_KPOP_VIEW_CACHE_DAYS: ${{ vars.BEATHIT_KPOP_VIEW_CACHE_DAYS || '7' }}
+          BEATHIT_KPOP_SEARCH_CALL_BUDGET: ${{ vars.BEATHIT_KPOP_SEARCH_CALL_BUDGET || '59' }}
+          BEATHIT_KPOP_GENERIC_SEARCHES: ${{ vars.BEATHIT_KPOP_GENERIC_SEARCHES || '0' }}
           BEATHIT_COUNTRY_WORKERS: ${{ vars.BEATHIT_COUNTRY_WORKERS || '4' }}
         run: |
-          python scripts/build_full_dataset.py --reuse-complete --force vocaloid video_game_music kpop --only vocaloid video_game_music kpop
+          python scripts/build_full_dataset.py --reuse-complete --only vocaloid video_game_music kpop
+
+      - name: Save resumable builder checkpoints
+        if: ${{ always() && steps.restore-builder-checkpoints.outputs.cache-hit != 'true' }}
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            .cache/full_build/vocadb_original_youtube_scan.jsonl
+            .cache/full_build/vocadb_original_youtube_scan.meta.json
+            .cache/full_build/vocadb_youtube_view_counts.json
+            .cache/full_build/kpop_youtube_checkpoint.json
+            .cache/full_build/listenbrainz_video_game_music.json
+            .cache/full_build/wikidata_top_video_games.json
+          key: beathit-builder-checkpoints-v2-${{ runner.os }}-${{ github.run_id }}
 
       - name: Update checksums
         run: python scripts/update_manifest.py
@@ -163,6 +192,20 @@ jobs:
             data/children_childhood/*.csv
             data/unserious/*.csv
             data/special_required/*.csv
+
+      - name: Upload resumable builder checkpoints
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: beathit-builder-checkpoints
+          include-hidden-files: true
+          path: |
+            .cache/full_build/vocadb_original_youtube_scan.jsonl
+            .cache/full_build/vocadb_original_youtube_scan.meta.json
+            .cache/full_build/vocadb_youtube_view_counts.json
+            .cache/full_build/kpop_youtube_checkpoint.json
+            .cache/full_build/listenbrainz_video_game_music.json
+            .cache/full_build/wikidata_top_video_games.json
 
       - name: Propagate validation failure
         if: ${{ steps.validation.outcome == 'failure' }}

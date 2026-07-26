@@ -17,7 +17,7 @@ import pandas as pd
 from rapidfuzz import fuzz
 
 from .dedupe import norm
-from .io import write_rows
+from .io import read_rows, write_rows
 from .models import SongRow
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -942,67 +942,167 @@ def _youtube_kpop_rows(
     threshold: int,
     trusted_aliases: dict[str, str],
     trusted_artists: list[str],
-) -> list[SongRow]:
+) -> tuple[list[SongRow], bool]:
+    """Resume a bounded, registry-wide official-video scan.
+
+    YouTube ``search.list`` is expensive. Successful artist queries and the resulting
+    ``videos.list`` snapshots are checkpointed after every request so a quota-limited
+    workflow continues with the first unfinished artist instead of repeating prior work.
+    """
     key = os.getenv("YOUTUBE_API_KEY", "").strip()
     if not key:
         status.warnings.append("K-pop YouTube discovery skipped: missing YOUTUBE_API_KEY")
-        return []
+        status.sources["youtube_kpop_discovery"] = {
+            "source": "YouTube Data API v3 search.list + videos.list",
+            "ok": False,
+            "error": "missing YOUTUBE_API_KEY",
+        }
+        return [], False
 
-    pages = max(1, min(_safe_int(os.getenv("BEATHIT_KPOP_SEARCH_PAGES")) or 2, 4))
-    artist_search_limit = max(
-        0,
-        min(_safe_int(os.getenv("BEATHIT_KPOP_ARTIST_SEARCHES")) or 35, 45),
+    cache_path = CACHE / "kpop_youtube_checkpoint.json"
+    now = int(time.time())
+    detail_ttl = max(
+        1,
+        min(_safe_int(os.getenv("BEATHIT_KPOP_VIEW_CACHE_DAYS")) or 7, 30),
+    ) * 86_400
+    cache: dict[str, Any] = {
+        "schema_version": 2,
+        "queries": {},
+        "videos": {},
+    }
+    try:
+        if cache_path.exists():
+            value = json.loads(cache_path.read_text(encoding="utf-8"))
+            if isinstance(value, dict) and value.get("schema_version") == 2:
+                cache = value
+    except Exception as exc:
+        status.warnings.append(f"K-pop YouTube checkpoint ignored: {exc}")
+
+    query_cache = cache.setdefault("queries", {})
+    video_cache = cache.setdefault("videos", {})
+    if not isinstance(query_cache, dict) or not isinstance(video_cache, dict):
+        query_cache = {}
+        video_cache = {}
+        cache = {"schema_version": 2, "queries": query_cache, "videos": video_cache}
+
+    def save_cache() -> None:
+        CACHE.mkdir(parents=True, exist_ok=True)
+        cache["updated_at"] = now
+        temp_path = cache_path.with_suffix(".tmp")
+        temp_path.write_text(
+            json.dumps(cache, ensure_ascii=False, separators=(",", ":")) + "\n",
+            encoding="utf-8",
+        )
+        temp_path.replace(cache_path)
+
+    # Artist-specific queries are substantially cleaner than broad "K-pop" searches.
+    # Optional generic queries remain available for an audited expansion pass, but the
+    # default budget is devoted to every catalog/curation-verified artist identity.
+    artist_queries = list(
+        dict.fromkeys(f'"{artist}" official MV' for artist in trusted_artists if artist)
     )
-    search_plan = [(query, pages) for query in KPOP_SEARCH_QUERIES]
-    search_plan.extend((f'"{artist}" official MV', 1) for artist in trusted_artists[:artist_search_limit])
+    generic_limit = max(
+        0,
+        min(
+            _safe_int(os.getenv("BEATHIT_KPOP_GENERIC_SEARCHES")) or 0,
+            len(KPOP_SEARCH_QUERIES),
+        ),
+    )
+    search_plan = artist_queries + KPOP_SEARCH_QUERIES[:generic_limit]
+    search_call_budget = max(
+        1,
+        # 59 search calls leave enough of the default daily YouTube quota for
+        # the exhaustive Vocaloid videos.list pass in the same workflow.
+        min(_safe_int(os.getenv("BEATHIT_KPOP_SEARCH_CALL_BUDGET")) or 59, 59),
+    )
 
     discovered: dict[str, dict[str, Any]] = {}
     search_calls = 0
+    failed_queries: list[str] = []
     with httpx.Client(
         timeout=60,
         follow_redirects=True,
-        headers={"User-Agent": "BeatHit-Dataset/1.0"},
+        headers={
+            "User-Agent": (
+                "BeatHit-Dataset/1.0 "
+                "(+https://github.com/Dummy1-sudo/BeatHit-Dataset)"
+            )
+        },
     ) as client:
-        for query, query_pages in search_plan:
-            page_token: str | None = None
-            for page in range(query_pages):
-                params = {
-                    "part": "snippet",
-                    "q": query,
-                    "type": "video",
-                    "videoCategoryId": "10",
-                    "order": "viewCount",
-                    "maxResults": "50",
-                    "regionCode": "KR",
-                    "safeSearch": "none",
-                    "key": key,
-                }
-                if page_token:
-                    params["pageToken"] = page_token
-                try:
-                    response = client.get(f"{YOUTUBE_API}/search", params=params)
-                    response.raise_for_status()
-                    data = response.json()
-                    search_calls += 1
-                except Exception as exc:
-                    status.warnings.append(f"K-pop YouTube search {query!r} page={page + 1}: {exc}")
-                    break
-                for item in data.get("items", []) or []:
-                    video_id = str((item.get("id") or {}).get("videoId") or "").strip()
-                    if video_id:
-                        discovered.setdefault(
-                            video_id,
-                            {"query": query, "search_snippet": item.get("snippet") or {}},
-                        )
-                page_token = str(data.get("nextPageToken") or "").strip() or None
-                if not page_token:
-                    break
-                time.sleep(0.05)
+        for query in search_plan:
+            cached_query = query_cache.get(query)
+            if isinstance(cached_query, dict) and cached_query.get("complete"):
+                cached_videos = cached_query.get("videos") or {}
+                if isinstance(cached_videos, dict):
+                    for video_id, snippet in cached_videos.items():
+                        if video_id:
+                            discovered.setdefault(
+                                str(video_id),
+                                {"query": query, "search_snippet": snippet or {}},
+                            )
+                continue
+            if search_calls >= search_call_budget:
+                continue
 
-        rows: list[SongRow] = []
+            params = {
+                "part": "snippet",
+                "q": query,
+                "type": "video",
+                "videoCategoryId": "10",
+                "order": "viewCount",
+                "maxResults": "50",
+                "regionCode": "KR",
+                "safeSearch": "none",
+                "key": key,
+            }
+            try:
+                response = client.get(f"{YOUTUBE_API}/search", params=params)
+                search_calls += 1
+                if response.is_error:
+                    raise RuntimeError(
+                        f"HTTP {response.status_code}: {response.text[:800]}"
+                    )
+                data = response.json()
+            except Exception as exc:
+                failed_queries.append(query)
+                status.warnings.append(f"K-pop YouTube search {query!r}: {exc}")
+                if "quota" in str(exc).casefold():
+                    break
+                continue
+
+            query_videos: dict[str, Any] = {}
+            for item in data.get("items", []) or []:
+                video_id = str((item.get("id") or {}).get("videoId") or "").strip()
+                if video_id:
+                    snippet = item.get("snippet") or {}
+                    query_videos[video_id] = snippet
+                    discovered.setdefault(
+                        video_id,
+                        {"query": query, "search_snippet": snippet},
+                    )
+            query_cache[query] = {
+                "complete": True,
+                "checked_at": now,
+                "videos": query_videos,
+            }
+            save_cache()
+            time.sleep(0.05)
+
         video_ids = list(discovered)
-        for start in range(0, len(video_ids), 50):
-            batch = video_ids[start:start + 50]
+        pending_video_ids: list[str] = []
+        for video_id in video_ids:
+            detail = video_cache.get(video_id)
+            if not isinstance(detail, dict):
+                pending_video_ids.append(video_id)
+                continue
+            checked_at = _safe_int(detail.get("checked_at")) or 0
+            if not checked_at or now - checked_at > detail_ttl:
+                pending_video_ids.append(video_id)
+
+        failed_stat_batches = 0
+        quota_stopped = False
+        for start in range(0, len(pending_video_ids), 50):
+            batch = pending_video_ids[start:start + 50]
             try:
                 response = client.get(
                     f"{YOUTUBE_API}/videos",
@@ -1012,85 +1112,156 @@ def _youtube_kpop_rows(
                         "key": key,
                     },
                 )
-                response.raise_for_status()
+                if response.is_error:
+                    raise RuntimeError(
+                        f"HTTP {response.status_code}: {response.text[:800]}"
+                    )
                 items = response.json().get("items", []) or []
             except Exception as exc:
-                status.warnings.append(f"K-pop YouTube statistics batch={start // 50 + 1}: {exc}")
+                failed_stat_batches += 1
+                status.warnings.append(
+                    f"K-pop YouTube statistics batch={start // 50 + 1}: {exc}"
+                )
+                if "quota" in str(exc).casefold():
+                    quota_stopped = True
+                    break
                 continue
 
+            returned: dict[str, Any] = {}
             for item in items:
                 video_id = str(item.get("id") or "").strip()
-                snippet = item.get("snippet") or {}
-                statistics = item.get("statistics") or {}
-                views = _safe_int(statistics.get("viewCount"))
-                if views is None or views <= threshold:
-                    continue
-                raw_title = html.unescape(str(snippet.get("title") or "")).strip()
-                channel_title = html.unescape(str(snippet.get("channelTitle") or "")).strip()
-                if KPOP_REJECT_TITLE.search(raw_title):
-                    continue
-
-                title, parsed_artist = _parse_kpop_video_identity(raw_title, channel_title)
-                artist = _match_trusted_kpop_artist(parsed_artist, trusted_aliases)
-                if artist is None:
-                    continue
-
-                channel_matches_artist = bool(
-                    _kpop_artist_aliases(channel_title).intersection(_kpop_artist_aliases(artist))
-                )
-                official = bool(
-                    KPOP_LABEL_CHANNEL.search(channel_title)
-                    or channel_matches_artist
-                )
-                if not official or not KPOP_OFFICIAL_MARKER.search(raw_title):
-                    continue
-
-                rows.append(
-                    SongRow(
-                        title=title,
-                        main_artist=artist,
-                        genres=["k-pop"],
-                        languages=["und"],
-                        metric_name="youtube_views",
-                        metric_value=float(views),
-                        metric_unit="views",
-                        view_count=views,
-                        overall_popularity_score=math.log10(views + 1) * 10,
-                        source_url=f"https://www.youtube.com/watch?v={video_id}",
-                        retrieved_at=TODAY,
-                        source_notes=(
-                            "Discovered with the official YouTube Data API and retained only when "
-                            "the parsed artist matches a catalog-verified K-pop artist and the upload "
-                            "has official-MV, official-label, or artist-channel evidence."
+                if video_id:
+                    returned[video_id] = {
+                        "checked_at": now,
+                        "exists": True,
+                        "snippet": item.get("snippet") or {},
+                        "view_count": _safe_int(
+                            (item.get("statistics") or {}).get("viewCount")
                         ),
-                        extra={
-                            "culture_category": "kpop",
-                            "youtube_video_id": video_id,
-                            "youtube_channel_id": snippet.get("channelId"),
-                            "youtube_channel_title": channel_title,
-                            "youtube_original_title": raw_title,
-                            "youtube_discovery_query": (discovered.get(video_id) or {}).get("query"),
-                            "youtube_view_threshold_strictly_greater_than": threshold,
-                            "kpop_artist_verified": True,
-                            "verified_kpop_artist": artist,
-                            "selection": "official YouTube API discovery restricted to verified K-pop artists",
-                        },
-                    )
+                    }
+            for video_id in batch:
+                video_cache[video_id] = returned.get(
+                    video_id,
+                    {
+                        "checked_at": now,
+                        "exists": False,
+                        "snippet": (
+                            (discovered.get(video_id) or {}).get("search_snippet") or {}
+                        ),
+                        "view_count": None,
+                    },
                 )
+            save_cache()
 
+        rows: list[SongRow] = []
+        for video_id in video_ids:
+            detail = video_cache.get(video_id)
+            if not isinstance(detail, dict):
+                continue
+            views = _safe_int(detail.get("view_count"))
+            if views is None or views <= threshold:
+                continue
+            snippet = detail.get("snippet") or {}
+            raw_title = html.unescape(str(snippet.get("title") or "")).strip()
+            channel_title = html.unescape(
+                str(snippet.get("channelTitle") or "")
+            ).strip()
+            if KPOP_REJECT_TITLE.search(raw_title):
+                continue
+
+            title, parsed_artist = _parse_kpop_video_identity(raw_title, channel_title)
+            artist = _match_trusted_kpop_artist(parsed_artist, trusted_aliases)
+            if artist is None:
+                continue
+
+            channel_matches_artist = bool(
+                _kpop_artist_aliases(channel_title).intersection(
+                    _kpop_artist_aliases(artist)
+                )
+            )
+            official = bool(
+                KPOP_LABEL_CHANNEL.search(channel_title) or channel_matches_artist
+            )
+            if not official or not KPOP_OFFICIAL_MARKER.search(raw_title):
+                continue
+
+            rows.append(
+                SongRow(
+                    title=title,
+                    main_artist=artist,
+                    genres=["k-pop"],
+                    languages=["und"],
+                    metric_name="youtube_views",
+                    metric_value=float(views),
+                    metric_unit="views",
+                    view_count=views,
+                    overall_popularity_score=math.log10(views + 1) * 10,
+                    source_url=f"https://www.youtube.com/watch?v={video_id}",
+                    retrieved_at=TODAY,
+                    source_notes=(
+                        "Discovered with the official YouTube Data API and retained "
+                        "only when the parsed artist matches the audited K-pop artist "
+                        "registry and the upload has official-video evidence."
+                    ),
+                    extra={
+                        "culture_category": "kpop",
+                        "youtube_video_id": video_id,
+                        "youtube_channel_id": snippet.get("channelId"),
+                        "youtube_channel_title": channel_title,
+                        "youtube_original_title": raw_title,
+                        "youtube_discovery_query": (
+                            discovered.get(video_id) or {}
+                        ).get("query"),
+                        "youtube_view_threshold_strictly_greater_than": threshold,
+                        "kpop_artist_verified": True,
+                        "verified_kpop_artist": artist,
+                        "selection": (
+                            "official YouTube API discovery restricted to the "
+                            "audited K-pop artist registry"
+                        ),
+                    },
+                )
+            )
+
+    save_cache()
+    completed_queries = sum(
+        1
+        for query in search_plan
+        if isinstance(query_cache.get(query), dict)
+        and query_cache[query].get("complete")
+    )
+    unresolved_statistics = sum(
+        1
+        for video_id in discovered
+        if not isinstance(video_cache.get(video_id), dict)
+        or not (_safe_int(video_cache[video_id].get("checked_at")) or 0)
+    )
+    registry_complete = bool(
+        search_plan
+        and completed_queries == len(search_plan)
+        and not failed_queries
+        and not failed_stat_batches
+        and not quota_stopped
+        and unresolved_statistics == 0
+    )
     status.sources["youtube_kpop_discovery"] = {
         "source": "YouTube Data API v3 search.list + videos.list",
-        "queries": [query for query, _ in search_plan],
-        "generic_pages_per_query": pages,
-        "artist_specific_queries": min(artist_search_limit, len(trusted_artists)),
-        "curated_artist_registry": len(KPOP_CURATED_ARTISTS),
-        "search_calls": search_calls,
+        "planned_artist_queries": len(artist_queries),
+        "optional_generic_queries": generic_limit,
+        "completed_queries": completed_queries,
+        "live_search_calls": search_calls,
+        "search_call_budget": search_call_budget,
         "unique_video_candidates": len(discovered),
         "qualified_rows": len(rows),
+        "failed_queries": failed_queries,
+        "failed_statistics_batches": failed_stat_batches,
+        "unresolved_statistics": unresolved_statistics,
+        "registry_scan_complete": registry_complete,
         "threshold": threshold,
-        "ok": bool(rows),
+        "checkpoint": str(cache_path.relative_to(ROOT)),
+        "ok": registry_complete,
     }
-    return rows
+    return rows, registry_complete
 
 
 def build_kpop_youtube_100m(catalog: pd.DataFrame, status: Any) -> list[SongRow]:
@@ -1098,7 +1269,26 @@ def build_kpop_youtube_100m(catalog: pd.DataFrame, status: Any) -> list[SongRow]
     threshold = 100_000_000
     trusted_aliases, trusted_artists = _build_trusted_kpop_artists(catalog)
 
+    output_path = DATA / "kpop" / "kpop_youtube_over_100m.csv"
     rows: list[SongRow] = []
+
+    # A quota-limited refresh must never erase previously verified canonical rows.
+    if output_path.exists():
+        try:
+            for existing in read_rows(output_path):
+                extra = existing.extra or {}
+                if (
+                    existing.metric_name == "youtube_views"
+                    and existing.metric_unit == "views"
+                    and int(existing.view_count or existing.metric_value or 0) > threshold
+                    and bool(extra.get("kpop_artist_verified"))
+                    and str(extra.get("verified_kpop_artist") or "").strip()
+                ):
+                    rows.append(existing)
+        except Exception as exc:
+            status.warnings.append(f"K-pop existing output was not reused: {exc}")
+    preserved_rows = len(rows)
+
     for _, row in catalog.iterrows():
         row_genres = _parse_clean_genres(row.get("genres"))
         if not set(row_genres).intersection(KPOP_STRONG_GENRES):
@@ -1130,21 +1320,28 @@ def build_kpop_youtube_100m(catalog: pd.DataFrame, status: Any) -> list[SongRow]
         song.main_artist = canonical_artist
         rows.append(song)
 
-    catalog_rows = len(rows)
-    rows.extend(_youtube_kpop_rows(status, threshold, trusted_aliases, trusted_artists))
+    catalog_rows = len(rows) - preserved_rows
+    youtube_rows, registry_complete = _youtube_kpop_rows(
+        status,
+        threshold,
+        trusted_aliases,
+        trusted_artists,
+    )
+    rows.extend(youtube_rows)
     rows = _dedupe_kpop_rows(rows, 10_000)
-    write_rows(rows, DATA / "kpop" / "kpop_youtube_over_100m.csv")
+    write_rows(rows, output_path)
     st = status.datasets["kpop"]
     st.rows = len(rows)
-    st.complete = False
+    st.complete = registry_complete
     st.metric_coverage = _metric_counts(rows)
     st.notes = [
         "Catalog rows require an exact cleaned K-pop genre plus Korean ISRC, Korean source-country metadata, or Korean artist identity.",
-        "YouTube discovery accepts only parsed artists already verified from the catalog; generic search results such as Western pop videos are rejected.",
+        "YouTube discovery accepts only parsed artists in the audited catalog/curation-backed artist registry; generic Western-pop results are rejected.",
         "Artist aliases and Korean/Latin title variants are canonicalized before deduplication.",
         "Every retained row has an observed YouTube view count strictly above 100,000,000.",
-        f"trusted_artists={len(trusted_artists)}; catalog_qualified={catalog_rows}; final_deduplicated_rows={len(rows)}",
-        "Not marked exhaustive because bounded YouTube search cannot prove enumeration of every K-pop upload.",
+        "Successful artist searches and video-statistics snapshots are checkpointed; a quota-limited rerun resumes at the first unfinished artist and preserves verified rows.",
+        f"trusted_artists={len(trusted_artists)}; preserved_rows={preserved_rows}; catalog_qualified={catalog_rows}; live_youtube_qualified={len(youtube_rows)}; final_deduplicated_rows={len(rows)}",
+        "Completeness is scoped to the fully scanned audited artist registry; it is not a claim that every upload labeled K-pop on the internet has been enumerated.",
     ]
     status.save()
     return rows
@@ -1158,7 +1355,7 @@ PREFIX wdt: <http://www.wikidata.org/prop/direct/>
 PREFIX rdfs: <http://www.w3.org/2000/01/rdf-schema#>
 PREFIX wikibase: <http://wikiba.se/ontology#>
 SELECT ?game ?gameLabel ?sitelinks WHERE {{
-  ?game wdt:P31/wdt:P279* wd:Q7889 ;
+  ?game wdt:P31 wd:Q7889 ;
         wikibase:sitelinks ?sitelinks ;
         rdfs:label ?gameLabel .
   FILTER(LANG(?gameLabel) = "en")
@@ -1170,15 +1367,20 @@ LIMIT {int(limit)}
     successful_endpoint = ""
     errors: list[str] = []
     attempts = [
-        ("POST", WIKIDATA_QLEVER),
-        ("POST", WIKIDATA_SPARQL),
-        ("POST", WIKIDATA_SPARQL_FALLBACK),
         ("GET", WIKIDATA_SPARQL),
+        ("POST", WIKIDATA_SPARQL),
+        ("POST", WIKIDATA_QLEVER),
+        ("POST", WIKIDATA_SPARQL_FALLBACK),
     ]
     with httpx.Client(
         timeout=120,
         follow_redirects=True,
-        headers={"User-Agent": "BeatHit-Dataset/1.0 (source-backed music research)"},
+        headers={
+            "User-Agent": (
+                "BeatHit-Dataset/1.0 "
+                "(+https://github.com/Dummy1-sudo/BeatHit-Dataset)"
+            )
+        },
     ) as client:
         for method, endpoint in attempts:
             try:
@@ -1283,6 +1485,16 @@ GAME_SOUNDTRACK_MARKER = re.compile(
     r"(?:video\s+)?game\s+soundtrack|original\s+game\s+score)\b",
     re.I,
 )
+GAME_EXPLICIT_SOUNDTRACK_RELEASE = re.compile(
+    r"(?:\b(?:original\s+(?:video\s+)?game\s+soundtracks?|"
+    r"(?:video\s+)?game\s+soundtracks?|original\s+soundtracks?|"
+    r"original\s+sound\s+versions?|original\s+(?:game\s+)?scores?|"
+    r"soundtrack\s+recordings?|soundtracks?|\bosts?\b)\b|"
+    r"オリジナル[・\s]*(?:ゲーム[・\s]*)?サウンド[・\s]*(?:トラック|ヴァージョン)|"
+    r"サウンド[・\s]*トラック|サントラ|"
+    r"오리지널\s*사운드트랙|사운드트랙|(?:游戏|遊戲)?原声(?:带|帶)?)",
+    re.I,
+)
 GAME_MEDIA_REJECT = re.compile(
     r"\b(?:motion picture|original film|film soundtrack|movie soundtrack|"
     r"television soundtrack|tv soundtrack|original tv series|original series soundtrack|"
@@ -1308,6 +1520,13 @@ GAME_ASSOCIATION_PRIORITY = {
     "explicit_track_reference": 3,
     "genre_album": 1,
 }
+GAME_LISTENBRAINZ_TAGS = [
+    "video game music",
+    "video game soundtrack",
+    "game soundtrack",
+    "vgm",
+    "game music",
+]
 GAME_FRANCHISE_ARTISTS = {
     "league of legends": "League of Legends",
     "valorant": "VALORANT",
@@ -1434,12 +1653,284 @@ def _infer_game_title(row: pd.Series) -> str | None:
     return candidate
 
 
+def _game_title_from_explicit_soundtrack_release(album: Any) -> str | None:
+    """Remove an explicit soundtrack suffix without fuzzy game matching."""
+    value = html.unescape(str(album or "")).strip()
+    marker = GAME_EXPLICIT_SOUNDTRACK_RELEASE.search(value)
+    if not value or not marker:
+        return None
+    candidate = value[:marker.start()].strip(" \t-–—:|,()[]{}'\"“”・")
+    candidate = re.sub(
+        r"\s*(?:collector'?s|deluxe|complete|remastered|expanded)\s+edition\s*$",
+        "",
+        candidate,
+        flags=re.I,
+    )
+    candidate = re.sub(
+        r"\s*(?:,|[-–—:])?\s*(?:volume|vol\.?|disc|cd|part|pt\.?)\s*"
+        r"(?:\d+|[ivxlcdm]+)\s*$",
+        "",
+        candidate,
+        flags=re.I,
+    )
+    candidate = candidate.strip(" \t-–—:|,()[]{}'\"“”・")
+    if not candidate or norm(candidate) in {
+        "original",
+        "game",
+        "video game",
+        "music",
+        "soundtrack",
+    }:
+        return None
+    return candidate
+
+
+def _listenbrainz_video_game_rows(status: Any) -> list[SongRow]:
+    """Fetch release-group-tagged recordings with explicit soundtrack albums.
+
+    Tag-radio evidence is restricted to release-group tags; artist-only tags are too
+    broad. MusicBrainz recording/release metadata then has to contain an explicit
+    soundtrack marker, and common film/TV/anime and arrangement markers are rejected.
+    """
+    cache_path = CACHE / "listenbrainz_video_game_music.json"
+    cache: dict[str, Any] = {
+        "schema_version": 1,
+        "tag_results": {},
+        "metadata": {},
+    }
+    try:
+        if cache_path.exists():
+            value = json.loads(cache_path.read_text(encoding="utf-8"))
+            if isinstance(value, dict) and value.get("schema_version") == 1:
+                cache = value
+    except Exception as exc:
+        status.warnings.append(f"ListenBrainz video-game checkpoint ignored: {exc}")
+
+    tag_cache = cache.setdefault("tag_results", {})
+    metadata_cache = cache.setdefault("metadata", {})
+    if not isinstance(tag_cache, dict) or not isinstance(metadata_cache, dict):
+        tag_cache = {}
+        metadata_cache = {}
+        cache = {
+            "schema_version": 1,
+            "tag_results": tag_cache,
+            "metadata": metadata_cache,
+        }
+
+    def save_cache() -> None:
+        CACHE.mkdir(parents=True, exist_ok=True)
+        cache["updated_at"] = TODAY
+        temp_path = cache_path.with_suffix(".tmp")
+        temp_path.write_text(
+            json.dumps(cache, ensure_ascii=False, separators=(",", ":")) + "\n",
+            encoding="utf-8",
+        )
+        temp_path.replace(cache_path)
+
+    source_errors: list[str] = []
+    with httpx.Client(
+        timeout=90,
+        follow_redirects=True,
+        headers={
+            "User-Agent": (
+                "BeatHit-Dataset/1.0 "
+                "(+https://github.com/Dummy1-sudo/BeatHit-Dataset)"
+            )
+        },
+    ) as client:
+        for tag in GAME_LISTENBRAINZ_TAGS:
+            try:
+                response = client.get(
+                    f"{LISTENBRAINZ_API}/lb-radio/tags",
+                    params={
+                        "tag": tag,
+                        "operator": "OR",
+                        "count": 1000,
+                        "pop_begin": 0,
+                        "pop_end": 100,
+                    },
+                )
+                response.raise_for_status()
+                payload = response.json()
+                if not isinstance(payload, list):
+                    raise ValueError("expected a list of tag-radio candidates")
+                tag_cache[tag] = payload
+                save_cache()
+            except Exception as exc:
+                source_errors.append(f"tag {tag}: {exc}")
+                if tag not in tag_cache:
+                    status.warnings.append(
+                        f"ListenBrainz video-game tag {tag!r}: {exc}"
+                    )
+
+        evidence: dict[str, dict[str, Any]] = {}
+        for tag in GAME_LISTENBRAINZ_TAGS:
+            values = tag_cache.get(tag) or []
+            if not isinstance(values, list):
+                continue
+            for value in values:
+                if not isinstance(value, dict):
+                    continue
+                if str(value.get("source") or "").casefold() != "release-group":
+                    continue
+                mbid = str(value.get("recording_mbid") or "").strip().casefold()
+                if not re.fullmatch(
+                    r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-"
+                    r"[0-9a-f]{4}-[0-9a-f]{12}",
+                    mbid,
+                ):
+                    continue
+                item = evidence.setdefault(
+                    mbid,
+                    {"percent": 0.0, "tag_count": 0, "tags": []},
+                )
+                item["percent"] = max(
+                    float(item["percent"]),
+                    _safe_float(value.get("percent")) or 0.0,
+                )
+                item["tag_count"] = max(
+                    int(item["tag_count"]),
+                    _safe_int(value.get("tag_count")) or 0,
+                )
+                if tag not in item["tags"]:
+                    item["tags"].append(tag)
+
+        missing = [mbid for mbid in evidence if mbid not in metadata_cache]
+        for start in range(0, len(missing), 500):
+            batch = missing[start:start + 500]
+            try:
+                response = client.post(
+                    f"{LISTENBRAINZ_API}/metadata/recording/",
+                    json={
+                        "recording_mbids": batch,
+                        "inc": "artist release tag",
+                    },
+                )
+                response.raise_for_status()
+                payload = response.json()
+                if not isinstance(payload, dict):
+                    raise ValueError("expected a recording metadata object")
+                for mbid in batch:
+                    metadata_cache[mbid] = payload.get(mbid)
+                save_cache()
+            except Exception as exc:
+                source_errors.append(f"metadata batch {start // 500 + 1}: {exc}")
+                status.warnings.append(
+                    f"ListenBrainz video-game metadata batch {start // 500 + 1}: {exc}"
+                )
+
+    rows: list[SongRow] = []
+    rejection_counts: dict[str, int] = defaultdict(int)
+    for mbid, tag_evidence in evidence.items():
+        metadata = metadata_cache.get(mbid)
+        if not isinstance(metadata, dict):
+            rejection_counts["missing_metadata"] += 1
+            continue
+        recording = metadata.get("recording") or {}
+        artist_data = metadata.get("artist") or {}
+        release = metadata.get("release") or {}
+        title = str(recording.get("name") or "").strip()
+        artist = str(artist_data.get("name") or "").strip()
+        album = str(release.get("name") or "").strip()
+        combined = f"{album} | {title} | {artist}"
+        if not title or not artist or not album:
+            rejection_counts["blank_metadata"] += 1
+            continue
+        if GAME_MEDIA_REJECT.search(combined):
+            rejection_counts["non_game_media"] += 1
+            continue
+        if GAME_ARRANGEMENT_REJECT.search(combined):
+            rejection_counts["arrangement_or_cover"] += 1
+            continue
+        game_title = _game_title_from_explicit_soundtrack_release(album)
+        if not game_title:
+            rejection_counts["no_explicit_soundtrack_marker"] += 1
+            continue
+
+        first_release = str(recording.get("first_release_date") or "").strip()
+        isrcs = recording.get("isrcs") or []
+        isrc = (
+            str(isrcs[0]).strip().upper()
+            if isinstance(isrcs, list) and isrcs
+            else None
+        )
+        tags = list(tag_evidence.get("tags") or [])
+        percent = float(tag_evidence.get("percent") or 0.0)
+        rows.append(
+            SongRow(
+                title=title,
+                main_artist=artist,
+                album=album,
+                release_date=first_release or None,
+                release_year=_safe_int(first_release[:4]) if first_release else None,
+                genres=tags,
+                languages=["und"],
+                screen_work=game_title,
+                metric_name="listenbrainz_tag_popularity_percent",
+                metric_value=max(percent, 0.01),
+                metric_unit="score_0_100",
+                overall_popularity_score=max(percent, 0.01),
+                musicbrainz_recording_mbid=mbid,
+                isrc=isrc,
+                source_url=f"https://musicbrainz.org/recording/{mbid}",
+                retrieved_at=TODAY,
+                source_notes=(
+                    "ListenBrainz release-group tag-radio popularity evidence plus "
+                    "MusicBrainz recording/release metadata. The score is a popularity "
+                    "percentage, not a stream or listen count."
+                ),
+                extra={
+                    "culture_category": "video_game_music",
+                    "video_game": game_title,
+                    "selection": (
+                        "release-group game-music tag plus explicit soundtrack "
+                        "release marker"
+                    ),
+                    "game_association_kind": "listenbrainz_release_group_tag",
+                    "listenbrainz_source_scope": "release-group",
+                    "listenbrainz_source_tags": tags,
+                    "listenbrainz_tag_count": int(
+                        tag_evidence.get("tag_count") or 0
+                    ),
+                    "listenbrainz_tag_popularity_percent": percent,
+                    "musicbrainz_release_mbid": release.get("mbid"),
+                    "musicbrainz_release_group_mbid": release.get(
+                        "release_group_mbid"
+                    ),
+                    "explicit_soundtrack_release": album,
+                },
+            )
+        )
+
+    rows.sort(
+        key=lambda row: (
+            float(row.metric_value or 0.0),
+            int((row.extra or {}).get("listenbrainz_tag_count") or 0),
+        ),
+        reverse=True,
+    )
+    status.sources["listenbrainz_video_game_music"] = {
+        "source": "ListenBrainz tag radio + recording metadata API",
+        "tags": GAME_LISTENBRAINZ_TAGS,
+        "release_group_tagged_recordings": len(evidence),
+        "metadata_records": sum(
+            1 for value in metadata_cache.values() if isinstance(value, dict)
+        ),
+        "qualified_rows": len(rows),
+        "rejections": dict(sorted(rejection_counts.items())),
+        "checkpoint": str(cache_path.relative_to(ROOT)),
+        "errors": source_errors,
+        "ok": bool(rows),
+    }
+    return rows
+
+
 def build_video_game_music(catalog: pd.DataFrame, status: Any) -> list[SongRow]:
     """Build a popularity-ranked list of source-backed video-game soundtrack recordings."""
     target = 1_000
     games = _fetch_top_games(status, target)
 
-    candidates: list[tuple[pd.Series, str, str, bool, str]] = []
+    candidates: list[tuple[pd.Series, str, str, bool, str, str]] = []
     token_index: dict[str, set[int]] = defaultdict(set)
     stop = {
         "the", "and", "for", "with", "from", "game", "edition", "remastered",
@@ -1478,6 +1969,8 @@ def build_video_game_music(catalog: pd.DataFrame, status: Any) -> list[SongRow]:
     selected: list[SongRow] = []
     used_tracks: set[str] = set()
     used_songs: set[tuple[str, str]] = set()
+    used_mbids: set[str] = set()
+    used_isrcs: set[str] = set()
     per_game: dict[str, int] = defaultdict(int)
 
     def append_song(
@@ -1489,11 +1982,19 @@ def build_video_game_music(catalog: pd.DataFrame, status: Any) -> list[SongRow]:
     ) -> bool:
         track_key = _game_track_key(row)
         song_key = _game_song_key(row)
+        isrc = str(row.get("isrc") or "").strip().casefold()
         game_key = norm(game_title)
-        if not game_key or track_key in used_tracks or song_key in used_songs:
+        if (
+            not game_key
+            or track_key in used_tracks
+            or song_key in used_songs
+            or bool(isrc and isrc in used_isrcs)
+        ):
             return False
         used_tracks.add(track_key)
         used_songs.add(song_key)
+        if isrc:
+            used_isrcs.add(isrc)
         per_game[game_key] += 1
         song = _catalog_song(
             row,
@@ -1624,7 +2125,7 @@ def build_video_game_music(catalog: pd.DataFrame, status: Any) -> list[SongRow]:
             continue
         if association_kind == "explicit_track_reference" and not genre_hit and per_game.get(game_key, 0) == 0:
             continue
-        if per_game.get(game_key, 0) >= 8:
+        if per_game.get(game_key, 0) >= 5:
             continue
         if append_song(
             row,
@@ -1634,11 +2135,41 @@ def build_video_game_music(catalog: pd.DataFrame, status: Any) -> list[SongRow]:
                 "catalog_fallback_rank": fallback_unique + fallback_additional + 1,
                 "wikidata_available": bool(games),
                 "fallback_stage": "additional_tracks",
-                "per_game_track_cap": 8,
+                "per_game_track_cap": 5,
                 "game_association_kind": association_kind,
             },
         ):
             fallback_additional += 1
+
+    listenbrainz_added = 0
+    listenbrainz_candidates = 0
+    if len(selected) < target:
+        listenbrainz_rows = _listenbrainz_video_game_rows(status)
+        listenbrainz_candidates = len(listenbrainz_rows)
+        for song in listenbrainz_rows:
+            if len(selected) >= target:
+                break
+            game_key = norm(song.screen_work or "")
+            song_key = (norm(song.title), norm(song.main_artist))
+            mbid = str(song.musicbrainz_recording_mbid or "").strip().casefold()
+            isrc = str(song.isrc or "").strip().casefold()
+            if (
+                not game_key
+                or not all(song_key)
+                or per_game.get(game_key, 0) >= 5
+                or song_key in used_songs
+                or bool(mbid and mbid in used_mbids)
+                or bool(isrc and isrc in used_isrcs)
+            ):
+                continue
+            used_songs.add(song_key)
+            if mbid:
+                used_mbids.add(mbid)
+            if isrc:
+                used_isrcs.add(isrc)
+            per_game[game_key] += 1
+            selected.append(song)
+            listenbrainz_added += 1
 
     # The requested list is popularity-ranked. Game rank remains provenance, not the
     # final row ordering criterion.
@@ -1658,11 +2189,11 @@ def build_video_game_music(catalog: pd.DataFrame, status: Any) -> list[SongRow]:
     st.complete = len(selected) == target
     st.metric_coverage = _metric_counts(selected)
     st.notes = [
-        "QLever is the primary Wikidata fallback and the last successful top-game ranking is cached for later runs.",
+        "The direct Wikidata video-game query is attempted first; the last successful top-game ranking is cached for later runs.",
         "Movie/television/anime soundtracks, licensed compilations, tribute releases, piano collections, music-box albums, cover albums, and generic remix albums are rejected.",
-        "Each row records whether the game association came from an official soundtrack album, franchise artist, explicit track-title reference, or a high-confidence Wikidata match.",
-        "Selection preserves game breadth, then allows up to eight popular recordings per independently established game; final rows are sorted by song popularity evidence.",
-        f"ranked_games={len(games)}; soundtrack_candidates={len(candidates)}; unique_games={len(per_game)}; fallback_unique={fallback_unique}; fallback_additional={fallback_additional}; rows={len(selected)}",
+        "Each row records whether the game association came from an official soundtrack album, franchise artist, explicit track-title reference, high-confidence Wikidata match, or a ListenBrainz release-group game tag paired with an explicit soundtrack release.",
+        "Selection preserves game breadth, then allows up to five source-backed recordings per game; final rows are sorted by popularity evidence.",
+        f"ranked_games={len(games)}; catalog_soundtrack_candidates={len(candidates)}; listenbrainz_candidates={listenbrainz_candidates}; listenbrainz_added={listenbrainz_added}; unique_games={len(per_game)}; fallback_unique={fallback_unique}; fallback_additional={fallback_additional}; rows={len(selected)}",
     ]
     status.save()
     return selected

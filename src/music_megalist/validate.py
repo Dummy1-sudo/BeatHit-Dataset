@@ -129,17 +129,35 @@ def validate(data_dir: str|Path='data', *, require_complete: bool=False) -> list
         if len(rows)>10000: errors.append('COUNT vocaloid > 10000')
         for i,r in enumerate(rows,1):
             ex=r.extra or {}
+            official_pvs=ex.get('official_youtube_pvs')
+            selected_video_id=str(ex.get('youtube_video_id') or '').strip()
+            selected_views=0
+            if isinstance(official_pvs,list):
+                for pv in official_pvs:
+                    if not isinstance(pv,dict):
+                        continue
+                    if str(pv.get('video_id') or '').strip()!=selected_video_id:
+                        continue
+                    try: selected_views=int(pv.get('views') or 0)
+                    except Exception: selected_views=0
+                    break
             if r.metric_name!='youtube_views' or r.metric_unit!='views' or r.metric_value<100_000_000:
                 errors.append(f'VOCALOID_THRESHOLD row {i}')
             if r.view_count is None or int(r.view_count)!=int(r.metric_value):
                 errors.append(f'VOCALOID_VIEW_COUNT row {i}')
+            if (
+                int(ex.get('highest_individual_official_pv_views') or 0)!=int(r.metric_value)
+                or selected_views!=int(r.metric_value)
+                or str(ex.get('qualification_method') or '')!='single_official_original_youtube_pv'
+            ):
+                errors.append(f'VOCALOID_INDIVIDUAL_PV_EVIDENCE row {i}')
             if str(ex.get('vocadb_song_type') or '').casefold()!='original':
                 errors.append(f'VOCALOID_SONG_TYPE row {i}')
             if str(ex.get('youtube_pv_type') or '').casefold()!='original':
                 errors.append(f'VOCALOID_PV_TYPE row {i}')
             if str(ex.get('youtube_pv_service') or '').casefold()!='youtube':
                 errors.append(f'VOCALOID_PV_SERVICE row {i}')
-            if not str(ex.get('youtube_video_id') or '').strip():
+            if not selected_video_id:
                 errors.append(f'VOCALOID_VIDEO_ID row {i}')
     kp=data/'kpop'/'kpop_youtube_over_100m.csv'
     if kp.exists():

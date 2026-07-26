@@ -3,7 +3,8 @@ from __future__ import annotations
 """Full, source-backed BeatHit dataset build.
 
 This module is intentionally conservative: it never invents stream/view counts and it
-never pads a conditional list (for example Vocaloid songs >=10M Spotify streams) with
+never pads a conditional list (for example Vocaloid songs with an official Original
+YouTube PV at or above 100M views) with
 non-qualifying rows. Fixed-size lists are filled from the best available source pool;
 when a source is exhausted, the coverage report records the shortfall instead of
 fabricating records.
@@ -2566,7 +2567,7 @@ def _youtube_views_official(ids:list[str],status:BuildStatus)->tuple[dict[str,in
     ids=list(dict.fromkeys(video_id for video_id in ids if video_id))
     key=os.getenv("YOUTUBE_API_KEY","").strip()
     cache_path=CACHE/"vocadb_youtube_view_counts.json"
-    cache_days=max(1,min(_safe_int(os.getenv("BEATHIT_VOCALOID_VIEW_CACHE_DAYS")) or 3,30))
+    cache_days=max(1,min(_safe_int(os.getenv("BEATHIT_VOCALOID_VIEW_CACHE_DAYS")) or 30,90))
     now=int(time.time())
     ttl_seconds=cache_days*86_400
     entries={}
@@ -2633,7 +2634,17 @@ def _youtube_views_official(ids:list[str],status:BuildStatus)->tuple[dict[str,in
         return out,unresolved
 
     failed_batches=0
-    with httpx.Client(timeout=60,follow_redirects=True) as client:
+    quota_stopped=False
+    with httpx.Client(
+        timeout=60,
+        follow_redirects=True,
+        headers={
+            "User-Agent":(
+                "BeatHit-Dataset/1.0 "
+                "(+https://github.com/Dummy1-sudo/BeatHit-Dataset)"
+            )
+        },
+    ) as client:
         for start in range(0,len(pending),50):
             batch=pending[start:start+50]
             data=None
@@ -2663,6 +2674,14 @@ def _youtube_views_official(ids:list[str],status:BuildStatus)->tuple[dict[str,in
                     f"Vocaloid YouTube live_batch={start//50+1} ERROR "
                     f"{type(last_error).__name__ if last_error else 'UnknownError'}: {last_error}"
                 )
+                error_text=str(last_error or "").casefold()
+                if "quotaexceeded" in error_text or "dailylimitexceeded" in error_text:
+                    quota_stopped=True
+                    status.warnings.append(
+                        "Vocaloid YouTube quota exhausted; saved the completed batches "
+                        "and stopped so the next run resumes at the first unresolved video."
+                    )
+                    break
                 continue
 
             resolved_batch={}
@@ -2699,6 +2718,7 @@ def _youtube_views_official(ids:list[str],status:BuildStatus)->tuple[dict[str,in
         "fresh_cached_missing":fresh_missing,
         "live_requested":len(pending),
         "failed_batches":failed_batches,
+        "quota_stopped":quota_stopped,
         "cache_days":cache_days,
         "cache":str(cache_path.relative_to(ROOT)),
         "ok":bool(out) and unresolved==0 and failed_batches==0,
@@ -2708,8 +2728,66 @@ def _youtube_views_official(ids:list[str],status:BuildStatus)->tuple[dict[str,in
     return out,unresolved
 
 
+def _normalize_existing_vocaloid_row(
+    row:SongRow,
+    threshold:int=100_000_000,
+)->SongRow|None:
+    """Salvage only rows that already prove one qualifying official Original PV."""
+    extra=dict(row.extra or {})
+    pvs=extra.get("official_youtube_pvs")
+    if (
+        str(extra.get("vocadb_song_type") or "").casefold()!="original"
+        or str(extra.get("youtube_pv_type") or "").casefold()!="original"
+        or str(extra.get("youtube_pv_service") or "").casefold()!="youtube"
+        or not isinstance(extra.get("voice_synth_vocalists"),list)
+        or not extra.get("voice_synth_vocalists")
+        or not isinstance(pvs,list)
+    ):
+        return None
+
+    resolved=[]
+    for pv in pvs:
+        if not isinstance(pv,dict):
+            continue
+        video_id=str(pv.get("video_id") or "").strip()
+        views=_safe_int(pv.get("views"))
+        if video_id and views is not None:
+            resolved.append((views,pv))
+    if not resolved:
+        return None
+    best_views,best_pv=max(resolved,key=lambda pair:pair[0])
+    if best_views<threshold:
+        return None
+
+    row.metric_name="youtube_views"
+    row.metric_value=float(best_views)
+    row.metric_unit="views"
+    row.view_count=int(best_views)
+    row.source_url=f"https://www.youtube.com/watch?v={best_pv['video_id']}"
+    row.source_notes=(
+        "VocaDB SongType=Original and PVType=Original identify the original "
+        "voice-synth song and authorized upload. This row qualifies because one "
+        "enabled official Original YouTube PV independently has at least "
+        "100,000,000 official API views; PV counts are never summed to qualify."
+    )
+    extra.update({
+        "youtube_video_id":best_pv["video_id"],
+        "youtube_pv_type":"Original",
+        "youtube_pv_service":"Youtube",
+        "youtube_pv_author":best_pv.get("author"),
+        "official_youtube_resolved_pv_count":len(resolved),
+        "official_youtube_total_views":sum(views for views,_ in resolved),
+        "highest_individual_official_pv_views":int(best_views),
+        "qualification_threshold_views":threshold,
+        "qualification_method":"single_official_original_youtube_pv",
+        "selection":"highest individual official Original YouTube PV view count",
+    })
+    row.extra=extra
+    return row
+
+
 def build_vocaloid(catalog:pd.DataFrame,status:BuildStatus)->list[SongRow]:
-    # Build original voice-synth songs whose combined official Original YouTube PVs have >=100M views.
+    # Build original voice-synth songs with one official Original YouTube PV at >=100M views.
     # catalog is intentionally unused so Spotify/catalog data cannot affect the list.
     del catalog
     threshold=100_000_000
@@ -2720,6 +2798,16 @@ def build_vocaloid(catalog:pd.DataFrame,status:BuildStatus)->list[SongRow]:
 
     output_path.parent.mkdir(parents=True,exist_ok=True)
     partial_path.unlink(missing_ok=True)
+
+    preserved=[]
+    if output_path.exists():
+        try:
+            for existing in read_rows(output_path):
+                normalized=_normalize_existing_vocaloid_row(existing,threshold)
+                if normalized is not None:
+                    preserved.append(normalized)
+        except Exception as exc:
+            status.warnings.append(f"Vocaloid existing output was not reused: {exc}")
 
     vocadb_rows,vocadb_exhaustive=_vocadb_all(status)
 
@@ -2738,7 +2826,7 @@ def build_vocaloid(catalog:pd.DataFrame,status:BuildStatus)->list[SongRow]:
     )
     view_counts,unresolved_video_ids=_youtube_views_official(all_video_ids,status)
 
-    rows=[]
+    rows=list(preserved)
     for item,pvs in songs:
         resolved=[
             (view_counts[pv["video_id"]],pv)
@@ -2748,11 +2836,11 @@ def build_vocaloid(catalog:pd.DataFrame,status:BuildStatus)->list[SongRow]:
         if not resolved:
             continue
 
-        # A song qualifies by the sum of distinct authorized Original PV uploads.
-        # Covers, remixes, reprints and other PV types never enter this sum.
         total_views=sum(views for views,_ in resolved)
         best_views,best_pv=max(resolved,key=lambda pair:pair[0])
-        if total_views<threshold:
+        # Qualification is deliberately per upload. Two sub-threshold PVs may not be
+        # added together to manufacture a qualifying song.
+        if best_views<threshold:
             continue
 
         names=_vocadb_names(item)
@@ -2773,15 +2861,15 @@ def build_vocaloid(catalog:pd.DataFrame,status:BuildStatus)->list[SongRow]:
             release_year=int(year_match.group(0)) if year_match else None,
             languages=["und"],
             metric_name="youtube_views",
-            metric_value=float(total_views),
+            metric_value=float(best_views),
             metric_unit="views",
-            view_count=int(total_views),
+            view_count=int(best_views),
             source_url=f"https://www.youtube.com/watch?v={best_pv['video_id']}",
             retrieved_at=TODAY,
             source_notes=(
                 "VocaDB SongType=Original and VocaDB PVType=Original identify the original "
-                "voice-synth song and its authorized uploads. The metric sums live YouTube "
-                "viewCount values across distinct enabled Original PV video IDs. Remixes, mashups, "
+                "voice-synth song and its authorized uploads. The metric is the live YouTube "
+                "viewCount of the highest individual enabled Original PV. Remixes, mashups, "
                 "covers, remasters, MusicPV entries, reprints, other PVs, disabled PVs, generic "
                 "OtherVoiceSynthesizer/VirtualSinger credits, and Spotify evidence are excluded."
             ),
@@ -2809,18 +2897,20 @@ def build_vocaloid(catalog:pd.DataFrame,status:BuildStatus)->list[SongRow]:
                 ],
                 "highest_individual_official_pv_views":int(best_views),
                 "qualification_threshold_views":threshold,
-                "selection":"sum of distinct official Original YouTube PV view counts",
+                "qualification_method":"single_official_original_youtube_pv",
+                "selection":"highest individual official Original YouTube PV view count",
                 **credit_extra,
             },
         )
         rows.append(row)
         append_row(row,partial_path)
         _progress(
-            f"Vocaloid QUALIFY provisional={len(rows)} total_views={total_views} "
+            f"Vocaloid QUALIFY provisional={len(rows)} audit_total_views={total_views} "
             f"best_upload_views={best_views} title={title!r} artist={main_artist!r} "
             f"video={best_pv['video_id']}"
         )
 
+    rows.sort(key=lambda row:int(row.view_count or row.metric_value),reverse=True)
     rows=dedupe(rows)
     rows.sort(key=lambda row:int(row.view_count or row.metric_value),reverse=True)
     rows=rows[:cap]
@@ -2835,18 +2925,18 @@ def build_vocaloid(catalog:pd.DataFrame,status:BuildStatus)->list[SongRow]:
 
     complete=bool(rows and vocadb_exhaustive and unresolved_video_ids==0 and os.getenv("YOUTUBE_API_KEY","").strip())
     status.datasets["vocaloid"]=DatasetStatus(
-        target="all VocaDB Original voice-synth songs whose distinct official Original YouTube PVs total >=100,000,000 views; cap 10,000",
+        target="all VocaDB Original voice-synth songs with one official Original YouTube PV >=100,000,000 views; cap 10,000",
         rows=len(rows),
         complete=complete,
         metric_coverage=dict(_metric_counts(rows)),
         notes=[
             "VocaDB-only classification and metadata; official YouTube Data API view counts only.",
-            "SongType must equal Original. Only enabled service=Youtube, pvType=Original uploads are summed per song, with every contributing video ID and count retained for audit.",
+            "SongType must equal Original. One enabled service=Youtube, pvType=Original upload must independently reach 100,000,000 views; counts from multiple PVs are retained for audit but never summed to qualify.",
             "Generic OtherVoiceSynthesizer and VirtualSinger artist types do not establish voice-synth eligibility.",
             "Producer/composer credit takes precedence over simultaneous human-vocalist roles, preventing instrumentalists from being promoted to main artist.",
-            "Official YouTube statistics are cached and retried so corrected runs do not repeat the full 185k-video lookup.",
+            "Official YouTube statistics and the exhaustive VocaDB scan are checkpointed; a quota-limited rerun resumes with unresolved IDs instead of repeating the full lookup.",
             "No Spotify matching, title collision matching, remix, mashup, cover, remaster, MusicPV entry, reprint, or third-party view-count fallback.",
-            f"vocadb_exhaustive={vocadb_exhaustive}; unresolved_youtube_video_ids={unresolved_video_ids}",
+            f"preserved_single_pv_rows={len(preserved)}; vocadb_exhaustive={vocadb_exhaustive}; unresolved_youtube_video_ids={unresolved_video_ids}",
         ],
     )
     status.save()
@@ -3237,7 +3327,7 @@ def _reuse_complete_output(
     try:
         # Validate the individual CSV before trusting it. This catches the duplicate Spotify ID
         # that caused run 30067726035 to fail after generation had otherwise completed.
-        from .validation import _generic_csv_errors
+        from .validate import _generic_csv_errors
 
         errors = _generic_csv_errors(path)
         if errors:
@@ -3282,7 +3372,12 @@ def full_build(
     )
     for name,target in FIXED_TARGETS.items():status.datasets[name]=DatasetStatus(target=target)
     status.datasets["vocaloid"]=DatasetStatus(target="all VocaDB Original songs with an official Original YouTube PV >=100,000,000 views; cap 10,000")
-    status.datasets["kpop"]=DatasetStatus(target="all source-tagged K-pop songs with observed YouTube views strictly above 100,000,000")
+    status.datasets["kpop"]=DatasetStatus(
+        target=(
+            "all official videos above 100,000,000 views found by the fully scanned "
+            "catalog/curation-backed K-pop artist registry"
+        )
+    )
     status.datasets["countries"]=DatasetStatus(target="top 1,000 unique songs for every detected Spotify regional country/territory chart")
     status.save()
     _progress("PHASE acquire_sources START")
