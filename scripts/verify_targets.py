@@ -118,7 +118,7 @@ def main() -> None:
             country_check["error"] = str(exc)
     report["semantic_checks"]["spotify_country_top1000"] = country_check
 
-    vocaloid = read_csv("vocaloid/vocaloid_youtube_100m.csv")
+    vocaloid = read_csv("vocaloid/vocaloid_originals_youtube_views.csv")
     invalid_vocaloid = []
     for i, r in enumerate(vocaloid, 1):
         try:
@@ -160,7 +160,7 @@ def main() -> None:
         valid = (
             r.get("metric_name") == "youtube_views"
             and r.get("metric_unit") == "views"
-            and value >= 100_000_000
+            and value >= 0
             and view_count == int(value)
             and highest_individual == int(value)
             and selected_pv_views == int(value)
@@ -175,16 +175,16 @@ def main() -> None:
             and str(e.get("youtube_pv_type") or "").casefold() == "original"
             and str(e.get("youtube_pv_service") or "").casefold() == "youtube"
             and bool(selected_video_id)
-            and str(e.get("qualification_method") or "") == "single_official_original_youtube_pv"
+            and str(e.get("qualification_method") or "") == "official_original_youtube_pv"
         )
         if not valid:
             invalid_vocaloid.append(i)
-    report["semantic_checks"]["vocaloid_threshold"] = {
-        "target": "VocaDB Original voice-synth songs with one official Original YouTube PV >=100,000,000 views; cap 10,000",
+    report["semantic_checks"]["vocaloid_original_youtube_corpus"] = {
+        "target": "every VocaDB Original voice-synth song with a resolved official Original YouTube PV, ordered by views",
         "rows": len(vocaloid),
         "invalid_rows": invalid_vocaloid[:100],
-        "threshold_valid": not invalid_vocaloid and len(vocaloid) <= 10_000,
-        "corpus_completeness": "Read STATUS.json datasets.vocaloid.complete; threshold validity does not prove exhaustive source coverage.",
+        "row_validity": not invalid_vocaloid,
+        "corpus_completeness": "Read STATUS.json datasets.vocaloid.complete; row validity does not prove exhaustive source coverage.",
     }
 
     kpop = read_csv("kpop/kpop_youtube_over_100m.csv")

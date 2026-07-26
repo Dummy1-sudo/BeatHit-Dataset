@@ -123,10 +123,9 @@ def validate(data_dir: str|Path='data', *, require_complete: bool=False) -> list
         # bootstrap files are provenance examples, not final canonical categories.
         if '/bootstrap/' in p.as_posix() or '/seeds/' in p.as_posix() or p.name.endswith('_snapshot.csv'): continue
         errors.extend(_generic_csv_errors(p))
-    vp=data/'vocaloid'/'vocaloid_youtube_100m.csv'
+    vp=data/'vocaloid'/'vocaloid_originals_youtube_views.csv'
     if vp.exists():
         rows=read_rows(vp)
-        if len(rows)>10000: errors.append('COUNT vocaloid > 10000')
         for i,r in enumerate(rows,1):
             ex=r.extra or {}
             official_pvs=ex.get('official_youtube_pvs')
@@ -141,14 +140,14 @@ def validate(data_dir: str|Path='data', *, require_complete: bool=False) -> list
                     try: selected_views=int(pv.get('views') or 0)
                     except Exception: selected_views=0
                     break
-            if r.metric_name!='youtube_views' or r.metric_unit!='views' or r.metric_value<100_000_000:
-                errors.append(f'VOCALOID_THRESHOLD row {i}')
+            if r.metric_name!='youtube_views' or r.metric_unit!='views' or r.metric_value<0:
+                errors.append(f'VOCALOID_VIEW_METRIC row {i}')
             if r.view_count is None or int(r.view_count)!=int(r.metric_value):
                 errors.append(f'VOCALOID_VIEW_COUNT row {i}')
             if (
                 int(ex.get('highest_individual_official_pv_views') or 0)!=int(r.metric_value)
                 or selected_views!=int(r.metric_value)
-                or str(ex.get('qualification_method') or '')!='single_official_original_youtube_pv'
+                or str(ex.get('qualification_method') or '')!='official_original_youtube_pv'
             ):
                 errors.append(f'VOCALOID_INDIVIDUAL_PV_EVIDENCE row {i}')
             if str(ex.get('vocadb_song_type') or '').casefold()!='original':

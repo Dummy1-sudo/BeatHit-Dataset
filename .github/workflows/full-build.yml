@@ -101,7 +101,7 @@ jobs:
           BEATHIT_KPOP_GENERIC_SEARCHES: ${{ vars.BEATHIT_KPOP_GENERIC_SEARCHES || '0' }}
           BEATHIT_COUNTRY_WORKERS: ${{ vars.BEATHIT_COUNTRY_WORKERS || '4' }}
         run: |
-          python scripts/build_full_dataset.py --reuse-complete --only vocaloid video_game_music kpop
+          python scripts/build_full_dataset.py --reuse-complete --force vocaloid --only vocaloid video_game_music kpop
 
       - name: Save resumable builder checkpoints
         if: ${{ always() && steps.restore-builder-checkpoints.outputs.cache-hit != 'true' }}

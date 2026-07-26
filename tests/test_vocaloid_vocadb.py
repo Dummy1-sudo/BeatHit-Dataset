@@ -90,9 +90,12 @@ def _existing_vocaloid_row(pv_views):
     )
 
 
-def test_vocaloid_does_not_qualify_by_summing_two_subthreshold_pvs():
+def test_vocaloid_includes_subthreshold_original_and_uses_highest_pv():
     row = _existing_vocaloid_row([60_000_000, 50_000_000])
-    assert _normalize_existing_vocaloid_row(row) is None
+    normalized = _normalize_existing_vocaloid_row(row)
+    assert normalized is not None
+    assert normalized.view_count == 60_000_000
+    assert normalized.metric_value == 60_000_000
 
 
 def test_vocaloid_qualifies_by_one_individual_official_pv():
@@ -101,4 +104,4 @@ def test_vocaloid_qualifies_by_one_individual_official_pv():
     assert normalized is not None
     assert normalized.view_count == 110_000_000
     assert normalized.metric_value == 110_000_000
-    assert normalized.extra["qualification_method"] == "single_official_original_youtube_pv"
+    assert normalized.extra["qualification_method"] == "official_original_youtube_pv"
