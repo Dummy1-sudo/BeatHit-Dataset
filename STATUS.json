@@ -1,8 +1,8 @@
 {
   "schema_version": 7,
   "requested_at": "2026-07-20",
-  "last_build_started_at": "2026-07-25T11:03:06.483801+00:00",
-  "last_build_finished_at": "2026-07-25T15:50:23.251232+00:00",
+  "last_build_started_at": "2026-07-25T22:24:33.974458+00:00",
+  "last_build_finished_at": "2026-07-26T03:29:10.189637+00:00",
   "delivery_mode": "github_ready_manual_push_with_network_backed_full_build",
   "accuracy_policy": "No fabricated songs, artists, counts, associations, or quota padding. Exact counters are separated from scores/proxies; every row preserves provenance and snapshot/retrieval timing.",
   "completion_summary": {
@@ -114,17 +114,16 @@
     },
     "video_game_music": {
       "target": 1000,
-      "materialized_rows": 388,
+      "materialized_rows": 634,
       "complete": false,
       "metric_coverage": {
-        "spotify_popularity": 387,
-        "spotify_streams_snapshot": 1
+        "spotify_popularity": 634
       },
       "notes": [
-        "Primary path ranks games by Wikidata Wikimedia-sitelink count and selects one confident soundtrack match per game.",
-        "If Wikidata fails or leaves gaps, explicitly tagged video-game soundtrack albums are used as a non-empty source-backed fallback, with one recording per inferred game.",
-        "Generic movie/television OST rows are not accepted by the fallback unless source metadata explicitly identifies video-game music.",
-        "ranked_games=0; soundtrack_candidates=1126; fallback_added=388; matched_games=388"
+        "Movie/television soundtracks, licensed-song compilations, tribute albums, piano collections, music-box albums, cover albums, and generic remix albums are rejected.",
+        "Game names are normalized from soundtrack album metadata; known franchise-artist singles such as League of Legends are mapped to their game.",
+        "Fallback selection first maximizes distinct games, then allows up to four high-popularity original soundtrack tracks per game to approach the 1,000-song target.",
+        "ranked_games=0; soundtrack_candidates=747; unique_games=353; fallback_unique=353; fallback_additional=281; rows=634"
       ]
     },
     "internet_native": {
@@ -149,8 +148,8 @@
       "complete": true,
       "metric_coverage": {
         "spotify_chart_streams_snapshot": 191,
-        "spotify_popularity": 519,
-        "spotify_streams": 184,
+        "spotify_popularity": 518,
+        "spotify_streams": 185,
         "spotify_streams_snapshot": 106
       },
       "notes": [
@@ -238,30 +237,33 @@
       ]
     },
     "vocaloid": {
-      "target": "all VocaDB original songs with an official original YouTube PV >=100,000,000 views; cap 10,000",
-      "materialized_rows": 16,
+      "target": "all VocaDB Original voice-synth songs whose distinct official Original YouTube PVs total >=100,000,000 views; cap 10,000",
+      "materialized_rows": 22,
       "complete": false,
       "metric_coverage": {
-        "youtube_views": 16
+        "youtube_views": 22
       },
       "notes": [
-        "VocaDB-only classification and metadata; YouTube Data API view counts only.",
-        "SongType must equal Original. Qualifying PV must be service=Youtube, pvType=Original, enabled, and individually >=100,000,000 views.",
+        "VocaDB-only classification and metadata; official YouTube Data API view counts only.",
+        "SongType must equal Original. Only enabled service=Youtube, pvType=Original uploads are summed per song.",
+        "Generic OtherVoiceSynthesizer and VirtualSinger artist types do not establish voice-synth eligibility.",
         "No Spotify matching, title collision matching, remix, mashup, cover, remaster, MusicPV entry, reprint, or third-party view-count fallback.",
-        "vocadb_exhaustive=True; unresolved_youtube_video_ids=6568"
+        "vocadb_exhaustive=True; unresolved_youtube_video_ids=6480"
       ]
     },
     "kpop": {
       "target": "all source-tagged K-pop songs with observed YouTube views strictly above 100,000,000",
-      "materialized_rows": 316,
+      "materialized_rows": 105,
       "complete": false,
       "metric_coverage": {
-        "youtube_views": 316
+        "youtube_views": 105
       },
       "notes": [
-        "Catalog-tagged K-pop candidates are merged with bounded official YouTube Data API discovery.",
-        "Every row has an observed YouTube view count strictly above 100,000,000; covers, reactions, lyric videos, remixes, teasers, and dance-practice videos are rejected.",
-        "catalog_qualified=70; final_deduplicated_rows=316",
+        "Catalog rows require an exact cleaned K-pop genre plus Korean ISRC, Korean source-country metadata, or Korean artist identity.",
+        "YouTube discovery accepts only parsed artists already verified from the catalog; generic search results such as Western pop videos are rejected.",
+        "Artist aliases and Korean/Latin title variants are canonicalized before deduplication.",
+        "Every retained row has an observed YouTube view count strictly above 100,000,000.",
+        "trusted_artists=14; catalog_qualified=42; final_deduplicated_rows=105",
         "Not marked exhaustive because bounded YouTube search cannot prove enumeration of every K-pop upload."
       ]
     },
@@ -280,18 +282,18 @@
     },
     "megalist": {
       "target": "deduplicated union of all requested lists",
-      "materialized_rows": 94026,
+      "materialized_rows": 93919,
       "complete": false,
       "metric_coverage": {
         "anime_popularity_proxy": 794,
         "cross_platform_track_score": 2,
         "curated_required_seed": 4,
-        "spotify_chart_streams_snapshot": 2833,
-        "spotify_popularity": 54428,
-        "spotify_regional_chart_streams_sum": 27688,
+        "spotify_chart_streams_snapshot": 2831,
+        "spotify_popularity": 54487,
+        "spotify_regional_chart_streams_sum": 27698,
         "spotify_streams": 2689,
         "spotify_streams_snapshot": 3332,
-        "youtube_views": 2256
+        "youtube_views": 2082
       },
       "notes": [
         "Megalist is a deduplicated union of materialized rows; completeness is false because one or more upstream requested lists are incomplete."
@@ -383,10 +385,10 @@
     },
     "vocadb_original_youtube_scan": {
       "url": "https://vocadb.net/api/songs",
-      "rows": 260777,
+      "rows": 261672,
       "requested_limit": 350000,
-      "api_reported_total": 289852,
-      "pages": 5798,
+      "api_reported_total": 289962,
+      "pages": 5800,
       "exhaustive": true,
       "resumed_from_source_offset": 0,
       "checkpoint": ".cache/full_build/vocadb_original_youtube_scan.jsonl",
@@ -400,17 +402,17 @@
     },
     "vocaloid_youtube_view_counts": {
       "source": "YouTube Data API v3 videos.list(part=statistics)",
-      "requested": 184519,
-      "resolved": 177951,
-      "unresolved": 6568,
+      "requested": 184725,
+      "resolved": 178245,
+      "unresolved": 6480,
       "ok": false,
       "threshold": 100000000,
       "note": "Official YouTube API only; no Return YouTube Dislike, yt-dlp, or Spotify fallback."
     },
     "youtube_view_counts": {
       "source": "YouTube Data API v3",
-      "requested": 41427,
-      "resolved": 41386,
+      "requested": 41447,
+      "resolved": 41409,
       "ok": true
     },
     "wikidata_top_video_games": {
@@ -439,12 +441,27 @@
         "K-pop 2010s official MV",
         "K-pop 2020s official MV",
         "K-pop debut official MV",
-        "K-pop viral official MV"
+        "K-pop viral official MV",
+        "\"BLACKPINK\" official MV",
+        "\"LISA\" official MV",
+        "\"BTS\" official MV",
+        "\"JENNIE\" official MV",
+        "\"IVE\" official MV",
+        "\"Red Velvet\" official MV",
+        "\"EXO\" official MV",
+        "\"(G)I-DLE\" official MV",
+        "\"HWASA\" official MV",
+        "\"aespa\" official MV",
+        "\"LeeHi\" official MV",
+        "\"Jessi\" official MV",
+        "\"Kep1er\" official MV",
+        "\"SHAUN\" official MV"
       ],
-      "pages_per_query": 4,
-      "search_calls": 34,
-      "unique_video_candidates": 976,
-      "qualified_rows": 268,
+      "generic_pages_per_query": 4,
+      "artist_specific_queries": 14,
+      "search_calls": 48,
+      "unique_video_candidates": 1421,
+      "qualified_rows": 99,
       "threshold": 100000000,
       "ok": true
     }
