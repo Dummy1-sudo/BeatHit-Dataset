@@ -2478,6 +2478,7 @@ def _vocadb_song_credit(item:dict)->tuple[str,list[str],dict]:
     producer_priority=[]
     other_humans=[]
     vocalists=[]
+    vocalist_types={}
     all_artists=[]
 
     # Keep only named singing-synthesis engines. VocaDB's broad
@@ -2509,14 +2510,12 @@ def _vocadb_song_credit(item:dict)->tuple[str,list[str],dict]:
 
         if artist_type in synth_types:
             vocalists.append(name)
+            vocalist_types[name]=artist_type
             continue
 
-        # A human vocalist credit is not evidence that the song belongs in a voice-synth corpus.
-        if roles & vocalist_roles:
-            if not is_support:
-                other_humans.append(name)
-            continue
-
+        # Producer/composer identity takes precedence over a simultaneous vocalist role.
+        # This keeps PinocchioP, MikitoP and similar self-vocalizing producers as the
+        # main artist instead of incorrectly promoting an instrumentalist.
         if not is_support and (artist_type=="producer" or roles & producer_roles):
             score=(
                 3 if "composer" in roles else
@@ -2525,7 +2524,15 @@ def _vocadb_song_credit(item:dict)->tuple[str,list[str],dict]:
                 0
             )
             producer_priority.append((score,name))
-        elif not is_support and artist_type not in {"animator","illustrator","designer","label"}:
+            continue
+
+        # A human vocalist credit is not evidence that the song belongs in a voice-synth corpus.
+        if roles & vocalist_roles:
+            if not is_support:
+                other_humans.append(name)
+            continue
+
+        if not is_support and artist_type not in {"animator","illustrator","designer","label"}:
             other_humans.append(name)
 
     producer_priority.sort(key=lambda x:x[0],reverse=True)
@@ -2549,67 +2556,154 @@ def _vocadb_song_credit(item:dict)->tuple[str,list[str],dict]:
     return main_artist,featured,{
         "producer_artists":producers,
         "voice_synth_vocalists":vocalists,
+        "voice_synth_types":{name:vocalist_types.get(name) for name in vocalists},
         "all_vocadb_artist_credits":all_artists,
     }
 
 
 def _youtube_views_official(ids:list[str],status:BuildStatus)->tuple[dict[str,int],int]:
-    # Fetch live view counts only from the official YouTube Data API.
+    # Cache official API results so a corrected builder does not repeat ~185k lookups.
     ids=list(dict.fromkeys(video_id for video_id in ids if video_id))
     key=os.getenv("YOUTUBE_API_KEY","").strip()
+    cache_path=CACHE/"vocadb_youtube_view_counts.json"
+    cache_days=max(1,min(_safe_int(os.getenv("BEATHIT_VOCALOID_VIEW_CACHE_DAYS")) or 3,30))
+    now=int(time.time())
+    ttl_seconds=cache_days*86_400
+    entries={}
+
+    try:
+        if cache_path.exists():
+            cached=json.loads(cache_path.read_text(encoding="utf-8"))
+            if isinstance(cached,dict):
+                entries=cached.get("videos") or {}
+            if not isinstance(entries,dict):
+                entries={}
+    except Exception as exc:
+        status.warnings.append(f"Vocaloid YouTube cache ignored: {exc}")
+        entries={}
+
+    def save_cache()->None:
+        CACHE.mkdir(parents=True,exist_ok=True)
+        temp_path=cache_path.with_suffix(".tmp")
+        temp_path.write_text(
+            json.dumps(
+                {"schema_version":1,"updated_at":now,"videos":entries},
+                ensure_ascii=False,
+                separators=(",",":"),
+            )+"\n",
+            encoding="utf-8",
+        )
+        temp_path.replace(cache_path)
+
+    out={}
+    pending=[]
+    fresh_hits=0
+    fresh_missing=0
+    for video_id in ids:
+        entry=entries.get(video_id) if isinstance(entries.get(video_id),dict) else {}
+        views=_safe_int(entry.get("views"))
+        checked_at=_safe_int(entry.get("checked_at")) or 0
+        if views is not None:
+            # Keep the last official value as a resilience fallback even when refresh fails.
+            out[video_id]=views
+        if checked_at and now-checked_at<=ttl_seconds:
+            if views is None:
+                fresh_missing+=1
+            else:
+                fresh_hits+=1
+            continue
+        pending.append(video_id)
+
     if not key:
         status.warnings.append(
-            "Vocaloid build requires YOUTUBE_API_KEY; no third-party or Spotify fallback is allowed."
+            "Vocaloid build has no YOUTUBE_API_KEY; reusing cached official API values only."
         )
+        unresolved=len([video_id for video_id in ids if video_id not in out])
         status.sources["vocaloid_youtube_view_counts"]={
-            "source":"YouTube Data API v3",
+            "source":"cached YouTube Data API v3 videos.list(part=statistics)",
             "requested":len(ids),
-            "resolved":0,
-            "unresolved":len(ids),
+            "resolved":len(out),
+            "unresolved":unresolved,
+            "fresh_cache_hits":fresh_hits,
+            "live_requested":0,
+            "cache":str(cache_path.relative_to(ROOT)),
             "ok":False,
             "error":"missing YOUTUBE_API_KEY",
         }
-        return {},len(ids)
+        return out,unresolved
 
-    out={}
+    failed_batches=0
     with httpx.Client(timeout=60,follow_redirects=True) as client:
-        for start in range(0,len(ids),50):
-            batch=ids[start:start+50]
-            try:
-                data=_http_json(
-                    client,
-                    "GET",
-                    YOUTUBE_API,
-                    params={
-                        "part":"statistics",
-                        "id":",".join(batch),
-                        "key":key,
-                    },
+        for start in range(0,len(pending),50):
+            batch=pending[start:start+50]
+            data=None
+            last_error=None
+            for attempt in range(3):
+                try:
+                    data=_http_json(
+                        client,
+                        "GET",
+                        YOUTUBE_API,
+                        params={
+                            "part":"statistics",
+                            "id":",".join(batch),
+                            "key":key,
+                        },
+                    )
+                    break
+                except Exception as exc:
+                    last_error=exc
+                    time.sleep(1.0*(attempt+1))
+            if data is None:
+                failed_batches+=1
+                status.warnings.append(
+                    f"Vocaloid YouTube API batch {start}: {last_error}"
                 )
-                for item in data.get("items",[]) or []:
-                    views=_safe_int((item.get("statistics") or {}).get("viewCount"))
-                    if views is not None:
-                        out[str(item.get("id"))]=views
                 _progress(
-                    f"Vocaloid YouTube batch={start//50+1} batch_size={len(batch)} "
-                    f"resolved={len(out)}/{len(ids)}"
+                    f"Vocaloid YouTube live_batch={start//50+1} ERROR "
+                    f"{type(last_error).__name__ if last_error else 'UnknownError'}: {last_error}"
                 )
-            except Exception as exc:
-                status.warnings.append(f"Vocaloid YouTube API batch {start}: {exc}")
-                _progress(
-                    f"Vocaloid YouTube batch={start//50+1} ERROR "
-                    f"{type(exc).__name__}: {exc}"
-                )
+                continue
 
+            resolved_batch={}
+            for item in data.get("items",[]) or []:
+                video_id=str(item.get("id") or "")
+                views=_safe_int((item.get("statistics") or {}).get("viewCount"))
+                if video_id and views is not None:
+                    resolved_batch[video_id]=views
+
+            for video_id in batch:
+                views=resolved_batch.get(video_id)
+                entries[video_id]={"views":views,"checked_at":now}
+                if views is None:
+                    out.pop(video_id,None)
+                else:
+                    out[video_id]=views
+
+            if (start//50+1)%25==0:
+                save_cache()
+            _progress(
+                f"Vocaloid YouTube live_batch={start//50+1} batch_size={len(batch)} "
+                f"live_remaining={max(0,len(pending)-start-len(batch))} "
+                f"resolved={len(out)}/{len(ids)}"
+            )
+
+    save_cache()
     unresolved=len([video_id for video_id in ids if video_id not in out])
     status.sources["vocaloid_youtube_view_counts"]={
-        "source":"YouTube Data API v3 videos.list(part=statistics)",
+        "source":"YouTube Data API v3 videos.list(part=statistics) with persistent official-value cache",
         "requested":len(ids),
         "resolved":len(out),
         "unresolved":unresolved,
-        "ok":bool(out) and unresolved==0,
+        "fresh_cache_hits":fresh_hits,
+        "fresh_cached_missing":fresh_missing,
+        "live_requested":len(pending),
+        "failed_batches":failed_batches,
+        "cache_days":cache_days,
+        "cache":str(cache_path.relative_to(ROOT)),
+        "ok":bool(out) and unresolved==0 and failed_batches==0,
         "threshold":100_000_000,
-        "note":"Official YouTube API only; no Return YouTube Dislike, yt-dlp, or Spotify fallback.",
+        "note":"Only official YouTube API values are cached; no third-party or Spotify fallback.",
     }
     return out,unresolved
 
@@ -2704,6 +2798,15 @@ def build_vocaloid(catalog:pd.DataFrame,status:BuildStatus)->list[SongRow]:
                 "official_youtube_pv_count":len(pvs),
                 "official_youtube_resolved_pv_count":len(resolved),
                 "official_youtube_total_views":int(total_views),
+                "official_youtube_pvs":[
+                    {
+                        "video_id":pv["video_id"],
+                        "views":int(views),
+                        "author":pv.get("author"),
+                        "url":pv.get("url"),
+                    }
+                    for views,pv in sorted(resolved,key=lambda pair:pair[0],reverse=True)
+                ],
                 "highest_individual_official_pv_views":int(best_views),
                 "qualification_threshold_views":threshold,
                 "selection":"sum of distinct official Original YouTube PV view counts",
@@ -2738,8 +2841,10 @@ def build_vocaloid(catalog:pd.DataFrame,status:BuildStatus)->list[SongRow]:
         metric_coverage=dict(_metric_counts(rows)),
         notes=[
             "VocaDB-only classification and metadata; official YouTube Data API view counts only.",
-            "SongType must equal Original. Only enabled service=Youtube, pvType=Original uploads are summed per song.",
+            "SongType must equal Original. Only enabled service=Youtube, pvType=Original uploads are summed per song, with every contributing video ID and count retained for audit.",
             "Generic OtherVoiceSynthesizer and VirtualSinger artist types do not establish voice-synth eligibility.",
+            "Producer/composer credit takes precedence over simultaneous human-vocalist roles, preventing instrumentalists from being promoted to main artist.",
+            "Official YouTube statistics are cached and retried so corrected runs do not repeat the full 185k-video lookup.",
             "No Spotify matching, title collision matching, remix, mashup, cover, remaster, MusicPV entry, reprint, or third-party view-count fallback.",
             f"vocadb_exhaustive={vocadb_exhaustive}; unresolved_youtube_video_ids={unresolved_video_ids}",
         ],

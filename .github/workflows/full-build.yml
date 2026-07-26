@@ -80,10 +80,12 @@ jobs:
           BEATHIT_RYD_WORKERS: '20'
           BEATHIT_YTDLP_FALLBACK: '0'
           BEATHIT_VOCADB_SCAN_LIMIT: ${{ vars.BEATHIT_VOCADB_SCAN_LIMIT || '350000' }}
-          BEATHIT_KPOP_SEARCH_PAGES: ${{ vars.BEATHIT_KPOP_SEARCH_PAGES || '4' }}
+          BEATHIT_VOCALOID_VIEW_CACHE_DAYS: ${{ vars.BEATHIT_VOCALOID_VIEW_CACHE_DAYS || '3' }}
+          BEATHIT_KPOP_SEARCH_PAGES: ${{ vars.BEATHIT_KPOP_SEARCH_PAGES || '2' }}
+          BEATHIT_KPOP_ARTIST_SEARCHES: ${{ vars.BEATHIT_KPOP_ARTIST_SEARCHES || '35' }}
           BEATHIT_COUNTRY_WORKERS: ${{ vars.BEATHIT_COUNTRY_WORKERS || '4' }}
         run: |
-          python scripts/build_full_dataset.py --reuse-complete --force vocaloid video_game_music kpop unserious --only anime vocaloid vtuber_original vtuber_non_original video_game_music kpop internet_native electronic_subcultures alternative_extreme jazz_depth children_childhood unserious special_required
+          python scripts/build_full_dataset.py --reuse-complete --force vocaloid video_game_music kpop --only vocaloid video_game_music kpop
 
       - name: Update checksums
         run: python scripts/update_manifest.py

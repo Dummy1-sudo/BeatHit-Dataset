@@ -135,15 +135,35 @@ def main() -> None:
             official_total = 0
             resolved_pvs = 0
         voice_synths = e.get("voice_synth_vocalists")
+        voice_synth_types = e.get("voice_synth_types")
+        official_pvs = e.get("official_youtube_pvs")
+        pv_ids = []
+        pv_sum = 0
+        if isinstance(official_pvs, list):
+            for pv in official_pvs:
+                if not isinstance(pv, dict):
+                    continue
+                video_id = str(pv.get("video_id") or "").strip()
+                try:
+                    views = int(pv.get("views") or 0)
+                except Exception:
+                    views = 0
+                if video_id:
+                    pv_ids.append(video_id)
+                    pv_sum += views
         valid = (
             r.get("metric_name") == "youtube_views"
             and r.get("metric_unit") == "views"
             and value >= 100_000_000
             and view_count == int(value)
             and official_total == int(value)
-            and resolved_pvs >= 1
+            and pv_sum == int(value)
+            and resolved_pvs == len(pv_ids)
+            and len(pv_ids) == len(set(pv_ids))
             and isinstance(voice_synths, list)
             and bool(voice_synths)
+            and isinstance(voice_synth_types, dict)
+            and set(voice_synths).issubset(set(voice_synth_types))
             and str(e.get("vocadb_song_type") or "").casefold() == "original"
             and str(e.get("youtube_pv_type") or "").casefold() == "original"
             and str(e.get("youtube_pv_service") or "").casefold() == "youtube"
@@ -178,6 +198,8 @@ def main() -> None:
             or view_count != int(value)
             or not bool(e.get("kpop_artist_verified"))
             or not verified_artist
+            or norm(r.get("main_artist") or "") != norm(verified_artist)
+            or not str(r.get("source_url") or "").strip()
         ):
             invalid_kpop.append(i)
         kpop_keys.append((norm(r.get("title") or ""), norm(verified_artist or r.get("main_artist") or "")))
@@ -195,18 +217,40 @@ def main() -> None:
     invalid_video_games = []
     reject_game_text = re.compile(
         r"\b(?:motion picture|film soundtrack|movie soundtrack|television soundtrack|"
-        r"music from the video game|piano collections?|tribute|music box|cover album|remix album)\b",
+        r"original tv series|anime score|anime soundtrack|music from the video game|"
+        r"piano collections?|for piano solo|soundtrack for piano|tribute|music box|"
+        r"cover album|played by|remix album)\b",
         re.I,
     )
+    reject_screen_work = re.compile(
+        r"\b(?:soundtrack|original score|volume|vol\.?|music collection|for piano|played by)\b",
+        re.I,
+    )
+    allowed_associations = {
+        "official_soundtrack_album",
+        "franchise_artist",
+        "explicit_track_reference",
+        "genre_album",
+    }
+    seen_game_songs = set()
     for i, r in enumerate(video_games, 1):
         e = extra(r)
-        evidence = f"{r.get('album') or ''} | {r.get('screen_work') or ''}"
-        if (
-            not str(r.get("screen_work") or "").strip()
+        screen_work = str(r.get("screen_work") or "").strip()
+        evidence = f"{r.get('album') or ''} | {screen_work} | {r.get('genres') or ''}"
+        association = str(e.get("game_association_kind") or "")
+        song_key = (norm(screen_work), norm(r.get("title") or ""), norm(r.get("main_artist") or ""))
+        invalid = (
+            not screen_work
             or str(e.get("culture_category") or "") != "video_game_music"
+            or association not in allowed_associations
             or reject_game_text.search(evidence)
-        ):
+            or reject_screen_work.search(screen_work)
+            or (association == "genre_album" and not str(e.get("game_wikidata_id") or "").strip())
+            or song_key in seen_game_songs
+        )
+        if invalid:
             invalid_video_games.append(i)
+        seen_game_songs.add(song_key)
     report["semantic_checks"]["video_game_music_classification"] = {
         "rows": len(video_games),
         "invalid_rows": invalid_video_games[:100],

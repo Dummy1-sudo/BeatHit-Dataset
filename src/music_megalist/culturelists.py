@@ -27,6 +27,7 @@ TODAY = date.today().isoformat()
 LISTENBRAINZ_API = "https://api.listenbrainz.org/1"
 WIKIDATA_SPARQL = "https://query.wikidata.org/sparql"
 WIKIDATA_SPARQL_FALLBACK = "https://query.wikidata.org/bigdata/namespace/wdq/sparql"
+WIKIDATA_QLEVER = "https://qlever.dev/api/wikidata"
 YOUTUBE_API = "https://www.googleapis.com/youtube/v3"
 
 TAG_LISTS = {
@@ -688,9 +689,73 @@ KPOP_STRONG_GENRES = {
     "k-pop boy group",
     "k-pop girl group",
 }
+# Curated artist identities prevent YouTube search relevance from being mistaken for
+# genre membership. The order is also the artist-specific search priority.
+KPOP_CURATED_ARTISTS = [
+    ("BTS", {"BTS", "방탄소년단", "BTS (방탄소년단)"}),
+    ("BLACKPINK", {"BLACKPINK", "블랙핑크"}),
+    ("TWICE", {"TWICE", "트와이스"}),
+    ("PSY", {"PSY", "싸이"}),
+    ("BIGBANG", {"BIGBANG", "빅뱅"}),
+    ("EXO", {"EXO", "엑소"}),
+    ("Red Velvet", {"Red Velvet", "레드벨벳"}),
+    ("SEVENTEEN", {"SEVENTEEN", "세븐틴", "SVT"}),
+    ("Stray Kids", {"Stray Kids", "스트레이 키즈", "SKZ"}),
+    ("(G)I-DLE", {"(G)I-DLE", "GIDLE", "여자아이들"}),
+    ("aespa", {"aespa", "에스파"}),
+    ("IVE", {"IVE", "아이브"}),
+    ("ITZY", {"ITZY", "있지"}),
+    ("NCT 127", {"NCT 127", "엔시티 127"}),
+    ("NCT DREAM", {"NCT DREAM", "엔시티 드림"}),
+    ("NewJeans", {"NewJeans", "뉴진스"}),
+    ("LE SSERAFIM", {"LE SSERAFIM", "르세라핌"}),
+    ("TOMORROW X TOGETHER", {"TOMORROW X TOGETHER", "TXT", "투모로우바이투게더"}),
+    ("ENHYPEN", {"ENHYPEN", "엔하이픈"}),
+    ("ATEEZ", {"ATEEZ", "에이티즈"}),
+    ("GOT7", {"GOT7", "갓세븐"}),
+    ("iKON", {"iKON", "아이콘"}),
+    ("WINNER", {"WINNER", "위너"}),
+    ("MAMAMOO", {"MAMAMOO", "마마무"}),
+    ("MOMOLAND", {"MOMOLAND", "모모랜드"}),
+    ("EVERGLOW", {"EVERGLOW", "에버글로우"}),
+    ("GFRIEND", {"GFRIEND", "여자친구"}),
+    ("IZ*ONE", {"IZ*ONE", "IZONE", "아이즈원"}),
+    ("2NE1", {"2NE1", "투애니원"}),
+    ("Girls' Generation", {"Girls' Generation", "SNSD", "소녀시대"}),
+    ("Super Junior", {"Super Junior", "슈퍼주니어"}),
+    ("SHINee", {"SHINee", "샤이니"}),
+    ("IU", {"IU", "아이유"}),
+    ("Sunmi", {"Sunmi", "선미"}),
+    ("HyunA", {"HyunA", "현아"}),
+    ("Jessi", {"Jessi", "제시"}),
+    ("ZICO", {"ZICO", "지코"}),
+    ("KARD", {"KARD", "카드"}),
+    ("Dreamcatcher", {"Dreamcatcher", "드림캐쳐"}),
+    ("Kep1er", {"Kep1er", "케플러"}),
+    ("NMIXX", {"NMIXX", "엔믹스"}),
+    ("BABYMONSTER", {"BABYMONSTER", "베이비몬스터"}),
+    ("TREASURE", {"TREASURE", "트레저"}),
+    ("MONSTA X", {"MONSTA X", "몬스타엑스"}),
+    ("Apink", {"Apink", "에이핑크"}),
+    ("T-ARA", {"T-ARA", "티아라"}),
+    ("4Minute", {"4Minute", "포미닛"}),
+    ("Wonder Girls", {"Wonder Girls", "원더걸스"}),
+    ("miss A", {"miss A", "미쓰에이"}),
+    ("TAEMIN", {"TAEMIN", "태민"}),
+    ("G-DRAGON", {"G-DRAGON", "GD", "지드래곤"}),
+    ("TAEYANG", {"TAEYANG", "태양"}),
+    ("CL", {"CL", "씨엘"}),
+    ("JENNIE", {"JENNIE", "제니"}),
+    ("LISA", {"LISA", "리사"}),
+    ("ROSÉ", {"ROSÉ", "ROSE", "로제"}),
+    ("HWASA", {"HWASA", "화사"}),
+    ("LeeHi", {"LeeHi", "LEE HI", "이하이"}),
+    ("SHAUN", {"SHAUN", "숀"}),
+]
 KPOP_REJECT_TITLE = re.compile(
     r"\b(?:reaction|dance practice|dance cover|cover|lyrics?|karaoke|sped up|slowed|"
-    r"nightcore|remix|teaser|trailer|shorts?|fanmade|fancam|instrumental)\b",
+    r"nightcore|remix|teaser|trailer|shorts?|fanmade|fancam|instrumental|"
+    r"performance|live(?:\s+clip)?|stage|audio|visualizer|choreography|behind)\b",
     re.I,
 )
 KPOP_OFFICIAL_MARKER = re.compile(
@@ -769,8 +834,26 @@ def _build_trusted_kpop_artists(catalog: pd.DataFrame) -> tuple[dict[str, str], 
         for alias in _kpop_artist_aliases(artist) | _kpop_artist_aliases(name):
             aliases.setdefault(alias, name)
 
+    # Curated identities override noisy catalog spellings and supply artists whose source
+    # rows omit Korean ISRC/country metadata. No song is added by this registry alone:
+    # every output still needs an observed >100M YouTube count and official-video evidence.
+    curated_ranked: list[str] = []
+    for canonical_name, source_aliases in KPOP_CURATED_ARTISTS:
+        curated_ranked.append(canonical_name)
+        for alias_value in set(source_aliases) | {canonical_name}:
+            for alias in _kpop_artist_aliases(alias_value):
+                aliases[alias] = canonical_name
+
     ranked_primary = sorted(trusted_primary, key=lambda value: best_score.get(value, 0.0), reverse=True)
-    return aliases, [canonical[value] for value in ranked_primary]
+    ranked = list(curated_ranked)
+    seen_ranked = {_kpop_primary_artist_key(value) for value in ranked}
+    for primary in ranked_primary:
+        name = canonical[primary]
+        key = _kpop_primary_artist_key(name)
+        if key not in seen_ranked:
+            seen_ranked.add(key)
+            ranked.append(name)
+    return aliases, ranked
 
 
 def _match_trusted_kpop_artist(value: Any, trusted_aliases: dict[str, str]) -> str | None:
@@ -865,10 +948,10 @@ def _youtube_kpop_rows(
         status.warnings.append("K-pop YouTube discovery skipped: missing YOUTUBE_API_KEY")
         return []
 
-    pages = max(1, min(_safe_int(os.getenv("BEATHIT_KPOP_SEARCH_PAGES")) or 4, 8))
+    pages = max(1, min(_safe_int(os.getenv("BEATHIT_KPOP_SEARCH_PAGES")) or 2, 4))
     artist_search_limit = max(
         0,
-        min(_safe_int(os.getenv("BEATHIT_KPOP_ARTIST_SEARCHES")) or 40, 60),
+        min(_safe_int(os.getenv("BEATHIT_KPOP_ARTIST_SEARCHES")) or 35, 45),
     )
     search_plan = [(query, pages) for query in KPOP_SEARCH_QUERIES]
     search_plan.extend((f'"{artist}" official MV', 1) for artist in trusted_artists[:artist_search_limit])
@@ -1000,6 +1083,7 @@ def _youtube_kpop_rows(
         "queries": [query for query, _ in search_plan],
         "generic_pages_per_query": pages,
         "artist_specific_queries": min(artist_search_limit, len(trusted_artists)),
+        "curated_artist_registry": len(KPOP_CURATED_ARTISTS),
         "search_calls": search_calls,
         "unique_video_candidates": len(discovered),
         "qualified_rows": len(rows),
@@ -1067,11 +1151,17 @@ def build_kpop_youtube_100m(catalog: pd.DataFrame, status: Any) -> list[SongRow]
 
 
 def _fetch_top_games(status: Any, limit: int = 1_000) -> list[dict[str, Any]]:
+    cache_path = CACHE / "wikidata_top_video_games.json"
     query = f"""
+PREFIX wd: <http://www.wikidata.org/entity/>
+PREFIX wdt: <http://www.wikidata.org/prop/direct/>
+PREFIX rdfs: <http://www.w3.org/2000/01/rdf-schema#>
+PREFIX wikibase: <http://wikiba.se/ontology#>
 SELECT ?game ?gameLabel ?sitelinks WHERE {{
   ?game wdt:P31/wdt:P279* wd:Q7889 ;
-        wikibase:sitelinks ?sitelinks .
-  SERVICE wikibase:label {{ bd:serviceParam wikibase:language "en". }}
+        wikibase:sitelinks ?sitelinks ;
+        rdfs:label ?gameLabel .
+  FILTER(LANG(?gameLabel) = "en")
 }}
 ORDER BY DESC(?sitelinks)
 LIMIT {int(limit)}
@@ -1080,6 +1170,7 @@ LIMIT {int(limit)}
     successful_endpoint = ""
     errors: list[str] = []
     attempts = [
+        ("POST", WIKIDATA_QLEVER),
         ("POST", WIKIDATA_SPARQL),
         ("POST", WIKIDATA_SPARQL_FALLBACK),
         ("GET", WIKIDATA_SPARQL),
@@ -1112,9 +1203,32 @@ LIMIT {int(limit)}
                 errors.append(f"{method} {endpoint}: {exc}")
 
     if not bindings:
+        cached_games: list[dict[str, Any]] = []
+        try:
+            if cache_path.exists():
+                cached = json.loads(cache_path.read_text(encoding="utf-8"))
+                cached_games = [
+                    value for value in (cached.get("games") or [])
+                    if isinstance(value, dict) and value.get("game_title")
+                ][:limit]
+        except Exception as exc:
+            errors.append(f"cached top games: {exc}")
+        if cached_games:
+            status.warnings.append(
+                "Live Wikidata endpoints failed; using the last successful cached top-game ranking."
+            )
+            status.sources["wikidata_top_video_games"] = {
+                "url": "cached prior Wikidata/QLever result",
+                "rows": len(cached_games),
+                "ranking_proxy": "wikimedia_sitelinks",
+                "ok": True,
+                "cached": True,
+                "errors": errors,
+            }
+            return cached_games
         status.warnings.append("Wikidata top video games failed: " + " | ".join(errors))
         status.sources["wikidata_top_video_games"] = {
-            "url": [WIKIDATA_SPARQL, WIKIDATA_SPARQL_FALLBACK],
+            "url": [WIKIDATA_QLEVER, WIKIDATA_SPARQL, WIKIDATA_SPARQL_FALLBACK],
             "rows": 0,
             "ranking_proxy": "wikimedia_sitelinks",
             "ok": False,
@@ -1138,11 +1252,20 @@ LIMIT {int(limit)}
                 }
             )
 
+    if games:
+        CACHE.mkdir(parents=True, exist_ok=True)
+        temp_path = cache_path.with_suffix(".tmp")
+        temp_path.write_text(
+            json.dumps({"games": games, "retrieved_at": TODAY}, ensure_ascii=False, indent=2) + "\n",
+            encoding="utf-8",
+        )
+        temp_path.replace(cache_path)
     status.sources["wikidata_top_video_games"] = {
         "url": successful_endpoint,
         "rows": len(games),
         "ranking_proxy": "wikimedia_sitelinks",
         "ok": bool(games),
+        "cached": False,
     }
     return games
 
@@ -1162,16 +1285,29 @@ GAME_SOUNDTRACK_MARKER = re.compile(
 )
 GAME_MEDIA_REJECT = re.compile(
     r"\b(?:motion picture|original film|film soundtrack|movie soundtrack|"
-    r"television soundtrack|tv soundtrack|original series soundtrack|"
+    r"television soundtrack|tv soundtrack|original tv series|original series soundtrack|"
+    r"music from the original tv series|anime score|anime soundtrack|animation soundtrack|"
     r"broadway|stage musical)\b",
     re.I,
 )
 GAME_ARRANGEMENT_REJECT = re.compile(
-    r"\b(?:tribute|piano collections?|music box|lullaby|karaoke|cover album|"
-    r"lo-?fi|remix album|orchestral arrangements?|reimagined)\b",
+    r"\b(?:tribute|piano collections?|for piano solo|piano cover|soundtrack for piano|"
+    r"music box|lullaby|karaoke|cover album|played by|lo-?fi|remix album|"
+    r"orchestral arrangements?|reimagined)\b",
     re.I,
 )
 GAME_LICENSED_COMPILATION = re.compile(r"\bmusic from the video game\b", re.I)
+GAME_FROM_TITLE_PATTERNS = [
+    re.compile(r"\bfrom\s+[\"“](?P<game>[^\"”]{2,120})[\"”]", re.I),
+    re.compile(r"\((?:theme\s+)?from\s+(?P<game>[^)\]]{2,120})\)", re.I),
+    re.compile(r"\[(?:theme\s+)?from\s+(?P<game>[^\]]{2,120})\]", re.I),
+]
+GAME_ASSOCIATION_PRIORITY = {
+    "official_soundtrack_album": 4,
+    "franchise_artist": 4,
+    "explicit_track_reference": 3,
+    "genre_album": 1,
+}
 GAME_FRANCHISE_ARTISTS = {
     "league of legends": "League of Legends",
     "valorant": "VALORANT",
@@ -1196,14 +1332,44 @@ def _game_song_key(row: pd.Series) -> tuple[str, str]:
     )
 
 
+def _game_from_track_title(value: Any) -> str | None:
+    title = html.unescape(str(value or "")).strip()
+    for pattern in GAME_FROM_TITLE_PATTERNS:
+        match = pattern.search(title)
+        if not match:
+            continue
+        game = match.group("game").strip(" \t-–—:|,()[]{}'\"“”")
+        game = re.sub(r"\s+(?:theme|soundtrack|ost|score)\s*$", "", game, flags=re.I)
+        if game:
+            return game
+    return None
+
+
+def _game_candidate_kind(row: pd.Series, game_title: str) -> str:
+    album = html.unescape(str(row.get("album_name") or "")).strip()
+    artist = html.unescape(str(row.get("main_artist") or row.get("artists") or "")).strip()
+    if _game_from_track_title(row.get("title")):
+        return "explicit_track_reference"
+    if GAME_FRANCHISE_ARTISTS.get(norm(artist)):
+        return "franchise_artist"
+    if GAME_SOUNDTRACK_MARKER.search(album):
+        return "official_soundtrack_album"
+    return "genre_album"
+
+
 def _infer_game_title(row: pd.Series) -> str | None:
     album = html.unescape(str(row.get("album_name") or "")).strip()
     title = html.unescape(str(row.get("title") or "")).strip()
     artist = html.unescape(str(row.get("main_artist") or row.get("artists") or "")).strip()
-    text = f"{album} | {title}"
+    genres = " ".join(_parse_clean_genres(row.get("genres")))
+    text = f"{album} | {title} | {genres}"
 
     if not album or GAME_MEDIA_REJECT.search(text) or GAME_ARRANGEMENT_REJECT.search(text):
         return None
+
+    explicit_game = _game_from_track_title(title)
+    if explicit_game:
+        return explicit_game
 
     artist_game = GAME_FRANCHISE_ARTISTS.get(norm(artist))
     if artist_game and not GAME_SOUNDTRACK_MARKER.search(album):
@@ -1285,23 +1451,25 @@ def build_video_game_music(catalog: pd.DataFrame, status: Any) -> list[SongRow]:
         genre_hit = _game_genre_hit(row_genres)
         album = str(row.get("album_name") or "")
         title = str(row.get("title") or "")
-        text = f"{album} | {title}"
+        text = f"{album} | {title} | {' '.join(row_genres)}"
         if GAME_MEDIA_REJECT.search(text) or GAME_ARRANGEMENT_REJECT.search(text):
             continue
         if GAME_LICENSED_COMPILATION.search(album) and not genre_hit:
             continue
-        if not genre_hit and not GAME_SOUNDTRACK_MARKER.search(album):
+        explicit_title_game = _game_from_track_title(title)
+        if not genre_hit and not GAME_SOUNDTRACK_MARKER.search(album) and not explicit_title_game:
             continue
 
         game_title = _infer_game_title(row)
         if not game_title:
             continue
+        association_kind = _game_candidate_kind(row, game_title)
 
         album_norm = norm(album)
         title_norm = norm(title)
         game_norm = norm(game_title)
         position = len(candidates)
-        candidates.append((row, album_norm, title_norm, genre_hit, game_title))
+        candidates.append((row, album_norm, title_norm, genre_hit, game_title, association_kind))
         for token in (
             set(re.findall(r"[a-z0-9]{4,}", f"{game_norm} {album_norm} {title_norm}")) - stop
         ):
@@ -1357,7 +1525,7 @@ def build_video_game_music(catalog: pd.DataFrame, status: Any) -> list[SongRow]:
         best: tuple[pd.Series, float] | None = None
         best_score = -1.0
         for position in list(pool)[:1_000]:
-            row, album_norm, title_norm, genre_hit, inferred_game = candidates[position]
+            row, album_norm, title_norm, genre_hit, inferred_game, association_kind = candidates[position]
             inferred_norm = norm(inferred_game)
             exact = game_norm == inferred_norm
             contained = bool(
@@ -1372,9 +1540,15 @@ def build_video_game_music(catalog: pd.DataFrame, status: Any) -> list[SongRow]:
                 fuzz.ratio(game_norm, inferred_norm) if inferred_norm else 0,
                 fuzz.partial_ratio(game_norm, album_norm) if album_norm else 0,
             )
-            if not exact and not contained and similarity < 88:
+            minimum_similarity = 96 if association_kind == "genre_album" else 88
+            if not exact and not contained and similarity < minimum_similarity:
                 continue
-            combined = _catalog_score(row) + similarity * 0.35 + game["sitelinks"] * 0.002
+            combined = (
+                _catalog_score(row)
+                + similarity * 0.35
+                + game["sitelinks"] * 0.002
+                + GAME_ASSOCIATION_PRIORITY[association_kind] * 8
+            )
             if combined > best_score:
                 best_score = combined
                 best = (row, float(similarity))
@@ -1382,6 +1556,7 @@ def build_video_game_music(catalog: pd.DataFrame, status: Any) -> list[SongRow]:
         if best is None:
             continue
         row, best_match = best
+        association_kind = _game_candidate_kind(row, game["game_title"])
         append_song(
             row,
             game["game_title"],
@@ -1393,6 +1568,7 @@ def build_video_game_music(catalog: pd.DataFrame, status: Any) -> list[SongRow]:
                 "game_wikidata_id": game["wikidata_id"],
                 "game_wikidata_url": game["wikidata_url"],
                 "game_soundtrack_match_score": best_match,
+                "game_association_kind": association_kind,
             },
         )
         if len(selected) >= target:
@@ -1400,57 +1576,78 @@ def build_video_game_music(catalog: pd.DataFrame, status: Any) -> list[SongRow]:
 
     fallback_candidates = sorted(
         candidates,
-        key=lambda item: _catalog_score(item[0]),
+        key=lambda item: (
+            GAME_ASSOCIATION_PRIORITY[item[5]],
+            _catalog_score(item[0]),
+        ),
         reverse=True,
     )
     fallback_unique = 0
     fallback_additional = 0
 
-    # First preserve breadth: one highest-popularity recording for each confidently inferred game.
-    for row, album_norm, title_norm, genre_hit, game_title in fallback_candidates:
+    # First preserve breadth using only direct soundtrack/artist/title evidence. A raw
+    # genre tag alone is too noisy unless the candidate already matched a ranked game.
+    for row, album_norm, title_norm, genre_hit, game_title, association_kind in fallback_candidates:
         if len(selected) >= target:
             break
         game_key = norm(game_title)
+        if association_kind == "genre_album":
+            continue
+        if (
+            association_kind == "explicit_track_reference"
+            and not genre_hit
+            and game_key not in {norm(str(game.get("game_title") or "")) for game in games}
+        ):
+            continue
         if per_game.get(game_key, 0) >= 1:
             continue
         if append_song(
             row,
             game_title,
-            selection="highest-popularity explicit video-game soundtrack candidate for inferred game",
+            selection="highest-popularity source-backed recording for inferred game",
             extra={
                 "catalog_fallback_rank": fallback_unique + 1,
                 "wikidata_available": bool(games),
                 "fallback_stage": "one_per_game",
+                "game_association_kind": association_kind,
             },
         ):
             fallback_unique += 1
 
-    # Then fill the requested song list with additional recognizable tracks, capped per game.
-    for row, album_norm, title_norm, genre_hit, game_title in fallback_candidates:
+    # Then add more recognizable recordings. Genre-only albums are allowed only for a
+    # game that was independently established by Wikidata or stronger soundtrack evidence.
+    for row, album_norm, title_norm, genre_hit, game_title, association_kind in fallback_candidates:
         if len(selected) >= target:
             break
         game_key = norm(game_title)
-        if per_game.get(game_key, 0) >= 4:
+        if association_kind == "genre_album" and per_game.get(game_key, 0) == 0:
+            continue
+        if association_kind == "explicit_track_reference" and not genre_hit and per_game.get(game_key, 0) == 0:
+            continue
+        if per_game.get(game_key, 0) >= 8:
             continue
         if append_song(
             row,
             game_title,
-            selection="additional high-popularity original game-soundtrack recording",
+            selection="additional high-popularity game-associated recording",
             extra={
                 "catalog_fallback_rank": fallback_unique + fallback_additional + 1,
                 "wikidata_available": bool(games),
                 "fallback_stage": "additional_tracks",
-                "per_game_track_cap": 4,
+                "per_game_track_cap": 8,
+                "game_association_kind": association_kind,
             },
         ):
             fallback_additional += 1
 
+    # The requested list is popularity-ranked. Game rank remains provenance, not the
+    # final row ordering criterion.
     selected.sort(
         key=lambda row: (
-            0 if (row.extra or {}).get("game_rank") is not None else 1,
-            int((row.extra or {}).get("game_rank") or 10**9),
-            int((row.extra or {}).get("catalog_fallback_rank") or 10**9),
-        )
+            float(row.overall_popularity_score or 0.0),
+            float(row.metric_value or 0.0),
+        ),
+        reverse=True,
     )
     for rank, row in enumerate(selected, 1):
         row.rank = rank
@@ -1461,9 +1658,10 @@ def build_video_game_music(catalog: pd.DataFrame, status: Any) -> list[SongRow]:
     st.complete = len(selected) == target
     st.metric_coverage = _metric_counts(selected)
     st.notes = [
-        "Movie/television soundtracks, licensed-song compilations, tribute albums, piano collections, music-box albums, cover albums, and generic remix albums are rejected.",
-        "Game names are normalized from soundtrack album metadata; known franchise-artist singles such as League of Legends are mapped to their game.",
-        "Fallback selection first maximizes distinct games, then allows up to four high-popularity original soundtrack tracks per game to approach the 1,000-song target.",
+        "QLever is the primary Wikidata fallback and the last successful top-game ranking is cached for later runs.",
+        "Movie/television/anime soundtracks, licensed compilations, tribute releases, piano collections, music-box albums, cover albums, and generic remix albums are rejected.",
+        "Each row records whether the game association came from an official soundtrack album, franchise artist, explicit track-title reference, or a high-confidence Wikidata match.",
+        "Selection preserves game breadth, then allows up to eight popular recordings per independently established game; final rows are sorted by song popularity evidence.",
         f"ranked_games={len(games)}; soundtrack_candidates={len(candidates)}; unique_games={len(per_game)}; fallback_unique={fallback_unique}; fallback_additional={fallback_additional}; rows={len(selected)}",
     ]
     status.save()
