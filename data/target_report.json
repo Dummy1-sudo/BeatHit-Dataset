@@ -42,7 +42,7 @@
     },
     "video_games/video_game_music_1000.csv": {
       "target": 1000,
-      "rows": 388,
+      "rows": 634,
       "complete": false
     },
     "internet_native/internet_native_1000.csv": {
@@ -141,18 +141,24 @@
       "complete": false
     },
     "vocaloid_threshold": {
-      "target": "VocaDB Original voice-synth songs with one official Original YouTube PV >=100,000,000 views; cap 10,000",
-      "rows": 16,
+      "target": "VocaDB Original voice-synth songs whose distinct official Original YouTube PVs total >=100,000,000 views; cap 10,000",
+      "rows": 22,
       "invalid_rows": [],
       "threshold_valid": true,
       "corpus_completeness": "Read STATUS.json datasets.vocaloid.complete; threshold validity does not prove exhaustive source coverage."
     },
     "kpop_youtube_threshold": {
-      "target": "all materialized source-tagged K-pop songs strictly above 100,000,000 observed YouTube views",
-      "rows": 316,
+      "target": "verified K-pop artists with observed YouTube views strictly above 100,000,000",
+      "rows": 105,
       "invalid_rows": [],
+      "duplicate_title_artist_keys": 0,
       "threshold_valid": true,
-      "corpus_completeness": "Read STATUS.json datasets.kpop.complete; current source catalog is not claimed exhaustive."
+      "corpus_completeness": "Read STATUS.json datasets.kpop.complete; bounded official-YouTube search is not claimed exhaustive."
+    },
+    "video_game_music_classification": {
+      "rows": 634,
+      "invalid_rows": [],
+      "complete": false
     },
     "special_required": {
       "required": [
@@ -175,12 +181,12 @@
       "complete": true
     },
     "megalist_languages": {
-      "rows": 94026,
+      "rows": 93919,
       "invalid_rows": [],
       "complete": true
     },
     "megalist_deduplication": {
-      "rows": 94026,
+      "rows": 93919,
       "duplicate_title_main_artist_keys": 0,
       "complete": true
     }
