@@ -2,6 +2,8 @@ import csv
 import json
 from pathlib import Path
 
+from music_megalist.io import write_rows
+from music_megalist.models import SongRow
 from music_megalist.validate import validate
 
 
@@ -59,3 +61,71 @@ def test_country_source_exhausted_shortfall_is_valid_partial_but_not_request_com
     strict=validate(data,require_complete=True)
     assert any('COUNTRY_COUNT XX: 2 != 1000 (source exhausted)' in e for e in strict)
     assert any('COUNTRY_UNSUPPORTED 1' in e for e in strict)
+
+
+def _vocaloid_row(rank: int, vocadb_id: int, video_id: str) -> SongRow:
+    views=1000-rank
+    return SongRow(
+        rank=rank,
+        title='Shared title',
+        main_artist='Shared producer',
+        languages=['ja'],
+        metric_name='youtube_views',
+        metric_value=float(views),
+        metric_unit='views',
+        view_count=views,
+        source_url=f'https://www.youtube.com/watch?v={video_id}',
+        retrieved_at='2026-07-26',
+        extra={
+            'vocadb_id':vocadb_id,
+            'vocadb_song_type':'Original',
+            'youtube_video_id':video_id,
+            'youtube_pv_type':'Original',
+            'youtube_pv_service':'Youtube',
+            'official_youtube_resolved_pv_count':1,
+            'official_youtube_total_views':views,
+            'official_youtube_pvs':[{'video_id':video_id,'views':views}],
+            'highest_individual_official_pv_views':views,
+            'qualification_method':'official_original_youtube_pv',
+            'voice_synth_vocalists':['Hatsune Miku'],
+            'voice_synth_types':{'Hatsune Miku':'Vocaloid'},
+        },
+    )
+
+
+def test_compressed_vocaloid_uses_vocadb_identity(tmp_path: Path):
+    data=tmp_path/'data'
+    path=data/'vocaloid'/'vocaloid_originals_youtube_views.csv.gz'
+    write_rows([
+        _vocaloid_row(1,101,'video-one'),
+        _vocaloid_row(2,102,'video-two'),
+    ],path)
+    assert validate(data)==[]
+
+    write_rows([
+        _vocaloid_row(1,101,'video-one'),
+        _vocaloid_row(2,101,'video-two'),
+    ],path)
+    assert any('DUP_VOCADB_ID' in error for error in validate(data))
+
+
+def test_megalist_partition_keeps_global_rank_sequence(tmp_path: Path):
+    data=tmp_path/'data'
+    path=data/'megalist'/'megalist_part_002.csv'
+    rows=[
+        SongRow(
+            rank=10001+i,
+            title=f'Song {i}',
+            main_artist='Artist',
+            languages=['und'],
+            metric_name='spotify_streams',
+            metric_value=float(100-i),
+            metric_unit='streams',
+            listen_count=100-i,
+            source_url=f'https://example.test/{i}',
+            retrieved_at='2026-07-26',
+        )
+        for i in range(2)
+    ]
+    write_rows(rows,path)
+    assert validate(data)==[]

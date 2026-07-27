@@ -3,8 +3,8 @@ from __future__ import annotations
 """Full, source-backed BeatHit dataset build.
 
 This module is intentionally conservative: it never invents stream/view counts and it
-never pads a conditional list (for example Vocaloid songs with an official Original
-YouTube PV at or above 100M views) with
+never pads a conditional list (for example original Vocaloid songs with a resolved
+official Original YouTube PV) with
 non-qualifying rows. Fixed-size lists are filled from the best available source pool;
 when a source is exhausted, the coverage report records the shortfall instead of
 fabricating records.
@@ -108,7 +108,7 @@ FIXED_TARGETS = {
 
 MATERIALIZED_OUTPUTS = {
     "anime": DATA / "anime" / "anime_songs.csv",
-    "vocaloid": DATA / "vocaloid" / "vocaloid_originals_youtube_views.csv",
+    "vocaloid": DATA / "vocaloid" / "vocaloid_originals_youtube_views.csv.gz",
     "worldwide": DATA / "worldwide" / "worldwide_51000.csv",
     "classical": DATA / "classical" / "classical_10000.csv",
     "vtuber_original": DATA / "vtuber_original" / "vtuber_original_10000.csv",
@@ -2786,7 +2786,8 @@ def build_vocaloid(catalog:pd.DataFrame,status:BuildStatus)->list[SongRow]:
     # Build every original voice-synth song with a resolved official Original YouTube PV.
     # catalog is intentionally unused so Spotify/catalog data cannot affect the list.
     del catalog
-    output_path=DATA/"vocaloid"/"vocaloid_originals_youtube_views.csv"
+    output_path=DATA/"vocaloid"/"vocaloid_originals_youtube_views.csv.gz"
+    plain_output_path=DATA/"vocaloid"/"vocaloid_originals_youtube_views.csv"
     partial_path=DATA/"vocaloid"/"vocaloid_originals_youtube_views.partial.csv"
     old_threshold_path=DATA/"vocaloid"/"vocaloid_youtube_100m.csv"
     legacy_path=DATA/"vocaloid"/"vocaloid_spotify_10m.csv"
@@ -2795,9 +2796,10 @@ def build_vocaloid(catalog:pd.DataFrame,status:BuildStatus)->list[SongRow]:
     partial_path.unlink(missing_ok=True)
 
     preserved=[]
-    if output_path.exists():
+    preserved_path=output_path if output_path.exists() else plain_output_path
+    if preserved_path.exists():
         try:
-            for existing in read_rows(output_path):
+            for existing in read_rows(preserved_path):
                 normalized=_normalize_existing_vocaloid_row(existing)
                 if normalized is not None:
                     preserved.append(normalized)
@@ -2918,6 +2920,9 @@ def build_vocaloid(catalog:pd.DataFrame,status:BuildStatus)->list[SongRow]:
         row.rank=rank
     if rows:
         write_rows(rows,output_path)
+        # A failed pre-compression workflow may restore the old plain CSV from its
+        # artifact. Remove it only after the lossless compressed replacement exists.
+        plain_output_path.unlink(missing_ok=True)
         # Retire the contaminated legacy Spotify classifier only after a replacement was
         # successfully materialized. A failed/empty run never destroys the last canonical file.
         legacy_path.unlink(missing_ok=True)
@@ -3244,19 +3249,21 @@ def build_megalist(all_rows:dict[str,list[SongRow]],status:BuildStatus)->list[So
     path=DATA/"megalist"/"megalist.csv"
     write_rows(out,path)
     # GitHub rejects individual files above 100 MiB. Keep the canonical plain CSV when it is
-    # comfortably below that limit; otherwise replace it with gzip plus <=50k-row CSV parts.
+    # comfortably below that limit; otherwise replace it with deterministic gzip plus
+    # <=10k-row CSV parts.
     notes=[]
     if path.exists() and path.stat().st_size > 90*1024*1024:
-        import gzip
         gz=path.with_suffix('.csv.gz')
-        with path.open('rb') as src, gzip.open(gz,'wb',compresslevel=9) as dst:
-            shutil.copyfileobj(src,dst)
+        write_rows(out,gz)
         # Chunked plain CSVs remain easy to inspect/use without requiring gzip support.
         for old in path.parent.glob('megalist_part_*.csv'): old.unlink()
-        for part_no,start in enumerate(range(0,len(out),50_000),1):
-            write_rows(out[start:start+50_000],path.parent/f'megalist_part_{part_no:03d}.csv')
+        for part_no,start in enumerate(range(0,len(out),10_000),1):
+            write_rows(out[start:start+10_000],path.parent/f'megalist_part_{part_no:03d}.csv')
         path.unlink()
-        notes.append(f"Canonical megalist compressed to {gz.name} and split into 50k-row CSV parts to stay below GitHub's per-file size limit.")
+        notes.append(f"Canonical megalist compressed to {gz.name} and split into 10k-row CSV parts to stay below GitHub's per-file size limit.")
+    else:
+        path.with_suffix('.csv.gz').unlink(missing_ok=True)
+        for old in path.parent.glob('megalist_part_*.csv'): old.unlink()
     # The union itself is mechanically complete only when every upstream requested list is
     # complete. Otherwise it is still a valid deduplicated union of what was retrieved, but must
     # not be presented as the finished user-requested megalist.

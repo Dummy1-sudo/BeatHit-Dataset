@@ -2,7 +2,8 @@ from __future__ import annotations
 from pathlib import Path
 import csv
 import json
-from .io import read_rows
+import re
+from .io import open_text, read_rows
 from .dedupe import norm
 
 TARGETS={
@@ -35,7 +36,7 @@ def _worldwide_bucket(row: dict[str,str]) -> str:
 
 def _generic_csv_errors(path: Path) -> list[str]:
     errors=[]
-    with path.open(encoding='utf-8',newline='') as f: rows=list(csv.DictReader(f))
+    with open_text(path,'r',newline='') as f: rows=list(csv.DictReader(f))
     required={'title','main_artist','metric_name','metric_value','metric_unit','source_url','retrieved_at'}
     if rows and not required.issubset(rows[0]):
         errors.append(f"SCHEMA {path}: missing {sorted(required-set(rows[0]))}")
@@ -45,12 +46,26 @@ def _generic_csv_errors(path: Path) -> list[str]:
     # Anime rows represent anime titles, not a globally unique song catalog. The same theme can
     # legitimately be reused by multiple seasons/entries, so uniqueness is scoped to the anime.
     anime_scoped = path.name == 'anime_songs.csv'
-    seen_spotify=set(); seen_mbid=set(); seen_isrc=set(); seen_text=set()
+    # VocaDB song IDs define entries in the all-originals corpus. Distinct entries may
+    # legitimately share the same display title and producer.
+    vocaloid_ids = path.name in {
+        'vocaloid_originals_youtube_views.csv',
+        'vocaloid_originals_youtube_views.csv.gz',
+    }
+    # Megalist partitions preserve global ranks rather than restarting at one.
+    partitioned = bool(re.fullmatch(r'megalist_part_\d+\.csv(?:\.gz)?',path.name))
+    first_rank=1
+    if partitioned and rows:
+        try: first_rank=int((rows[0].get('rank') or '').strip())
+        except Exception: first_rank=0
+        if first_rank<1: errors.append(f'RANK_INVALID {path} row 1: {rows[0].get("rank")}')
+    seen_spotify=set(); seen_mbid=set(); seen_isrc=set(); seen_text=set(); seen_vocadb=set()
     for i,r in enumerate(rows,1):
         rank=(r.get('rank') or '').strip()
         if rank:
             try:
-                if int(rank) != i: errors.append(f'RANK {path} row {i}: {rank} != {i}')
+                expected=first_rank+i-1 if partitioned else i
+                if int(rank) != expected: errors.append(f'RANK {path} row {i}: {rank} != {expected}')
             except Exception: errors.append(f'RANK_INVALID {path} row {i}: {rank}')
         for k in required:
             if not str(r.get(k,'')).strip(): errors.append(f"BLANK {path} row {i} field {k}")
@@ -92,6 +107,17 @@ def _generic_csv_errors(path: Path) -> list[str]:
             scope=(anime_key,) if anime_key else ()
         else:
             scope=()
+        if vocaloid_ids:
+            try:
+                vocaloid_extra=json.loads(r.get('extra') or '{}')
+            except Exception:
+                vocaloid_extra={}
+            vocadb_id=str(vocaloid_extra.get('vocadb_id') or '').strip()
+            if not vocadb_id:
+                errors.append(f'VOCALOID_ID {path} row {i}: missing VocaDB song ID')
+            elif vocadb_id in seen_vocadb:
+                errors.append(f'DUP_VOCADB_ID {path} row {i}: {vocadb_id}')
+            seen_vocadb.add(vocadb_id)
         sid=(r.get('spotify_track_id') or '').strip()
         if sid:
             key=scope+(sid,)
@@ -108,7 +134,7 @@ def _generic_csv_errors(path: Path) -> list[str]:
             if key in seen_isrc: errors.append(f"DUP_ISRC {path} row {i}: {isrc} bucket={bucket}")
             seen_isrc.add(key)
         text=(norm(r.get('title') or ''),norm(r.get('main_artist') or ''))
-        if all(text):
+        if all(text) and not vocaloid_ids:
             key=scope+text
             if key in seen_text: errors.append(f"DUP_TEXT {path} row {i}: {r.get('title')} / {r.get('main_artist')} bucket={bucket}")
             seen_text.add(key)
@@ -116,14 +142,18 @@ def _generic_csv_errors(path: Path) -> list[str]:
 
 def validate(data_dir: str|Path='data', *, require_complete: bool=False) -> list[str]:
     data=Path(data_dir); errors=[]
-    for p in data.rglob('*.csv'):
+    csv_paths=sorted({*data.rglob('*.csv'),*data.rglob('*.csv.gz')})
+    for p in csv_paths:
         if '/raw/' in p.as_posix(): continue
         # Reports/inputs are not canonical song-list CSVs and use intentionally different schemas.
         if p.name in {'coverage_report.csv'}: continue
         # bootstrap files are provenance examples, not final canonical categories.
-        if '/bootstrap/' in p.as_posix() or '/seeds/' in p.as_posix() or p.name.endswith('_snapshot.csv'): continue
+        logical_name=p.name.removesuffix('.gz')
+        if '/bootstrap/' in p.as_posix() or '/seeds/' in p.as_posix() or logical_name.endswith('_snapshot.csv'): continue
         errors.extend(_generic_csv_errors(p))
-    vp=data/'vocaloid'/'vocaloid_originals_youtube_views.csv'
+    vp=data/'vocaloid'/'vocaloid_originals_youtube_views.csv.gz'
+    if not vp.exists():
+        vp=data/'vocaloid'/'vocaloid_originals_youtube_views.csv'
     if vp.exists():
         rows=read_rows(vp)
         for i,r in enumerate(rows,1):

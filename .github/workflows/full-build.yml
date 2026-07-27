@@ -20,6 +20,7 @@ on:
       - 'scripts/**'
       - 'requirements*.txt'
       - 'pyproject.toml'
+      - '.gitattributes'
       - '.github/workflows/full-build.yml'
 
 permissions:
@@ -173,7 +174,7 @@ jobs:
             data/target_report.json
             data/complete_validation.txt
             data/anime/*.csv
-            data/vocaloid/*.csv
+            data/vocaloid/*.csv*
             data/worldwide/*.csv
             data/classical/*.csv
             data/vtuber_original/*.csv

@@ -1,18 +1,52 @@
 from __future__ import annotations
-import csv, json
+import csv, gzip, io, json
+from contextlib import contextmanager
 from pathlib import Path
-from typing import Iterable
+from typing import Iterable, Iterator, TextIO
 from .models import SongRow
 
 FIELDS = list(SongRow.model_fields)
+
+
+@contextmanager
+def open_text(
+    path: str | Path,
+    mode: str,
+    *,
+    newline: str | None = None,
+) -> Iterator[TextIO]:
+    """Open UTF-8 text, transparently handling deterministic gzip files."""
+    path = Path(path)
+    if path.suffix != ".gz":
+        with path.open(mode, encoding="utf-8", newline=newline) as handle:
+            yield handle
+        return
+    if mode == "r":
+        with gzip.open(path, "rt", encoding="utf-8", newline=newline) as handle:
+            yield handle
+        return
+    if mode not in {"w", "a"}:
+        raise ValueError(f"Unsupported text mode for gzip file: {mode}")
+    binary_mode = f"{mode}b"
+    with path.open(binary_mode) as raw:
+        # Empty filename and mtime=0 make identical datasets byte-for-byte stable.
+        with gzip.GzipFile(
+            filename="",
+            mode=binary_mode,
+            fileobj=raw,
+            compresslevel=9,
+            mtime=0,
+        ) as compressed:
+            with io.TextIOWrapper(compressed, encoding="utf-8", newline=newline) as handle:
+                yield handle
 
 
 def append_row(row: SongRow, path: str | Path) -> int:
     """Append one row immediately and flush it to disk."""
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
-    if path.suffix == ".jsonl":
-        with path.open("a", encoding="utf-8") as f:
+    if path.name.endswith(".jsonl") or path.name.endswith(".jsonl.gz"):
+        with open_text(path, "a") as f:
             f.write(row.model_dump_json() + "\n")
             f.flush()
         return 1
@@ -21,7 +55,7 @@ def append_row(row: SongRow, path: str | Path) -> int:
     for k, v in d.items():
         if isinstance(v, (list, dict)):
             d[k] = json.dumps(v, ensure_ascii=False, separators=(",", ":"))
-    with path.open("a", encoding="utf-8", newline="") as f:
+    with open_text(path, "a", newline="") as f:
         w = csv.DictWriter(f, fieldnames=FIELDS, lineterminator="\n")
         if needs_header:
             w.writeheader()
@@ -33,12 +67,12 @@ def append_row(row: SongRow, path: str | Path) -> int:
 def write_rows(rows: Iterable[SongRow], path: str | Path) -> int:
     path = Path(path); path.parent.mkdir(parents=True, exist_ok=True)
     rows = list(rows)
-    if path.suffix == ".jsonl":
-        with path.open("w", encoding="utf-8") as f:
+    if path.name.endswith(".jsonl") or path.name.endswith(".jsonl.gz"):
+        with open_text(path, "w") as f:
             for row in rows:
                 f.write(row.model_dump_json() + "\n")
     else:
-        with path.open("w", encoding="utf-8", newline="") as f:
+        with open_text(path, "w", newline="") as f:
             w = csv.DictWriter(f, fieldnames=FIELDS, lineterminator="\n")
             w.writeheader()
             for row in rows:
@@ -52,11 +86,12 @@ def write_rows(rows: Iterable[SongRow], path: str | Path) -> int:
 def read_rows(path: str | Path) -> list[SongRow]:
     path = Path(path)
     out: list[SongRow] = []
-    if path.suffix == ".jsonl":
-        for line in path.read_text("utf-8").splitlines():
-            if line.strip(): out.append(SongRow.model_validate_json(line))
+    if path.name.endswith(".jsonl") or path.name.endswith(".jsonl.gz"):
+        with open_text(path, "r") as f:
+            for line in f:
+                if line.strip(): out.append(SongRow.model_validate_json(line))
         return out
-    with path.open(encoding="utf-8", newline="") as f:
+    with open_text(path, "r", newline="") as f:
         for d in csv.DictReader(f):
             for k in ("featured_artists", "genres"):
                 d[k] = json.loads(d[k] or "[]")

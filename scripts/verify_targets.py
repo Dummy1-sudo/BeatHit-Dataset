@@ -11,6 +11,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 from music_megalist.dedupe import norm
+from music_megalist.io import open_text
 
 DATA = ROOT / "data"
 
@@ -47,8 +48,11 @@ WORLDWIDE_BUCKETS = {
 def read_csv(rel: str) -> list[dict[str, str]]:
     path = DATA / rel
     if not path.exists():
-        return []
-    with path.open(encoding="utf-8", newline="") as f:
+        compressed = path.with_name(path.name + ".gz")
+        if not compressed.exists():
+            return []
+        path = compressed
+    with open_text(path, "r", newline="") as f:
         return list(csv.DictReader(f))
 
 
@@ -120,6 +124,7 @@ def main() -> None:
 
     vocaloid = read_csv("vocaloid/vocaloid_originals_youtube_views.csv")
     invalid_vocaloid = []
+    vocaloid_ids = []
     for i, r in enumerate(vocaloid, 1):
         try:
             value = float(r.get("metric_value") or 0)
@@ -143,6 +148,9 @@ def main() -> None:
         pv_sum = 0
         selected_pv_views = 0
         selected_video_id = str(e.get("youtube_video_id") or "").strip()
+        vocadb_id = str(e.get("vocadb_id") or "").strip()
+        if vocadb_id:
+            vocaloid_ids.append(vocadb_id)
         if isinstance(official_pvs, list):
             for pv in official_pvs:
                 if not isinstance(pv, dict):
@@ -174,16 +182,19 @@ def main() -> None:
             and str(e.get("vocadb_song_type") or "").casefold() == "original"
             and str(e.get("youtube_pv_type") or "").casefold() == "original"
             and str(e.get("youtube_pv_service") or "").casefold() == "youtube"
+            and bool(vocadb_id)
             and bool(selected_video_id)
             and str(e.get("qualification_method") or "") == "official_original_youtube_pv"
         )
         if not valid:
             invalid_vocaloid.append(i)
+    duplicate_vocaloid_ids = len(vocaloid_ids) - len(set(vocaloid_ids))
     report["semantic_checks"]["vocaloid_original_youtube_corpus"] = {
         "target": "every VocaDB Original voice-synth song with a resolved official Original YouTube PV, ordered by views",
         "rows": len(vocaloid),
         "invalid_rows": invalid_vocaloid[:100],
-        "row_validity": not invalid_vocaloid,
+        "duplicate_vocadb_ids": duplicate_vocaloid_ids,
+        "row_validity": not invalid_vocaloid and duplicate_vocaloid_ids == 0,
         "corpus_completeness": "Read STATUS.json datasets.vocaloid.complete; row validity does not prove exhaustive source coverage.",
     }
 
@@ -305,7 +316,7 @@ def main() -> None:
         # The canonical union can be compressed/split when large.
         parts = sorted((DATA / "megalist").glob("megalist_part_*.csv"))
         for p in parts:
-            with p.open(encoding="utf-8", newline="") as f:
+            with open_text(p, "r", newline="") as f:
                 mega.extend(csv.DictReader(f))
     invalid_languages = []
     for i, r in enumerate(mega, 1):
@@ -334,6 +345,7 @@ def main() -> None:
         all(x["complete"] for x in bucket_result.values())
         and len(genres) == 10_000 and len(selected_genres) >= 50
         and not invalid_vocaloid
+        and duplicate_vocaloid_ids == 0
         and not invalid_kpop
         and duplicate_kpop == 0
         and len(video_games) == 1_000
