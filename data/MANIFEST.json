@@ -3,8 +3,8 @@
   "files": [
     {
       "path": "data/BUILD_REPORT.json",
-      "bytes": 14719,
-      "sha256": "295c674ce206598435f89f4bb78ef93dc6a95279f9543332e82cc7975012c6f1"
+      "bytes": 14945,
+      "sha256": "5be759d2102d73edcdcd17262d6d17ad666fa787921bb0f16df42e75571674cb"
     },
     {
       "path": "data/README.md",
@@ -38,8 +38,8 @@
     },
     {
       "path": "data/complete_validation.txt",
-      "bytes": 409,
-      "sha256": "4772f7f1cbf768af93ab980bd97da8b612dc9d181279a9bba7d0ba88d6a24e6d"
+      "bytes": 352,
+      "sha256": "003ea103de05e4c0170d03de5b33a5509b592401efcd42319e4485ac24a9b606"
     },
     {
       "path": "data/countries/README.md",
@@ -428,8 +428,8 @@
     },
     {
       "path": "data/coverage_report.csv",
-      "bytes": 6476,
-      "sha256": "4f227431dc6fd0da9b2f7898c7609fbf0768daa381742544a9690ea6140b8b97"
+      "bytes": 6669,
+      "sha256": "a187767d6f3f94896c1a4f262e18b5e8b195413a47e14d1a4a16c360327bc32e"
     },
     {
       "path": "data/electronic_subcultures/electronic_subcultures_1000.csv",
@@ -458,13 +458,143 @@
     },
     {
       "path": "data/kpop/kpop_youtube_over_100m.csv",
-      "bytes": 227472,
-      "sha256": "f8c8a9cca60fa0835a54c2b9b8575f6d5231213bafc65556d1b363e6d8493f90"
+      "bytes": 228368,
+      "sha256": "67831975ab3d99f9fb177f3e8c55280b2eb3901bd4f85dc6e9c8d7c4842fa354"
     },
     {
-      "path": "data/megalist/megalist.csv",
-      "bytes": 69683083,
-      "sha256": "95b0c3145db439523fcadd7707ef4344e8fe3291a525345be37399f866279e3e"
+      "path": "data/megalist/megalist.csv.gz",
+      "bytes": 32600520,
+      "sha256": "05573e1a8a6c0c5a65846384e2e10fc264624f0b413cabb470a40d12ac6173cd"
+    },
+    {
+      "path": "data/megalist/megalist_part_001.csv",
+      "bytes": 7953793,
+      "sha256": "3d9418fb2e2e4ef4275eb68f42e508d946be0d63b294712e2be09665c3da1009"
+    },
+    {
+      "path": "data/megalist/megalist_part_002.csv",
+      "bytes": 5010362,
+      "sha256": "86015ffa3c74e900a3bc167550448880b80219ded337785c2654ecb466ff48d4"
+    },
+    {
+      "path": "data/megalist/megalist_part_003.csv",
+      "bytes": 5784481,
+      "sha256": "56d67154552a7e7e01fd10c55f4efc1e1eef9f7c45b6f09076336134c732de24"
+    },
+    {
+      "path": "data/megalist/megalist_part_004.csv",
+      "bytes": 7363631,
+      "sha256": "625c30f9d30a1330dc0ae11fa8ae49f74a25ec0c0c20b6013db8baf671fe16f6"
+    },
+    {
+      "path": "data/megalist/megalist_part_005.csv",
+      "bytes": 8018679,
+      "sha256": "d9a76c347655a8c040470b0e483be3bb82cf043b305b5aba6004562c9a474e07"
+    },
+    {
+      "path": "data/megalist/megalist_part_006.csv",
+      "bytes": 9855913,
+      "sha256": "90208cd6c7c9e75f342991924d380fcf18817def693f9dc4a9d100717122552e"
+    },
+    {
+      "path": "data/megalist/megalist_part_007.csv",
+      "bytes": 9863878,
+      "sha256": "7bf74dbf4d43a91df52930bcffff2a54ce3614ed19c3039ed071985789880789"
+    },
+    {
+      "path": "data/megalist/megalist_part_008.csv",
+      "bytes": 9415124,
+      "sha256": "cd488187092ac1bae2c2a6cd14bbf2072adab58885ec8019dc5283d3609cd1d0"
+    },
+    {
+      "path": "data/megalist/megalist_part_009.csv",
+      "bytes": 12776702,
+      "sha256": "88f7daf27af7c1d503909a329947c96ae2c6fcef36b07816b6a5530ca84d3a2b"
+    },
+    {
+      "path": "data/megalist/megalist_part_010.csv",
+      "bytes": 18706321,
+      "sha256": "1dd62131159360a7e97ad27928eb179fa5dde4d7ad28c00ee8ba67e3060782a7"
+    },
+    {
+      "path": "data/megalist/megalist_part_011.csv",
+      "bytes": 18873945,
+      "sha256": "a0abcee3605516c35cf5db5481a6f727e10616ec9dab192a56786593c9ab0d47"
+    },
+    {
+      "path": "data/megalist/megalist_part_012.csv",
+      "bytes": 18662467,
+      "sha256": "e809fa79db864e81315e08e686275254b5ce12ca6056cce25dce1c682a8bfc79"
+    },
+    {
+      "path": "data/megalist/megalist_part_013.csv",
+      "bytes": 19085298,
+      "sha256": "14987e4cfeaf59511c84d5f0986e0cf19c7605f612b4e2415b1d0f82de99d455"
+    },
+    {
+      "path": "data/megalist/megalist_part_014.csv",
+      "bytes": 18761738,
+      "sha256": "425b3ca3c99b1e8e025a3e033f4be8033cd7dc3230ce5c48807135b9204662ef"
+    },
+    {
+      "path": "data/megalist/megalist_part_015.csv",
+      "bytes": 18979169,
+      "sha256": "1d03f3cb5ca8ebb07d596c26043158d803934a26aa21ebb9dee1ffe19dcddc54"
+    },
+    {
+      "path": "data/megalist/megalist_part_016.csv",
+      "bytes": 19245545,
+      "sha256": "4ab216bbf1d38b9b0a8eac4884fd6a3dc8a7579fae60b782dcfe96f99d93e64c"
+    },
+    {
+      "path": "data/megalist/megalist_part_017.csv",
+      "bytes": 18853177,
+      "sha256": "8b128b7e55b36134a23b7de21d1e3ea619d2d3066f9e539365f35badedd47f40"
+    },
+    {
+      "path": "data/megalist/megalist_part_018.csv",
+      "bytes": 18797774,
+      "sha256": "d57c61c90ac0281ad431086a6f38f77e1f93ab316a1b64ba54b5b146a81c669f"
+    },
+    {
+      "path": "data/megalist/megalist_part_019.csv",
+      "bytes": 18772850,
+      "sha256": "bbf2d68f6cccf54a88b1dc5db127f8c946a9df3ff9d32cfee66c85eca66869c1"
+    },
+    {
+      "path": "data/megalist/megalist_part_020.csv",
+      "bytes": 19052067,
+      "sha256": "4362f28614b29f4e58689b6d75e374b86a9118dace0e2ff7eb071dfe3b1de848"
+    },
+    {
+      "path": "data/megalist/megalist_part_021.csv",
+      "bytes": 18622148,
+      "sha256": "0be5bf59a11bb8608f055fc191d98ff78bd1f024841c55afcf0a8b0d8ce2ef9e"
+    },
+    {
+      "path": "data/megalist/megalist_part_022.csv",
+      "bytes": 18477049,
+      "sha256": "fe628e2d380c53ef050b3d67d8e58d68811d50914058016d789d3652c04260c4"
+    },
+    {
+      "path": "data/megalist/megalist_part_023.csv",
+      "bytes": 18353453,
+      "sha256": "601e84ea54e246a2660e1583319f76d095f6ecaac7f81458b1c3f4c40f1b2056"
+    },
+    {
+      "path": "data/megalist/megalist_part_024.csv",
+      "bytes": 17787500,
+      "sha256": "c73fecf9a342758aa00580cabfbb2dc1d54d9461ca4e5b9617f842a869041fe4"
+    },
+    {
+      "path": "data/megalist/megalist_part_025.csv",
+      "bytes": 15323722,
+      "sha256": "fe176e6eebad10011e1bbc6e8b4e9a754b830b9e37a3852e9f1505609f9f3e80"
+    },
+    {
+      "path": "data/megalist/megalist_part_026.csv",
+      "bytes": 601175,
+      "sha256": "10b88f5078b864849830367b4eb67270322c182837a461e045d8b26274330e5e"
     },
     {
       "path": "data/raw/spotify_top10000_streamed_songs_2023.csv",
@@ -498,8 +628,8 @@
     },
     {
       "path": "data/target_report.json",
-      "bytes": 0,
-      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      "bytes": 4919,
+      "sha256": "60fe9deb32af21441072b0a531c11115f3677602998ae4dca6095ea251344127"
     },
     {
       "path": "data/unserious/unserious_1000.csv",
@@ -512,9 +642,9 @@
       "sha256": "f0368d25fd8d43bf6aeca2dfd99b4e919d605d4323bfef0d30776cc96e55445d"
     },
     {
-      "path": "data/vocaloid/vocaloid_youtube_100m.csv",
-      "bytes": 43395,
-      "sha256": "4af4120580e375e2785862d4dfcfed58e00d6e9880a8b6e83b9f630dc9fb08f1"
+      "path": "data/vocaloid/vocaloid_originals_youtube_views.csv.gz",
+      "bytes": 23993077,
+      "sha256": "e13049b42afa89bedfa0ce57ab03acedede2c7c8f40c08f175c33efdddb251f4"
     },
     {
       "path": "data/vtuber_non_original/vtuber_non_original_10000.csv",

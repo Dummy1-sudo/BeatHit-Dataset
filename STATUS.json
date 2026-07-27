@@ -1,8 +1,8 @@
 {
   "schema_version": 7,
   "requested_at": "2026-07-20",
-  "last_build_started_at": "2026-07-26T15:13:00.771998+00:00",
-  "last_build_finished_at": "2026-07-26T16:38:03.049233+00:00",
+  "last_build_started_at": "2026-07-27T04:07:08.254558+00:00",
+  "last_build_finished_at": "2026-07-27T04:14:48.818939+00:00",
   "delivery_mode": "github_ready_manual_push_with_network_backed_full_build",
   "accuracy_policy": "No fabricated songs, artists, counts, associations, or quota padding. Exact counters are separated from scores/proxies; every row preserves provenance and snapshot/retrieval timing.",
   "completion_summary": {
@@ -118,6 +118,7 @@
         "Each row records whether the game association came from an official soundtrack album, franchise artist, explicit track-title reference, or a high-confidence Wikidata match.",
         "Selection preserves game breadth, then allows up to eight popular recordings per independently established game; final rows are sorted by song popularity evidence.",
         "ranked_games=0; soundtrack_candidates=2183; unique_games=156; fallback_unique=156; fallback_additional=166; rows=322",
+        "Reused validated materialized output: data/video_games/video_game_music_1000.csv",
         "Reused validated materialized output: data/video_games/video_game_music_1000.csv"
       ]
     },
@@ -204,28 +205,28 @@
       "notes": []
     },
     "vocaloid": {
-      "target": "all VocaDB Original voice-synth songs with one official Original YouTube PV >=100,000,000 views; cap 10,000",
-      "materialized_rows": 15,
+      "target": "every VocaDB Original voice-synth song with a resolved official Original YouTube PV, ordered by views",
+      "materialized_rows": 156688,
       "complete": false,
       "metric_coverage": {
-        "youtube_views": 15
+        "youtube_views": 156688
       },
       "notes": [
         "VocaDB-only classification and metadata; official YouTube Data API view counts only.",
-        "SongType must equal Original. One enabled service=Youtube, pvType=Original upload must independently reach 100,000,000 views; counts from multiple PVs are retained for audit but never summed to qualify.",
+        "SongType must equal Original and at least one enabled service=Youtube, pvType=Original upload must have an official API view count. There is no minimum-view threshold or row cap.",
         "Generic OtherVoiceSynthesizer and VirtualSinger artist types do not establish voice-synth eligibility.",
         "Producer/composer credit takes precedence over simultaneous human-vocalist roles, preventing instrumentalists from being promoted to main artist.",
         "Official YouTube statistics and the exhaustive VocaDB scan are checkpointed; a quota-limited rerun resumes with unresolved IDs instead of repeating the full lookup.",
         "No Spotify matching, title collision matching, remix, mashup, cover, remaster, MusicPV entry, reprint, or third-party view-count fallback.",
-        "preserved_single_pv_rows=15; vocadb_exhaustive=True; unresolved_youtube_video_ids=6512"
+        "preserved_original_pv_rows=0; vocadb_exhaustive=True; unresolved_youtube_video_ids=6512"
       ]
     },
     "kpop": {
       "target": "all official videos above 100,000,000 views found by the fully scanned catalog/curation-backed K-pop artist registry",
-      "materialized_rows": 269,
+      "materialized_rows": 270,
       "complete": false,
       "metric_coverage": {
-        "youtube_views": 269
+        "youtube_views": 270
       },
       "notes": [
         "Catalog rows require an exact cleaned K-pop genre plus Korean ISRC, Korean source-country metadata, or Korean artist identity.",
@@ -233,7 +234,7 @@
         "Artist aliases and Korean/Latin title variants are canonicalized before deduplication.",
         "Every retained row has an observed YouTube view count strictly above 100,000,000.",
         "Successful artist searches and video-statistics snapshots are checkpointed; a quota-limited rerun resumes at the first unfinished artist and preserves verified rows.",
-        "trusted_artists=59; preserved_rows=265; catalog_qualified=60; live_youtube_qualified=250; final_deduplicated_rows=269",
+        "trusted_artists=59; preserved_rows=269; catalog_qualified=60; live_youtube_qualified=251; final_deduplicated_rows=270",
         "Completeness is scoped to the fully scanned audited artist registry; it is not a claim that every upload labeled K-pop on the internet has been enumerated."
       ]
     },
@@ -252,7 +253,7 @@
     },
     "megalist": {
       "target": "deduplicated union of all requested lists",
-      "materialized_rows": 94874,
+      "materialized_rows": 251087,
       "complete": false,
       "metric_coverage": {
         "anime_popularity_proxy": 794,
@@ -260,13 +261,14 @@
         "curated_required_seed": 4,
         "listenbrainz_tag_popularity_percent": 1000,
         "spotify_chart_streams_snapshot": 2831,
-        "spotify_popularity": 54348,
-        "spotify_regional_chart_streams_sum": 27669,
+        "spotify_popularity": 54334,
+        "spotify_regional_chart_streams_sum": 27666,
         "spotify_streams": 2689,
         "spotify_streams_snapshot": 3332,
-        "youtube_views": 2205
+        "youtube_views": 158435
       },
       "notes": [
+        "Canonical megalist compressed to megalist.csv.gz and split into 10k-row CSV parts to stay below GitHub's per-file size limit.",
         "Megalist is a deduplicated union of materialized rows; completeness is false because one or more upstream requested lists are incomplete."
       ]
     }
@@ -327,13 +329,13 @@
     "kworb_live_spotify": {
       "url": "https://kworb.net/spotify/songs.html",
       "rows": 2483,
-      "retrieved_at": "2026-07-26",
+      "retrieved_at": "2026-07-27",
       "ok": true
     },
     "kworb_global_daily": {
       "url": "https://kworb.net/spotify/country/global_daily.html",
       "rows": 200,
-      "retrieved_at": "2026-07-26",
+      "retrieved_at": "2026-07-27",
       "ok": true
     },
     "vocadb_original_youtube_scan": {
@@ -343,7 +345,7 @@
       "api_reported_total": 290045,
       "pages": 5801,
       "exhaustive": true,
-      "resumed_from_source_offset": 0,
+      "resumed_from_source_offset": 290050,
       "checkpoint": ".cache/full_build/vocadb_original_youtube_scan.jsonl",
       "filters": {
         "songTypes": "Original",
@@ -358,28 +360,28 @@
       "requested": 185146,
       "resolved": 178634,
       "unresolved": 6512,
-      "fresh_cache_hits": 0,
-      "fresh_cached_missing": 0,
-      "live_requested": 185146,
+      "fresh_cache_hits": 178634,
+      "fresh_cached_missing": 6512,
+      "live_requested": 0,
       "failed_batches": 0,
       "quota_stopped": false,
       "cache_days": 30,
       "cache": ".cache/full_build/vocadb_youtube_view_counts.json",
       "ok": false,
-      "threshold": 100000000,
+      "threshold": null,
       "note": "Only official YouTube API values are cached; no third-party or Spotify fallback."
     },
     "youtube_kpop_discovery": {
       "source": "YouTube Data API v3 search.list + videos.list",
       "planned_artist_queries": 59,
       "optional_generic_queries": 0,
-      "completed_queries": 44,
-      "live_search_calls": 45,
+      "completed_queries": 47,
+      "live_search_calls": 1,
       "search_call_budget": 59,
-      "unique_video_candidates": 1757,
-      "qualified_rows": 250,
+      "unique_video_candidates": 1890,
+      "qualified_rows": 251,
       "failed_queries": [
-        "\"Apink\" official MV"
+        "\"Wonder Girls\" official MV"
       ],
       "failed_statistics_batches": 0,
       "unresolved_statistics": 0,
@@ -390,7 +392,7 @@
     }
   },
   "warnings": [
-    "K-pop YouTube search '\"Apink\" official MV': HTTP 429: {\n  \"error\": {\n    \"code\": 429,\n    \"message\": \"Quota exceeded for quota metric 'Search Queries' and limit 'Search Queries per day' of service 'youtube.googleapis.com' for consumer 'project_number:806982358506'.\",\n    \"errors\": [\n      {\n        \"message\": \"Quota exceeded for quota metric 'Search Queries' and limit 'Search Queries per day' of service 'youtube.googleapis.com' for consumer 'project_number:806982358506'.\",\n        \"domain\": \"global\",\n        \"reason\": \"rateLimitExceeded\"\n      }\n    ],\n    \"status\": \"RESOURCE_EXHAUSTED\",\n    \"details\": [\n      {\n        \"@type\": \"type.googleapis.com/google.rpc.ErrorInfo\",\n        \"reason\": \"RATE_LIMIT_EXCEEDED\",\n        \"domain\": \"googleapis.com\",\n        \"metadata\": {\n          \"service\": \"youtube.googleapis.com\",\n          \"quota_metric\": \""
+    "K-pop YouTube search '\"Wonder Girls\" official MV': HTTP 429: {\n  \"error\": {\n    \"code\": 429,\n    \"message\": \"Quota exceeded for quota metric 'Search Queries' and limit 'Search Queries per day' of service 'youtube.googleapis.com' for consumer 'project_number:806982358506'.\",\n    \"errors\": [\n      {\n        \"message\": \"Quota exceeded for quota metric 'Search Queries' and limit 'Search Queries per day' of service 'youtube.googleapis.com' for consumer 'project_number:806982358506'.\",\n        \"domain\": \"global\",\n        \"reason\": \"rateLimitExceeded\"\n      }\n    ],\n    \"status\": \"RESOURCE_EXHAUSTED\",\n    \"details\": [\n      {\n        \"@type\": \"type.googleapis.com/google.rpc.ErrorInfo\",\n        \"reason\": \"RATE_LIMIT_EXCEEDED\",\n        \"domain\": \"googleapis.com\",\n        \"metadata\": {\n          \"service\": \"youtube.googleapis.com\",\n          \"quota_location\":"
   ],
   "completion_rule": "Do not treat this repository as fully complete unless completion_summary.all_requested_lists_complete is true and validation/target checks pass. Conditional/finite corpora are never padded."
 }
