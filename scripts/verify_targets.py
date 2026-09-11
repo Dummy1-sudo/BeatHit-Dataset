@@ -16,21 +16,21 @@ from music_megalist.io import open_text
 DATA = ROOT / "data"
 
 FIXED = {
-    "anime/anime_songs.csv": 1_000,
+    "anime/anime_songs.csv": 10_000,
     "worldwide/worldwide_51000.csv": 51_000,
     "classical/classical_10000.csv": 10_000,
-    "vtuber_original/vtuber_original_10000.csv": 1_000,
+    "vtuber_original/vtuber_original_10000.csv": 10_000,
     "emerging/emerging_10000.csv": 10_000,
     "genres/genres_10000.csv": 10_000,
     "screen_soundtracks/screen_soundtracks_10000.csv": 10_000,
-    "vtuber_non_original/vtuber_non_original_10000.csv": 1_000,
-    "video_games/video_game_music_1000.csv": 1_000,
-    "internet_native/internet_native_1000.csv": 1_000,
-    "electronic_subcultures/electronic_subcultures_1000.csv": 1_000,
-    "alternative_extreme/alternative_extreme_1000.csv": 1_000,
-    "jazz_depth/jazz_depth_1000.csv": 1_000,
-    "children_childhood/children_childhood_100.csv": 100,
-    "unserious/unserious_1000.csv": 1_000,
+    "vtuber_non_original/vtuber_non_original_10000.csv": 10_000,
+    "video_games/video_game_music_10000.csv": 10_000,
+    "internet_native/internet_native_10000.csv": 10_000,
+    "electronic_subcultures/electronic_subcultures_10000.csv": 10_000,
+    "alternative_extreme/alternative_extreme_10000.csv": 10_000,
+    "jazz_depth/jazz_depth_10000.csv": 10_000,
+    "children_childhood/children_childhood_10000.csv": 10_000,
+    "unserious/unserious_10000.csv": 10_000,
     "special_required/special_required.csv": 4,
 }
 WORLDWIDE_BUCKETS = {
@@ -232,7 +232,7 @@ def main() -> None:
         "corpus_completeness": "Read STATUS.json datasets.kpop.complete; completion is scoped to the audited artist registry, not every internet upload labeled K-pop.",
     }
 
-    video_games = read_csv("video_games/video_game_music_1000.csv")
+    video_games = read_csv("video_games/video_game_music_10000.csv")
     invalid_video_games = []
     reject_game_text = re.compile(
         r"\b(?:motion picture|film soundtrack|movie soundtrack|television soundtrack|"
@@ -284,7 +284,7 @@ def main() -> None:
     report["semantic_checks"]["video_game_music_classification"] = {
         "rows": len(video_games),
         "invalid_rows": invalid_video_games[:100],
-        "complete": len(video_games) == 1_000 and not invalid_video_games,
+        "complete": len(video_games) == 10_000 and not invalid_video_games,
     }
 
     special = read_csv("special_required/special_required.csv")
@@ -348,7 +348,7 @@ def main() -> None:
         and duplicate_vocaloid_ids == 0
         and not invalid_kpop
         and duplicate_kpop == 0
-        and len(video_games) == 1_000
+        and len(video_games) == 10_000
         and not invalid_video_games
         and required_special.issubset(observed_special)
         and not invalid_languages

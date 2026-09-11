@@ -80,15 +80,24 @@ TAG_LISTS = {
 }
 
 TAG_TARGETS = {
-    "internet_native": 1_000,
-    "electronic_subcultures": 1_000,
-    "alternative_extreme": 1_000,
-    "jazz_depth": 1_000,
-    "children_childhood": 100,
-    "unserious": 1_000,
+    "internet_native": 10_000,
+    "electronic_subcultures": 10_000,
+    "alternative_extreme": 10_000,
+    "jazz_depth": 10_000,
+    "children_childhood": 10_000,
+    "unserious": 10_000,
 }
 
 TAG_OUTPUTS = {
+    "internet_native": DATA / "internet_native" / "internet_native_10000.csv",
+    "electronic_subcultures": DATA / "electronic_subcultures" / "electronic_subcultures_10000.csv",
+    "alternative_extreme": DATA / "alternative_extreme" / "alternative_extreme_10000.csv",
+    "jazz_depth": DATA / "jazz_depth" / "jazz_depth_10000.csv",
+    "children_childhood": DATA / "children_childhood" / "children_childhood_10000.csv",
+    "unserious": DATA / "unserious" / "unserious_10000.csv",
+}
+
+LEGACY_TAG_OUTPUTS = {
     "internet_native": DATA / "internet_native" / "internet_native_1000.csv",
     "electronic_subcultures": DATA / "electronic_subcultures" / "electronic_subcultures_1000.csv",
     "alternative_extreme": DATA / "alternative_extreme" / "alternative_extreme_1000.csv",
@@ -488,6 +497,7 @@ def _listenbrainz_tag_rows(
     needed: int,
     category: str,
     used: set[tuple[str, str]],
+    used_mbids: set[str],
     status: Any,
 ) -> list[SongRow]:
     if needed <= 0:
@@ -529,13 +539,18 @@ def _listenbrainz_tag_rows(
                 key = (norm(str(title)), norm(str(artist)))
                 if key in used:
                     continue
-                used.add(key)
 
                 identifier = item.get("identifier") or item.get("recording_mbid")
                 if isinstance(identifier, list):
                     identifier = identifier[0] if identifier else None
                 if isinstance(identifier, str) and "/" in identifier:
                     identifier = identifier.rsplit("/", 1)[-1]
+                mbid = str(identifier or "").strip().casefold()
+                if mbid and mbid in used_mbids:
+                    continue
+                used.add(key)
+                if mbid:
+                    used_mbids.add(mbid)
 
                 rows.append(
                     SongRow(
@@ -566,6 +581,14 @@ def _build_tag_list(catalog: pd.DataFrame, status: Any, name: str) -> list[SongR
 
     rows = _seed_rows(name)
     used = {(norm(row.title), norm(row.main_artist)) for row in rows}
+    used_spotify = {str(row.spotify_track_id or "").strip() for row in rows}
+    used_mbids = {
+        str(row.musicbrainz_recording_mbid or "").strip().casefold() for row in rows
+    }
+    used_isrcs = {str(row.isrc or "").strip().casefold() for row in rows}
+    used_spotify.discard("")
+    used_mbids.discard("")
+    used_isrcs.discard("")
 
     candidates: list[tuple[float, pd.Series, list[str]]] = []
     for _, row in catalog.iterrows():
@@ -582,9 +605,24 @@ def _build_tag_list(catalog: pd.DataFrame, status: Any, name: str) -> list[SongR
             norm(str(row.get("title") or "")),
             norm(str(row.get("main_artist") or row.get("artists") or "")),
         )
-        if not all(key) or key in used:
+        spotify = str(row.get("track_id") or "").strip()
+        mbid = str(row.get("musicbrainz_recording_mbid") or "").strip().casefold()
+        isrc = str(row.get("isrc") or "").strip().casefold()
+        if (
+            not all(key)
+            or key in used
+            or bool(spotify and spotify in used_spotify)
+            or bool(mbid and mbid in used_mbids)
+            or bool(isrc and isrc in used_isrcs)
+        ):
             continue
         used.add(key)
+        if spotify:
+            used_spotify.add(spotify)
+        if mbid:
+            used_mbids.add(mbid)
+        if isrc:
+            used_isrcs.add(isrc)
         rows.append(
             _catalog_song(
                 row,
@@ -606,10 +644,23 @@ def _build_tag_list(catalog: pd.DataFrame, status: Any, name: str) -> list[SongR
             break
 
     if len(rows) < target:
-        rows.extend(_listenbrainz_tag_rows(tags, target - len(rows), name, used, status))
+        rows.extend(
+            _listenbrainz_tag_rows(
+                tags,
+                target - len(rows),
+                name,
+                used,
+                used_mbids,
+                status,
+            )
+        )
 
     rows = _dedupe_rank(rows, target)
     write_rows(rows, output)
+    legacy_output = LEGACY_TAG_OUTPUTS[name]
+    legacy_rows = read_rows(legacy_output) if legacy_output.exists() else []
+    if rows and len(rows) >= len(legacy_rows):
+        legacy_output.unlink(missing_ok=True)
     st = status.datasets[name]
     st.rows = len(rows)
     st.complete = len(rows) == target
@@ -1526,6 +1577,13 @@ GAME_LISTENBRAINZ_TAGS = [
     "game soundtrack",
     "vgm",
     "game music",
+    "computer game music",
+    "video game score",
+    "game score",
+    "original game soundtrack",
+    "game ost",
+    "gaming",
+    "chiptune",
 ]
 GAME_FRANCHISE_ARTISTS = {
     "league of legends": "League of Legends",
@@ -1927,7 +1985,8 @@ def _listenbrainz_video_game_rows(status: Any) -> list[SongRow]:
 
 def build_video_game_music(catalog: pd.DataFrame, status: Any) -> list[SongRow]:
     """Build a popularity-ranked list of source-backed video-game soundtrack recordings."""
-    target = 1_000
+    target = 10_000
+    per_game_track_cap = 25
     games = _fetch_top_games(status, target)
 
     candidates: list[tuple[pd.Series, str, str, bool, str, str]] = []
@@ -2125,7 +2184,7 @@ def build_video_game_music(catalog: pd.DataFrame, status: Any) -> list[SongRow]:
             continue
         if association_kind == "explicit_track_reference" and not genre_hit and per_game.get(game_key, 0) == 0:
             continue
-        if per_game.get(game_key, 0) >= 5:
+        if per_game.get(game_key, 0) >= per_game_track_cap:
             continue
         if append_song(
             row,
@@ -2135,7 +2194,7 @@ def build_video_game_music(catalog: pd.DataFrame, status: Any) -> list[SongRow]:
                 "catalog_fallback_rank": fallback_unique + fallback_additional + 1,
                 "wikidata_available": bool(games),
                 "fallback_stage": "additional_tracks",
-                "per_game_track_cap": 5,
+                "per_game_track_cap": per_game_track_cap,
                 "game_association_kind": association_kind,
             },
         ):
@@ -2156,7 +2215,7 @@ def build_video_game_music(catalog: pd.DataFrame, status: Any) -> list[SongRow]:
             if (
                 not game_key
                 or not all(song_key)
-                or per_game.get(game_key, 0) >= 5
+                or per_game.get(game_key, 0) >= per_game_track_cap
                 or song_key in used_songs
                 or bool(mbid and mbid in used_mbids)
                 or bool(isrc and isrc in used_isrcs)
@@ -2182,7 +2241,12 @@ def build_video_game_music(catalog: pd.DataFrame, status: Any) -> list[SongRow]:
     )
     for rank, row in enumerate(selected, 1):
         row.rank = rank
-    write_rows(selected, DATA / "video_games" / "video_game_music_1000.csv")
+    output = DATA / "video_games" / "video_game_music_10000.csv"
+    write_rows(selected, output)
+    legacy_output = DATA / "video_games" / "video_game_music_1000.csv"
+    legacy_rows = read_rows(legacy_output) if legacy_output.exists() else []
+    if selected and len(selected) >= len(legacy_rows):
+        legacy_output.unlink(missing_ok=True)
 
     st = status.datasets["video_game_music"]
     st.rows = len(selected)
@@ -2192,7 +2256,7 @@ def build_video_game_music(catalog: pd.DataFrame, status: Any) -> list[SongRow]:
         "The direct Wikidata video-game query is attempted first; the last successful top-game ranking is cached for later runs.",
         "Movie/television/anime soundtracks, licensed compilations, tribute releases, piano collections, music-box albums, cover albums, and generic remix albums are rejected.",
         "Each row records whether the game association came from an official soundtrack album, franchise artist, explicit track-title reference, high-confidence Wikidata match, or a ListenBrainz release-group game tag paired with an explicit soundtrack release.",
-        "Selection preserves game breadth, then allows up to five source-backed recordings per game; final rows are sorted by popularity evidence.",
+        f"Selection preserves game breadth, then allows up to {per_game_track_cap} source-backed recordings per game; final rows are sorted by popularity evidence.",
         f"ranked_games={len(games)}; catalog_soundtrack_candidates={len(candidates)}; listenbrainz_candidates={listenbrainz_candidates}; listenbrainz_added={listenbrainz_added}; unique_games={len(per_game)}; fallback_unique={fallback_unique}; fallback_additional={fallback_additional}; rows={len(selected)}",
     ]
     status.save()

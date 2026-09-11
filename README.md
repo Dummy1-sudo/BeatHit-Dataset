@@ -15,6 +15,13 @@ A reproducible, source-backed collection of large ranked music lists. The reposi
 | Genre-diverse | 10,000 songs across >=50 genres |
 | Movie/TV-associated songs | 10,000 |
 | VTuber non-original / cover songs | up to 10,000 verified entries |
+| Video-game music | 10,000 source-backed recordings |
+| Internet-native music | 10,000 |
+| Electronic subcultures | 10,000 |
+| Alternative/extreme music | 10,000 |
+| Jazz depth | 10,000 |
+| Children/childhood music | 10,000 |
+| Unserious/novelty music | 10,000 |
 | Spotify country charts | top 1,000 unique songs for every country/territory with a detected Spotify regional daily chart |
 | Megalist | deduplicated union of every list, including all country lists |
 

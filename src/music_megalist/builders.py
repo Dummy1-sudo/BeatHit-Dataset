@@ -24,7 +24,14 @@ def build_megalist() -> None:
       DATA/"worldwide"/"worldwide_51000.csv", DATA/"classical"/"classical_10000.csv",
       DATA/"vtuber_original"/"vtuber_original_10000.csv", DATA/"emerging"/"emerging_10000.csv",
       DATA/"genres"/"genres_10000.csv", DATA/"screen_soundtracks"/"screen_soundtracks_10000.csv",
-      DATA/"vtuber_non_original"/"vtuber_non_original_10000.csv"
+      DATA/"vtuber_non_original"/"vtuber_non_original_10000.csv",
+      DATA/"video_games"/"video_game_music_10000.csv",
+      DATA/"internet_native"/"internet_native_10000.csv",
+      DATA/"electronic_subcultures"/"electronic_subcultures_10000.csv",
+      DATA/"alternative_extreme"/"alternative_extreme_10000.csv",
+      DATA/"jazz_depth"/"jazz_depth_10000.csv",
+      DATA/"children_childhood"/"children_childhood_10000.csv",
+      DATA/"unserious"/"unserious_10000.csv"
     ]
     rows=[]
     for p in paths:

@@ -7,21 +7,21 @@ from .io import open_text, read_rows
 from .dedupe import norm
 
 TARGETS={
- "anime/anime_songs.csv":1000,
+ "anime/anime_songs.csv":10000,
  "worldwide/worldwide_51000.csv":51000,
  "classical/classical_10000.csv":10000,
- "vtuber_original/vtuber_original_10000.csv":1000,
+ "vtuber_original/vtuber_original_10000.csv":10000,
  "emerging/emerging_10000.csv":10000,
  "genres/genres_10000.csv":10000,
  "screen_soundtracks/screen_soundtracks_10000.csv":10000,
- "vtuber_non_original/vtuber_non_original_10000.csv":1000,
- "video_games/video_game_music_1000.csv":1000,
- "internet_native/internet_native_1000.csv":1000,
- "electronic_subcultures/electronic_subcultures_1000.csv":1000,
- "alternative_extreme/alternative_extreme_1000.csv":1000,
- "jazz_depth/jazz_depth_1000.csv":1000,
- "children_childhood/children_childhood_100.csv":100,
- "unserious/unserious_1000.csv":1000,
+ "vtuber_non_original/vtuber_non_original_10000.csv":10000,
+ "video_games/video_game_music_10000.csv":10000,
+ "internet_native/internet_native_10000.csv":10000,
+ "electronic_subcultures/electronic_subcultures_10000.csv":10000,
+ "alternative_extreme/alternative_extreme_10000.csv":10000,
+ "jazz_depth/jazz_depth_10000.csv":10000,
+ "children_childhood/children_childhood_10000.csv":10000,
+ "unserious/unserious_10000.csv":10000,
  "special_required/special_required.csv":4,
 }
 
