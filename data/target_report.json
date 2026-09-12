@@ -1,9 +1,9 @@
 {
   "fixed_targets": {
     "anime/anime_songs.csv": {
-      "target": 1000,
-      "rows": 1000,
-      "complete": true
+      "target": 10000,
+      "rows": 6049,
+      "complete": false
     },
     "worldwide/worldwide_51000.csv": {
       "target": 51000,
@@ -16,8 +16,8 @@
       "complete": true
     },
     "vtuber_original/vtuber_original_10000.csv": {
-      "target": 1000,
-      "rows": 1000,
+      "target": 10000,
+      "rows": 10000,
       "complete": true
     },
     "emerging/emerging_10000.csv": {
@@ -32,48 +32,48 @@
     },
     "screen_soundtracks/screen_soundtracks_10000.csv": {
       "target": 10000,
-      "rows": 5660,
+      "rows": 5664,
       "complete": false
     },
     "vtuber_non_original/vtuber_non_original_10000.csv": {
-      "target": 1000,
-      "rows": 1000,
+      "target": 10000,
+      "rows": 10000,
       "complete": true
     },
-    "video_games/video_game_music_1000.csv": {
-      "target": 1000,
-      "rows": 1000,
-      "complete": true
-    },
-    "internet_native/internet_native_1000.csv": {
-      "target": 1000,
-      "rows": 1000,
-      "complete": true
-    },
-    "electronic_subcultures/electronic_subcultures_1000.csv": {
-      "target": 1000,
-      "rows": 1000,
-      "complete": true
-    },
-    "alternative_extreme/alternative_extreme_1000.csv": {
-      "target": 1000,
-      "rows": 1000,
-      "complete": true
-    },
-    "jazz_depth/jazz_depth_1000.csv": {
-      "target": 1000,
-      "rows": 999,
+    "video_games/video_game_music_10000.csv": {
+      "target": 10000,
+      "rows": 2387,
       "complete": false
     },
-    "children_childhood/children_childhood_100.csv": {
-      "target": 100,
-      "rows": 100,
+    "internet_native/internet_native_10000.csv": {
+      "target": 10000,
+      "rows": 1083,
+      "complete": false
+    },
+    "electronic_subcultures/electronic_subcultures_10000.csv": {
+      "target": 10000,
+      "rows": 10000,
       "complete": true
     },
-    "unserious/unserious_1000.csv": {
-      "target": 1000,
-      "rows": 1000,
+    "alternative_extreme/alternative_extreme_10000.csv": {
+      "target": 10000,
+      "rows": 10000,
       "complete": true
+    },
+    "jazz_depth/jazz_depth_10000.csv": {
+      "target": 10000,
+      "rows": 5172,
+      "complete": false
+    },
+    "children_childhood/children_childhood_10000.csv": {
+      "target": 10000,
+      "rows": 2104,
+      "complete": false
+    },
+    "unserious/unserious_10000.csv": {
+      "target": 10000,
+      "rows": 1261,
+      "complete": false
     },
     "special_required/special_required.csv": {
       "target": 4,
@@ -134,15 +134,15 @@
       "complete_markets": 73,
       "total_rows": 73590,
       "target_per_country": 1000,
-      "source_exhausted_markets": 0,
-      "unsupported_index_links": 0,
-      "failures": 1,
+      "source_exhausted_markets": 2,
+      "unsupported_index_links": 1,
+      "failures": 0,
       "files_ok": true,
       "complete": false
     },
     "vocaloid_original_youtube_corpus": {
       "target": "every VocaDB Original voice-synth song with a resolved official Original YouTube PV, ordered by views",
-      "rows": 156688,
+      "rows": 215553,
       "invalid_rows": [],
       "duplicate_vocadb_ids": 0,
       "row_validity": true,
@@ -150,16 +150,117 @@
     },
     "kpop_youtube_threshold": {
       "target": "official videos above 100,000,000 views found by the fully scanned audited K-pop artist registry",
-      "rows": 270,
+      "rows": 275,
       "invalid_rows": [],
       "duplicate_title_artist_keys": 0,
       "threshold_valid": true,
       "corpus_completeness": "Read STATUS.json datasets.kpop.complete; completion is scoped to the audited artist registry, not every internet upload labeled K-pop."
     },
     "video_game_music_classification": {
-      "rows": 1000,
-      "invalid_rows": [],
-      "complete": true
+      "rows": 2387,
+      "invalid_rows": [
+        1735,
+        1746,
+        1747,
+        1748,
+        1758,
+        1761,
+        1771,
+        1778,
+        1787,
+        1791,
+        1792,
+        1805,
+        1806,
+        1807,
+        1808,
+        1809,
+        1816,
+        1817,
+        1818,
+        1819,
+        1828,
+        1835,
+        1842,
+        1844,
+        1872,
+        1879,
+        1892,
+        1898,
+        1899,
+        1912,
+        1913,
+        1914,
+        1915,
+        1928,
+        1944,
+        1945,
+        1954,
+        1964,
+        1975,
+        1977,
+        1984,
+        1985,
+        1995,
+        1996,
+        2000,
+        2004,
+        2008,
+        2011,
+        2020,
+        2021,
+        2022,
+        2031,
+        2040,
+        2043,
+        2052,
+        2053,
+        2065,
+        2066,
+        2075,
+        2076,
+        2085,
+        2094,
+        2095,
+        2105,
+        2106,
+        2152,
+        2159,
+        2167,
+        2180,
+        2181,
+        2182,
+        2189,
+        2190,
+        2205,
+        2206,
+        2210,
+        2217,
+        2223,
+        2239,
+        2240,
+        2302,
+        2311,
+        2335,
+        2336,
+        2337,
+        2338,
+        2339,
+        2340,
+        2341,
+        2342,
+        2343,
+        2344,
+        2345,
+        2346,
+        2347,
+        2348,
+        2349,
+        2350,
+        2351,
+        2352
+      ],
+      "complete": false
     },
     "special_required": {
       "required": [
@@ -172,22 +273,22 @@
       "complete": true
     },
     "vtuber_original_classification": {
-      "rows": 1000,
+      "rows": 10000,
       "invalid_rows": [],
       "complete": true
     },
     "vtuber_cover_classification": {
-      "rows": 1000,
+      "rows": 10000,
       "invalid_rows": [],
       "complete": true
     },
     "megalist_languages": {
-      "rows": 251087,
+      "rows": 354094,
       "invalid_rows": [],
       "complete": true
     },
     "megalist_deduplication": {
-      "rows": 251087,
+      "rows": 354094,
       "duplicate_title_main_artist_keys": 0,
       "complete": true
     }
