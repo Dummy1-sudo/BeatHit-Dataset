@@ -1,8 +1,8 @@
 {
   "schema_version": 7,
   "requested_at": "2026-07-20",
-  "last_build_started_at": "2026-09-11T20:12:37.985166+00:00",
-  "last_build_finished_at": "2026-09-12T01:02:16.005081+00:00",
+  "last_build_started_at": "2026-09-12T03:41:29.567692+00:00",
+  "last_build_finished_at": "2026-09-12T04:19:50.561972+00:00",
   "delivery_mode": "github_ready_manual_push_with_network_backed_full_build",
   "accuracy_policy": "No fabricated songs, artists, counts, associations, or quota padding. Exact counters are separated from scores/proxies; every row preserves provenance and snapshot/retrieval timing.",
   "completion_summary": {
@@ -15,16 +15,17 @@
   "datasets": {
     "anime": {
       "target": 10000,
-      "materialized_rows": 6049,
+      "materialized_rows": 6327,
       "complete": false,
       "metric_coverage": {
-        "myanimelist_members_snapshot": 5709,
-        "spotify_popularity": 336,
+        "myanimelist_members_snapshot": 5828,
+        "spotify_chart_streams_snapshot": 3,
+        "spotify_popularity": 492,
         "spotify_streams": 4
       },
       "notes": [
         "Local-first two-pass pipeline: bulk AnimeThemes + bundled MAL theme data are scanned without per-anime network calls; Jikan is used only as a bounded post-pass for higher-ranked unresolved anime.",
-        "local_rows_before_jikan=6049; jikan_stop_reason=circuit_breaker_after_4_consecutive_failures"
+        "local_rows_before_jikan=6327; jikan_stop_reason=circuit_breaker_after_12_consecutive_failures"
       ]
     },
     "worldwide": {
@@ -40,6 +41,7 @@
         "youtube_views": 4
       },
       "notes": [
+        "Reused validated materialized output: data/worldwide/worldwide_51000.csv",
         "Reused validated materialized output: data/worldwide/worldwide_51000.csv"
       ]
     },
@@ -54,6 +56,7 @@
         "spotify_streams_snapshot": 2
       },
       "notes": [
+        "Reused validated materialized output: data/classical/classical_10000.csv",
         "Reused validated materialized output: data/classical/classical_10000.csv"
       ]
     },
@@ -65,7 +68,8 @@
         "youtube_views": 10000
       },
       "notes": [
-        "Holodex topic classification with mentions/channel metadata; exact YouTube views used when available, Spotify streams used on confident catalog matches, subscriber counts only as an explicitly labeled proxy. Finite verified corpus is never padded."
+        "Holodex topic classification with mentions/channel metadata; exact YouTube views used when available, Spotify streams used on confident catalog matches, subscriber counts only as an explicitly labeled proxy. Finite verified corpus is never padded.",
+        "Reused validated materialized output: data/vtuber_original/vtuber_original_10000.csv"
       ]
     },
     "emerging": {
@@ -80,6 +84,7 @@
         "youtube_views": 1
       },
       "notes": [
+        "Reused validated materialized output: data/emerging/emerging_10000.csv",
         "Reused validated materialized output: data/emerging/emerging_10000.csv"
       ]
     },
@@ -95,15 +100,16 @@
         "spotify_streams_snapshot": 370
       },
       "notes": [
+        "Reused validated materialized output: data/genres/genres_10000.csv",
         "Reused validated materialized output: data/genres/genres_10000.csv"
       ]
     },
     "screen_soundtracks": {
       "target": 10000,
-      "materialized_rows": 5664,
+      "materialized_rows": 5669,
       "complete": false,
       "metric_coverage": {
-        "spotify_popularity": 5596,
+        "spotify_popularity": 5601,
         "spotify_streams": 34,
         "spotify_streams_snapshot": 34
       },
@@ -119,15 +125,16 @@
         "youtube_views": 10000
       },
       "notes": [
-        "Holodex topic classification with mentions/channel metadata; exact YouTube views used when available, Spotify streams used on confident catalog matches, subscriber counts only as an explicitly labeled proxy. Finite verified corpus is never padded."
+        "Holodex topic classification with mentions/channel metadata; exact YouTube views used when available, Spotify streams used on confident catalog matches, subscriber counts only as an explicitly labeled proxy. Finite verified corpus is never padded.",
+        "Reused validated materialized output: data/vtuber_non_original/vtuber_non_original_10000.csv"
       ]
     },
     "video_game_music": {
       "target": 10000,
-      "materialized_rows": 2387,
+      "materialized_rows": 2347,
       "complete": false,
       "metric_coverage": {
-        "listenbrainz_tag_popularity_percent": 1761,
+        "listenbrainz_tag_popularity_percent": 1721,
         "spotify_popularity": 626
       },
       "notes": [
@@ -135,7 +142,7 @@
         "Movie/television/anime soundtracks, licensed compilations, tribute releases, piano collections, music-box albums, cover albums, and generic remix albums are rejected.",
         "Each row records whether the game association came from an official soundtrack album, franchise artist, explicit track-title reference, high-confidence Wikidata match, or a ListenBrainz release-group game tag paired with an explicit soundtrack release.",
         "Selection preserves game breadth, then allows up to 25 source-backed recordings per game; final rows are sorted by popularity evidence.",
-        "ranked_games=10000; catalog_soundtrack_candidates=2184; listenbrainz_candidates=1912; listenbrainz_added=1761; unique_games=861; fallback_unique=102; fallback_additional=330; rows=2387"
+        "ranked_games=10000; catalog_soundtrack_candidates=2182; listenbrainz_candidates=1864; listenbrainz_added=1721; unique_games=878; fallback_unique=102; fallback_additional=330; rows=2347"
       ]
     },
     "internet_native": {
@@ -167,7 +174,8 @@
       "notes": [
         "Source-backed catalog genres/tags first; ListenBrainz tag-radio fallback second.",
         "No fabricated quota padding. Unknown song language is stored as ['und'], not guessed from title text.",
-        "catalog_candidates=20436; target=10000"
+        "catalog_candidates=20436; target=10000",
+        "Reused validated materialized output: data/electronic_subcultures/electronic_subcultures_10000.csv"
       ]
     },
     "alternative_extreme": {
@@ -183,7 +191,8 @@
       "notes": [
         "Source-backed catalog genres/tags first; ListenBrainz tag-radio fallback second.",
         "No fabricated quota padding. Unknown song language is stored as ['und'], not guessed from title text.",
-        "catalog_candidates=10266; target=10000"
+        "catalog_candidates=10266; target=10000",
+        "Reused validated materialized output: data/alternative_extreme/alternative_extreme_10000.csv"
       ]
     },
     "jazz_depth": {
@@ -244,6 +253,7 @@
         "curated_required_seed": 4
       },
       "notes": [
+        "Reused validated materialized output: data/special_required/special_required.csv",
         "Reused validated materialized output: data/special_required/special_required.csv"
       ]
     },
@@ -261,7 +271,7 @@
         "Producer/composer credit takes precedence over simultaneous human-vocalist roles, preventing instrumentalists from being promoted to main artist.",
         "Official YouTube statistics and the exhaustive VocaDB scan are checkpointed; a quota-limited rerun resumes with unresolved IDs instead of repeating the full lookup.",
         "No Spotify matching, title collision matching, remix, mashup, cover, remaster, MusicPV entry, reprint, or third-party view-count fallback.",
-        "preserved_original_pv_rows=156688; vocadb_exhaustive=True; unresolved_youtube_video_ids=6735"
+        "preserved_original_pv_rows=215553; vocadb_exhaustive=True; unresolved_youtube_video_ids=6735"
       ]
     },
     "kpop": {
@@ -278,7 +288,8 @@
         "Every retained row has an observed YouTube view count strictly above 100,000,000.",
         "Successful artist searches and video-statistics snapshots are checkpointed; a quota-limited rerun resumes at the first unfinished artist and preserves verified rows.",
         "trusted_artists=59; preserved_rows=270; catalog_qualified=60; live_youtube_qualified=258; final_deduplicated_rows=275",
-        "Completeness is scoped to the fully scanned audited artist registry; it is not a claim that every upload labeled K-pop on the internet has been enumerated."
+        "Completeness is scoped to the fully scanned audited artist registry; it is not a claim that every upload labeled K-pop on the internet has been enumerated.",
+        "Reused validated materialized output: data/kpop/kpop_youtube_over_100m.csv"
       ]
     },
     "countries": {
@@ -296,15 +307,15 @@
     },
     "megalist": {
       "target": "deduplicated union of all requested lists",
-      "materialized_rows": 354094,
+      "materialized_rows": 354448,
       "complete": false,
       "metric_coverage": {
         "cross_platform_track_score": 2,
         "curated_required_seed": 4,
-        "listenbrainz_tag_popularity_percent": 1761,
-        "myanimelist_members_snapshot": 5179,
-        "spotify_chart_streams_snapshot": 2834,
-        "spotify_popularity": 75505,
+        "listenbrainz_tag_popularity_percent": 1721,
+        "myanimelist_members_snapshot": 5466,
+        "spotify_chart_streams_snapshot": 2836,
+        "spotify_popularity": 75610,
         "spotify_regional_chart_streams_sum": 27845,
         "spotify_streams": 2689,
         "spotify_streams_snapshot": 3332,
@@ -371,14 +382,14 @@
     },
     "kworb_live_spotify": {
       "url": "https://kworb.net/spotify/songs.html",
-      "rows": 2483,
-      "retrieved_at": "2026-09-11",
+      "rows": 2481,
+      "retrieved_at": "2026-09-12",
       "ok": true
     },
     "kworb_global_daily": {
       "url": "https://kworb.net/spotify/country/global_daily.html",
       "rows": 200,
-      "retrieved_at": "2026-09-11",
+      "retrieved_at": "2026-09-12",
       "ok": true
     },
     "anime_popularity_candidates": {
@@ -390,13 +401,13 @@
     "jikan_theme_fallback": {
       "url": "https://api.jikan.moe/v4",
       "mode": "bounded_post_pass_only",
-      "queried": 4,
+      "queried": 12,
       "successful_requests": 0,
-      "cached": 4,
-      "query_budget": 50,
-      "time_budget_seconds": 120,
-      "failure_breaker": 4,
-      "stop_reason": "circuit_breaker_after_4_consecutive_failures",
+      "cached": 12,
+      "query_budget": 250,
+      "time_budget_seconds": 900,
+      "failure_breaker": 12,
+      "stop_reason": "circuit_breaker_after_12_consecutive_failures",
       "ok": false
     },
     "vocadb_original_youtube_scan": {
@@ -406,7 +417,7 @@
       "api_reported_total": 296933,
       "pages": 5939,
       "exhaustive": true,
-      "resumed_from_source_offset": 0,
+      "resumed_from_source_offset": 296936,
       "checkpoint": ".cache/full_build/vocadb_original_youtube_scan.jsonl",
       "filters": {
         "songTypes": "Original",
@@ -421,9 +432,9 @@
       "requested": 187448,
       "resolved": 180713,
       "unresolved": 6735,
-      "fresh_cache_hits": 0,
-      "fresh_cached_missing": 0,
-      "live_requested": 187448,
+      "fresh_cache_hits": 180713,
+      "fresh_cached_missing": 6735,
+      "live_requested": 0,
       "failed_batches": 0,
       "quota_stopped": false,
       "cache_days": 30,
@@ -431,12 +442,6 @@
       "ok": false,
       "threshold": null,
       "note": "Only official YouTube API values are cached; no third-party or Spotify fallback."
-    },
-    "youtube_view_counts": {
-      "source": "YouTube Data API v3",
-      "requested": 43150,
-      "resolved": 43099,
-      "ok": true
     },
     "wikidata_top_video_games": {
       "url": "GET https://query.wikidata.org/sparql",
@@ -461,35 +466,18 @@
         "gaming",
         "chiptune"
       ],
-      "release_group_tagged_recordings": 4821,
-      "metadata_records": 4750,
-      "qualified_rows": 1912,
+      "release_group_tagged_recordings": 4865,
+      "metadata_records": 8234,
+      "qualified_rows": 1864,
       "rejections": {
-        "arrangement_or_cover": 97,
-        "blank_metadata": 5,
-        "missing_metadata": 71,
-        "no_explicit_soundtrack_marker": 2734,
-        "non_game_media": 2
+        "arrangement_or_cover": 86,
+        "blank_metadata": 4,
+        "missing_metadata": 66,
+        "no_explicit_soundtrack_marker": 2844,
+        "non_game_media": 1
       },
       "checkpoint": ".cache/full_build/listenbrainz_video_game_music.json",
       "errors": [],
-      "ok": true
-    },
-    "youtube_kpop_discovery": {
-      "source": "YouTube Data API v3 search.list + videos.list",
-      "planned_artist_queries": 59,
-      "optional_generic_queries": 0,
-      "completed_queries": 59,
-      "live_search_calls": 59,
-      "search_call_budget": 59,
-      "unique_video_candidates": 2371,
-      "qualified_rows": 258,
-      "failed_queries": [],
-      "failed_statistics_batches": 0,
-      "unresolved_statistics": 0,
-      "registry_scan_complete": true,
-      "threshold": 100000000,
-      "checkpoint": ".cache/full_build/kpop_youtube_checkpoint.json",
       "ok": true
     },
     "spotify_country_charts_kworb": {
@@ -512,12 +500,54 @@
     }
   },
   "warnings": [
+    "ListenBrainz soundtrack tag television score: Client error '429 TOO MANY REQUESTS' for url 'https://api.listenbrainz.org/1/lb-radio/tags?tag=television+score&operator=OR&count=1000&pop_begin=80&pop_end=100'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/429",
+    "ListenBrainz soundtrack tag television score: Client error '429 TOO MANY REQUESTS' for url 'https://api.listenbrainz.org/1/lb-radio/tags?tag=television+score&operator=OR&count=1000&pop_begin=60&pop_end=80'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/429",
+    "ListenBrainz soundtrack tag television score: Client error '429 TOO MANY REQUESTS' for url 'https://api.listenbrainz.org/1/lb-radio/tags?tag=television+score&operator=OR&count=1000&pop_begin=40&pop_end=60'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/429",
+    "ListenBrainz soundtrack tag television score: Client error '429 TOO MANY REQUESTS' for url 'https://api.listenbrainz.org/1/lb-radio/tags?tag=television+score&operator=OR&count=1000&pop_begin=20&pop_end=40'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/429",
+    "ListenBrainz soundtrack tag television score: Client error '429 TOO MANY REQUESTS' for url 'https://api.listenbrainz.org/1/lb-radio/tags?tag=television+score&operator=OR&count=1000&pop_begin=0&pop_end=20'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/429",
+    "ListenBrainz soundtrack tag tv score: Client error '429 TOO MANY REQUESTS' for url 'https://api.listenbrainz.org/1/lb-radio/tags?tag=tv+score&operator=OR&count=1000&pop_begin=80&pop_end=100'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/429",
+    "ListenBrainz soundtrack tag tv score: Client error '429 TOO MANY REQUESTS' for url 'https://api.listenbrainz.org/1/lb-radio/tags?tag=tv+score&operator=OR&count=1000&pop_begin=60&pop_end=80'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/429",
+    "ListenBrainz soundtrack tag tv score: Client error '429 TOO MANY REQUESTS' for url 'https://api.listenbrainz.org/1/lb-radio/tags?tag=tv+score&operator=OR&count=1000&pop_begin=40&pop_end=60'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/429",
+    "ListenBrainz soundtrack tag tv score: Client error '429 TOO MANY REQUESTS' for url 'https://api.listenbrainz.org/1/lb-radio/tags?tag=tv+score&operator=OR&count=1000&pop_begin=20&pop_end=40'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/429",
+    "ListenBrainz soundtrack tag tv score: Client error '429 TOO MANY REQUESTS' for url 'https://api.listenbrainz.org/1/lb-radio/tags?tag=tv+score&operator=OR&count=1000&pop_begin=0&pop_end=20'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/429",
+    "ListenBrainz soundtrack tag original score: Client error '429 TOO MANY REQUESTS' for url 'https://api.listenbrainz.org/1/lb-radio/tags?tag=original+score&operator=OR&count=1000&pop_begin=80&pop_end=100'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/429",
+    "ListenBrainz soundtrack tag original score: Client error '429 TOO MANY REQUESTS' for url 'https://api.listenbrainz.org/1/lb-radio/tags?tag=original+score&operator=OR&count=1000&pop_begin=60&pop_end=80'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/429",
+    "ListenBrainz soundtrack tag original score: Client error '429 TOO MANY REQUESTS' for url 'https://api.listenbrainz.org/1/lb-radio/tags?tag=original+score&operator=OR&count=1000&pop_begin=40&pop_end=60'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/429",
+    "ListenBrainz soundtrack tag original score: Client error '429 TOO MANY REQUESTS' for url 'https://api.listenbrainz.org/1/lb-radio/tags?tag=original+score&operator=OR&count=1000&pop_begin=20&pop_end=40'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/429",
+    "ListenBrainz soundtrack tag original score: Client error '429 TOO MANY REQUESTS' for url 'https://api.listenbrainz.org/1/lb-radio/tags?tag=original+score&operator=OR&count=1000&pop_begin=0&pop_end=20'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/429",
+    "ListenBrainz soundtrack tag film music: Client error '429 TOO MANY REQUESTS' for url 'https://api.listenbrainz.org/1/lb-radio/tags?tag=film+music&operator=OR&count=1000&pop_begin=80&pop_end=100'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/429",
+    "ListenBrainz soundtrack tag film music: Client error '429 TOO MANY REQUESTS' for url 'https://api.listenbrainz.org/1/lb-radio/tags?tag=film+music&operator=OR&count=1000&pop_begin=60&pop_end=80'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/429",
+    "ListenBrainz soundtrack tag film music: Client error '429 TOO MANY REQUESTS' for url 'https://api.listenbrainz.org/1/lb-radio/tags?tag=film+music&operator=OR&count=1000&pop_begin=40&pop_end=60'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/429",
+    "ListenBrainz soundtrack tag film music: Client error '429 TOO MANY REQUESTS' for url 'https://api.listenbrainz.org/1/lb-radio/tags?tag=film+music&operator=OR&count=1000&pop_begin=20&pop_end=40'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/429",
+    "ListenBrainz soundtrack tag film music: Client error '429 TOO MANY REQUESTS' for url 'https://api.listenbrainz.org/1/lb-radio/tags?tag=film+music&operator=OR&count=1000&pop_begin=0&pop_end=20'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/429",
+    "ListenBrainz soundtrack tag cinema soundtrack: Client error '429 TOO MANY REQUESTS' for url 'https://api.listenbrainz.org/1/lb-radio/tags?tag=cinema+soundtrack&operator=OR&count=1000&pop_begin=80&pop_end=100'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/429",
+    "ListenBrainz soundtrack tag cinema soundtrack: Client error '429 TOO MANY REQUESTS' for url 'https://api.listenbrainz.org/1/lb-radio/tags?tag=cinema+soundtrack&operator=OR&count=1000&pop_begin=60&pop_end=80'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/429",
+    "ListenBrainz soundtrack tag cinema soundtrack: Client error '429 TOO MANY REQUESTS' for url 'https://api.listenbrainz.org/1/lb-radio/tags?tag=cinema+soundtrack&operator=OR&count=1000&pop_begin=40&pop_end=60'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/429",
+    "ListenBrainz soundtrack tag movie music: Client error '429 TOO MANY REQUESTS' for url 'https://api.listenbrainz.org/1/lb-radio/tags?tag=movie+music&operator=OR&count=1000&pop_begin=20&pop_end=40'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/429",
+    "ListenBrainz soundtrack tag movie music: Client error '429 TOO MANY REQUESTS' for url 'https://api.listenbrainz.org/1/lb-radio/tags?tag=movie+music&operator=OR&count=1000&pop_begin=0&pop_end=20'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/429",
+    "ListenBrainz soundtrack tag screen soundtrack: Client error '429 TOO MANY REQUESTS' for url 'https://api.listenbrainz.org/1/lb-radio/tags?tag=screen+soundtrack&operator=OR&count=1000&pop_begin=80&pop_end=100'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/429",
+    "ListenBrainz soundtrack tag screen soundtrack: Client error '429 TOO MANY REQUESTS' for url 'https://api.listenbrainz.org/1/lb-radio/tags?tag=screen+soundtrack&operator=OR&count=1000&pop_begin=60&pop_end=80'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/429",
+    "ListenBrainz soundtrack tag screen soundtrack: Client error '429 TOO MANY REQUESTS' for url 'https://api.listenbrainz.org/1/lb-radio/tags?tag=screen+soundtrack&operator=OR&count=1000&pop_begin=40&pop_end=60'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/429",
+    "ListenBrainz soundtrack tag screen soundtrack: Client error '429 TOO MANY REQUESTS' for url 'https://api.listenbrainz.org/1/lb-radio/tags?tag=screen+soundtrack&operator=OR&count=1000&pop_begin=20&pop_end=40'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/429",
+    "ListenBrainz soundtrack tag screen soundtrack: Client error '429 TOO MANY REQUESTS' for url 'https://api.listenbrainz.org/1/lb-radio/tags?tag=screen+soundtrack&operator=OR&count=1000&pop_begin=0&pop_end=20'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/429",
     "AniList popularity page 1: POST https://graphql.anilist.co failed: HTTP 403: {     \"errors\": [         {             \"message\": \"The AniList API has been temporarily disabled due to severe stability issues.\",             \"status\": 403,             \"locations\": [                 {                     \"line\": 1,                     \"column\": 1                 }             ]         }     ],     \"data\": null }; preserving 0 rows and using MAL snapshot fallback for the remainder",
-    "AnimeThemes page 1: GET https://api.animethemes.moe/api/anime failed: HTTP 404: {     \"message\": \"\" }",
-    "Jikan themes MAL 34134: HTTP 504 after 2 attempts",
     "Jikan themes MAL 9260: HTTP 504 after 2 attempts",
     "Jikan themes MAL 14349: HTTP 504 after 2 attempts",
-    "Jikan themes MAL 2418: HTTP 429 rate limited; skipping optional fallback",
+    "Jikan themes MAL 2418: HTTP 504 after 2 attempts",
+    "Jikan themes MAL 10067: HTTP 429 rate limited; skipping optional fallback",
+    "Jikan themes MAL 34240: HTTP 429 rate limited; skipping optional fallback",
+    "Jikan themes MAL 14353: HTTP 504 after 2 attempts",
+    "Jikan themes MAL 20159: HTTP 429 rate limited; skipping optional fallback",
+    "Jikan themes MAL 30458: HTTP 429 rate limited; skipping optional fallback",
+    "Jikan themes MAL 13357: HTTP 429 rate limited; skipping optional fallback",
+    "Jikan themes MAL 19489: HTTP 429 rate limited; skipping optional fallback",
+    "Jikan themes MAL 24991: HTTP 504 after 2 attempts",
+    "Jikan themes MAL 6421: HTTP 429 rate limited; skipping optional fallback",
+    "ListenBrainz children_childhood tag sesame street band 80-100: Client error '429 TOO MANY REQUESTS' for url 'https://api.listenbrainz.org/1/lb-radio/tags?tag=sesame+street&operator=OR&count=1000&pop_begin=80&pop_end=100'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/429",
+    "ListenBrainz children_childhood tag sesame street band 60-80: Client error '429 TOO MANY REQUESTS' for url 'https://api.listenbrainz.org/1/lb-radio/tags?tag=sesame+street&operator=OR&count=1000&pop_begin=60&pop_end=80'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/429",
+    "ListenBrainz children_childhood tag sesame street band 40-60: Client error '429 TOO MANY REQUESTS' for url 'https://api.listenbrainz.org/1/lb-radio/tags?tag=sesame+street&operator=OR&count=1000&pop_begin=40&pop_end=60'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/429",
+    "ListenBrainz children_childhood tag sesame street band 20-40: Client error '429 TOO MANY REQUESTS' for url 'https://api.listenbrainz.org/1/lb-radio/tags?tag=sesame+street&operator=OR&count=1000&pop_begin=20&pop_end=40'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/429",
+    "ListenBrainz children_childhood tag sesame street band 0-20: Client error '429 TOO MANY REQUESTS' for url 'https://api.listenbrainz.org/1/lb-radio/tags?tag=sesame+street&operator=OR&count=1000&pop_begin=0&pop_end=20'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/429",
     "Spotify country charts: 1 stale/unsupported index market links excluded; see data/countries/index.json"
   ],
   "completion_rule": "Do not treat this repository as fully complete unless completion_summary.all_requested_lists_complete is true and validation/target checks pass. Conditional/finite corpora are never padded."
