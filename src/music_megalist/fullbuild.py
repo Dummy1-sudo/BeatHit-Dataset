@@ -76,7 +76,9 @@ MAL_THEME_FALLBACK_URL = (
 )
 MAL_THEME_FALLBACK_SOURCE = "https://gist.github.com/Chepubelja/00ed0aae9bdd4d9be5f4fd1032d0d250"
 ANILIST_API = "https://graphql.anilist.co"
-ANIMETHEMES_API = "https://api.animethemes.moe/api/anime"
+# The public v2 endpoint is rooted at ``/anime``.  The old ``/api/anime`` URL
+# returns 404, which silently removed the largest bulk source from the anime build.
+ANIMETHEMES_API = "https://api.animethemes.moe/anime"
 VOCADB_API = "https://vocadb.net/api/songs"
 HOLODEX_API = "https://holodex.net/api/v2"
 YOUTUBE_API = "https://www.googleapis.com/youtube/v3/videos"
@@ -1391,13 +1393,19 @@ def _listenbrainz_soundtracks(limit: int, used: set[str], status: BuildStatus) -
     out: list[SongRow] = []
     client = httpx.Client(timeout=60, follow_redirects=True, headers={"User-Agent":"BeatHit-Dataset/1.0"})
     try:
-        for tag in tags:
+        # The service caps a response at 1,000 rows.  Spread requests across
+        # popularity bands so overlapping soundtrack tags do not repeatedly return
+        # the same head sample.
+        tag_bands = [(tag, low, high) for tag in tags for low, high in
+                     ((80, 100), (60, 80), (40, 60), (20, 40), (0, 20))]
+        for tag, pop_begin, pop_end in tag_bands:
             if len(out) >= limit:
                 break
             try:
                 r = client.get(
                     f"{LISTENBRAINZ_API}/lb-radio/tags",
-                    params={"tag":tag,"operator":"OR","count":1000,"pop_begin":0,"pop_end":100},
+                    params={"tag":tag,"operator":"OR","count":1000,
+                            "pop_begin":pop_begin,"pop_end":pop_end},
                 )
                 r.raise_for_status(); data = r.json()
             except Exception as exc:
@@ -1439,7 +1447,8 @@ def _listenbrainz_soundtracks(limit: int, used: set[str], status: BuildStatus) -
                         "The rank is a popularity-oriented tag-radio signal, not a Spotify stream count; "
                         "screen-work title is only populated when release metadata supplies one."
                     ),
-                    extra={"association_method":"listenbrainz_screen_soundtrack_tag","tag":tag},
+                    extra={"association_method":"listenbrainz_screen_soundtrack_tag","tag":tag,
+                           "source_popularity_band":[pop_begin,pop_end]},
                 )
                 out.append(row)
                 if len(out) >= limit:
@@ -1598,12 +1607,19 @@ def fetch_animethemes_all(status: BuildStatus) -> tuple[dict[int,list[dict]],dic
     """
     by_anilist=defaultdict(list); by_mal=defaultdict(list); page=1
     _progress("AnimeThemes START full index fetch")
+    endpoints=(ANIMETHEMES_API, "https://api.animethemes.moe/api/anime")
     with httpx.Client(timeout=90,follow_redirects=True,headers={"User-Agent":"BeatHit-Dataset/1.0"}) as c:
         while True:
             params={"include":"animethemes.song.artists,resources","page[size]":"100","page[number]":str(page)}
-            try: d=_http_json(c,"GET",ANIMETHEMES_API,params=params)
-            except Exception as exc:
-                status.warnings.append(f"AnimeThemes page {page}: {exc}"); break
+            d=None; failures=[]
+            for endpoint in endpoints:
+                try:
+                    d=_http_json(c,"GET",endpoint,params=params)
+                    break
+                except Exception as exc:
+                    failures.append(f"{endpoint}: {exc}")
+            if d is None:
+                status.warnings.append(f"AnimeThemes page {page}: {'; '.join(failures)}"); break
             items=d.get("anime") or d.get("data") or []
             if not items: break
             for a in items:

@@ -508,69 +508,75 @@ def _listenbrainz_tag_rows(
         follow_redirects=True,
         headers={"User-Agent": "BeatHit-Dataset/1.0"},
     ) as client:
+        # Tag radio caps every response at 1,000 recordings.  A single 0..100
+        # request therefore samples only its head and cannot fill broad genres
+        # such as jazz.  Query disjoint popularity bands before moving to next tag.
+        popularity_bands = ((80, 100), (60, 80), (40, 60), (20, 40), (0, 20))
         for tag in tags:
             if len(rows) >= needed:
                 break
-            try:
-                response = client.get(
-                    f"{LISTENBRAINZ_API}/lb-radio/tags",
-                    params={"tag": tag, "operator": "OR", "count": 1000, "pop_begin": 0, "pop_end": 100},
-                )
-                response.raise_for_status()
-                data = response.json()
-            except Exception as exc:
-                status.warnings.append(f"ListenBrainz {category} tag {tag}: {exc}")
-                continue
-
-            payload = data.get("payload", data) if isinstance(data, dict) else data
-            tracks = (
-                payload.get("jspf", {}).get("playlist", {}).get("track", [])
-                if isinstance(payload, dict)
-                else []
-            )
-            if not tracks and isinstance(payload, list):
-                tracks = payload
-
-            for position, item in enumerate(tracks, 1):
-                title = item.get("title") or item.get("track_name") or item.get("recording_name")
-                artist = item.get("creator") or item.get("artist_name") or item.get("artist_credit_name")
-                if not title or not artist:
-                    continue
-                key = (norm(str(title)), norm(str(artist)))
-                if key in used:
-                    continue
-
-                identifier = item.get("identifier") or item.get("recording_mbid")
-                if isinstance(identifier, list):
-                    identifier = identifier[0] if identifier else None
-                if isinstance(identifier, str) and "/" in identifier:
-                    identifier = identifier.rsplit("/", 1)[-1]
-                mbid = str(identifier or "").strip().casefold()
-                if mbid and mbid in used_mbids:
-                    continue
-                used.add(key)
-                if mbid:
-                    used_mbids.add(mbid)
-
-                rows.append(
-                    SongRow(
-                        title=str(title),
-                        main_artist=str(artist),
-                        genres=[tag],
-                        languages=["und"],
-                        metric_name="listenbrainz_tag_radio_rank",
-                        metric_value=float(max(1, 1001 - position)),
-                        metric_unit="rank_score",
-                        musicbrainz_recording_mbid=identifier,
-                        source_url="https://listenbrainz.org/",
-                        retrieved_at=TODAY,
-                        source_notes="ListenBrainz tag-radio popularity rank; no stream count is implied.",
-                        extra={"culture_category": category, "source_tag": tag},
-                    )
-                )
+            for pop_begin, pop_end in popularity_bands:
                 if len(rows) >= needed:
                     break
-            time.sleep(0.12)
+                try:
+                    response = client.get(
+                        f"{LISTENBRAINZ_API}/lb-radio/tags",
+                        params={"tag": tag, "operator": "OR", "count": 1000,
+                                "pop_begin": pop_begin, "pop_end": pop_end},
+                    )
+                    response.raise_for_status()
+                    data = response.json()
+                except Exception as exc:
+                    status.warnings.append(
+                        f"ListenBrainz {category} tag {tag} band {pop_begin}-{pop_end}: {exc}"
+                    )
+                    continue
+
+                payload = data.get("payload", data) if isinstance(data, dict) else data
+                tracks = (
+                    payload.get("jspf", {}).get("playlist", {}).get("track", [])
+                    if isinstance(payload, dict)
+                    else []
+                )
+                if not tracks and isinstance(payload, list):
+                    tracks = payload
+
+                for position, item in enumerate(tracks, 1):
+                    title = item.get("title") or item.get("track_name") or item.get("recording_name")
+                    artist = item.get("creator") or item.get("artist_name") or item.get("artist_credit_name")
+                    if not title or not artist:
+                        continue
+                    key = (norm(str(title)), norm(str(artist)))
+                    if key in used:
+                        continue
+
+                    identifier = item.get("identifier") or item.get("recording_mbid")
+                    if isinstance(identifier, list):
+                        identifier = identifier[0] if identifier else None
+                    if isinstance(identifier, str) and "/" in identifier:
+                        identifier = identifier.rsplit("/", 1)[-1]
+                    mbid = str(identifier or "").strip().casefold()
+                    if mbid and mbid in used_mbids:
+                        continue
+                    used.add(key)
+                    if mbid:
+                        used_mbids.add(mbid)
+
+                    rows.append(
+                        SongRow(
+                            title=str(title), main_artist=str(artist), genres=[tag],
+                            languages=["und"], metric_name="listenbrainz_tag_radio_rank",
+                            metric_value=float(max(1, 1001 - position)), metric_unit="rank_score",
+                            musicbrainz_recording_mbid=identifier, source_url="https://listenbrainz.org/",
+                            retrieved_at=TODAY,
+                            source_notes="ListenBrainz tag-radio popularity rank; no stream count is implied.",
+                            extra={"culture_category": category, "source_tag": tag,
+                                   "source_popularity_band": [pop_begin, pop_end]},
+                        )
+                    )
+                    if len(rows) >= needed:
+                        break
+                time.sleep(0.12)
     return rows
 
 
@@ -1988,6 +1994,7 @@ def build_video_game_music(catalog: pd.DataFrame, status: Any) -> list[SongRow]:
     target = 10_000
     per_game_track_cap = 25
     games = _fetch_top_games(status, target)
+    game_evidence = {norm(str(game.get("game_title") or "")): game for game in games}
 
     candidates: list[tuple[pd.Series, str, str, bool, str, str]] = []
     token_index: dict[str, set[int]] = defaultdict(set)
@@ -2180,6 +2187,7 @@ def build_video_game_music(catalog: pd.DataFrame, status: Any) -> list[SongRow]:
         if len(selected) >= target:
             break
         game_key = norm(game_title)
+        game = game_evidence.get(game_key)
         if association_kind == "genre_album" and per_game.get(game_key, 0) == 0:
             continue
         if association_kind == "explicit_track_reference" and not genre_hit and per_game.get(game_key, 0) == 0:
@@ -2196,6 +2204,10 @@ def build_video_game_music(catalog: pd.DataFrame, status: Any) -> list[SongRow]:
                 "fallback_stage": "additional_tracks",
                 "per_game_track_cap": per_game_track_cap,
                 "game_association_kind": association_kind,
+                # A genre-only association is valid only when it is tied to the
+                # independently ranked Wikidata game, not merely an album title.
+                "game_wikidata_id": (game or {}).get("wikidata_id"),
+                "game_wikidata_url": (game or {}).get("wikidata_url"),
             },
         ):
             fallback_additional += 1

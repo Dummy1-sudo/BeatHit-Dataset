@@ -94,6 +94,10 @@ jobs:
           BEATHIT_SKIP_ZENODO: ${{ github.event_name == 'workflow_dispatch' && inputs.skip_zenodo && '1' || '0' }}
           BEATHIT_RYD_FALLBACK: '1'
           BEATHIT_RYD_WORKERS: '20'
+          # AnimeThemes supplies the bulk mapping; Jikan is only a resilient post-pass.
+          BEATHIT_JIKAN_MAX_QUERIES: '250'
+          BEATHIT_JIKAN_MAX_SECONDS: '900'
+          BEATHIT_JIKAN_FAILURE_BREAKER: '12'
           BEATHIT_YTDLP_FALLBACK: '0'
           BEATHIT_VOCADB_SCAN_LIMIT: ${{ vars.BEATHIT_VOCADB_SCAN_LIMIT || '350000' }}
           BEATHIT_VOCALOID_VIEW_CACHE_DAYS: ${{ vars.BEATHIT_VOCALOID_VIEW_CACHE_DAYS || '30' }}
@@ -102,7 +106,7 @@ jobs:
           BEATHIT_KPOP_GENERIC_SEARCHES: ${{ vars.BEATHIT_KPOP_GENERIC_SEARCHES || '0' }}
           BEATHIT_COUNTRY_WORKERS: ${{ vars.BEATHIT_COUNTRY_WORKERS || '4' }}
         run: |
-          python scripts/build_full_dataset.py --reuse-complete --force anime vtuber_original vtuber_non_original video_game_music internet_native electronic_subcultures alternative_extreme jazz_depth children_childhood unserious screen_soundtracks
+          python scripts/build_full_dataset.py --reuse-complete --force anime video_game_music internet_native jazz_depth children_childhood unserious screen_soundtracks
 
       - name: Save resumable builder checkpoints
         if: ${{ always() && steps.restore-builder-checkpoints.outputs.cache-hit != 'true' }}

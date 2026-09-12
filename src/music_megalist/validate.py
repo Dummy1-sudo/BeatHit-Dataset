@@ -144,6 +144,10 @@ def validate(data_dir: str|Path='data', *, require_complete: bool=False) -> list
     data=Path(data_dir); errors=[]
     csv_paths=sorted({*data.rglob('*.csv'),*data.rglob('*.csv.gz')})
     for p in csv_paths:
+        # Interrupted builders retain a progress journal for recovery.  It is not a
+        # canonical output and may intentionally have rank gaps after de-duplication.
+        if p.name.endswith('.partial.csv'):
+            continue
         if '/raw/' in p.as_posix(): continue
         # Reports/inputs are not canonical song-list CSVs and use intentionally different schemas.
         if p.name in {'coverage_report.csv'}: continue
