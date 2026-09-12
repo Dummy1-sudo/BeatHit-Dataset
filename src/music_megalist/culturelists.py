@@ -212,21 +212,7 @@ def _safe_int(value: Any) -> int | None:
 
 
 def _parse_genres(value: Any) -> list[str]:
-    if value is None:
-        return []
-    if isinstance(value, list):
-        return [str(x).strip().casefold() for x in value if str(x).strip()]
-    text = str(value).strip()
-    if not text or text.casefold() in {"nan", "none", "null", "[]"}:
-        return []
-    try:
-        parsed = json.loads(text)
-        if isinstance(parsed, list):
-            return [str(x).strip().casefold() for x in parsed if str(x).strip()]
-    except Exception:
-        pass
-    return [x.strip().casefold() for x in re.split(r"[|;,]", text) if x.strip()]
-
+    return _parse_clean_genres(value)
 
 
 def _parse_clean_genres(value: Any) -> list[str]:
@@ -492,97 +478,48 @@ def _seed_rows(category: str) -> list[SongRow]:
     return rows
 
 
-def _listenbrainz_tag_rows(
-    tags: list[str],
-    needed: int,
-    category: str,
-    used: set[tuple[str, str]],
-    used_mbids: set[str],
-    status: Any,
-) -> list[SongRow]:
+def _listenbrainz_tag_rows(tags, needed, category, used, used_mbids, status):
+    from .listenbrainz import TagRadio
     if needed <= 0:
         return []
-    rows: list[SongRow] = []
-    with httpx.Client(
-        timeout=60,
-        follow_redirects=True,
-        headers={"User-Agent": "BeatHit-Dataset/1.0"},
-    ) as client:
-        # Tag radio caps every response at 1,000 recordings.  A single 0..100
-        # request therefore samples only its head and cannot fill broad genres
-        # such as jazz.  Query disjoint popularity bands before moving to next tag.
-        popularity_bands = ((80, 100), (60, 80), (40, 60), (20, 40), (0, 20))
-        for tag in tags:
-            if len(rows) >= needed:
-                break
-            for pop_begin, pop_end in popularity_bands:
-                if len(rows) >= needed:
-                    break
-                try:
-                    response = client.get(
-                        f"{LISTENBRAINZ_API}/lb-radio/tags",
-                        params={"tag": tag, "operator": "OR", "count": 1000,
-                                "pop_begin": pop_begin, "pop_end": pop_end},
-                    )
-                    response.raise_for_status()
-                    data = response.json()
-                except Exception as exc:
-                    status.warnings.append(
-                        f"ListenBrainz {category} tag {tag} band {pop_begin}-{pop_end}: {exc}"
-                    )
-                    continue
-
-                payload = data.get("payload", data) if isinstance(data, dict) else data
-                tracks = (
-                    payload.get("jspf", {}).get("playlist", {}).get("track", [])
-                    if isinstance(payload, dict)
-                    else []
-                )
-                if not tracks and isinstance(payload, list):
-                    tracks = payload
-
-                for position, item in enumerate(tracks, 1):
-                    title = item.get("title") or item.get("track_name") or item.get("recording_name")
-                    artist = item.get("creator") or item.get("artist_name") or item.get("artist_credit_name")
-                    if not title or not artist:
-                        continue
-                    key = (norm(str(title)), norm(str(artist)))
-                    if key in used:
-                        continue
-
-                    identifier = item.get("identifier") or item.get("recording_mbid")
-                    if isinstance(identifier, list):
-                        identifier = identifier[0] if identifier else None
-                    if isinstance(identifier, str) and "/" in identifier:
-                        identifier = identifier.rsplit("/", 1)[-1]
-                    mbid = str(identifier or "").strip().casefold()
-                    if mbid and mbid in used_mbids:
-                        continue
-                    used.add(key)
-                    if mbid:
-                        used_mbids.add(mbid)
-
-                    rows.append(
-                        SongRow(
-                            title=str(title), main_artist=str(artist), genres=[tag],
-                            languages=["und"], metric_name="listenbrainz_tag_radio_rank",
-                            metric_value=float(max(1, 1001 - position)), metric_unit="rank_score",
-                            musicbrainz_recording_mbid=identifier, source_url="https://listenbrainz.org/",
-                            retrieved_at=TODAY,
-                            source_notes="ListenBrainz tag-radio popularity rank; no stream count is implied.",
-                            extra={"culture_category": category, "source_tag": tag,
-                                   "source_popularity_band": [pop_begin, pop_end]},
-                        )
-                    )
-                    if len(rows) >= needed:
-                        break
-                time.sleep(0.12)
+    # Generic "comedy" includes spoken stand-up; it does not prove a song.
+    if category == "unserious":
+        tags = [t for t in tags if t not in {"comedy", "funny", "humorous", "satire", "absurdist"}]
+    scopes = {"recording", "release-group"} if category in {"unserious", "children_childhood"} else None
+    radio = TagRadio(CACHE, status, category)
+    rows = []
+    for mbid, metadata, evidence in radio.recordings(tags, scopes=scopes):
+        recording = metadata["recording"]
+        artist = metadata["artist"]["name"]
+        title = recording["name"]
+        key = (norm(title), norm(artist))
+        if key in used or mbid in used_mbids:
+            continue
+        album = (metadata.get("release") or {}).get("name")
+        if re.search(r"\b(?:stand[- ]?up|spoken word|audiobook|interview)\b", str(album or ""), re.I):
+            continue
+        used.add(key); used_mbids.add(mbid)
+        percent = _safe_float(evidence.get("percent")) or 0.0
+        rows.append(SongRow(
+            title=title, main_artist=artist, album=album, genres=[evidence["tag"]],
+            languages=["und"], musicbrainz_recording_mbid=mbid,
+            metric_name="listenbrainz_tag_popularity_percent", metric_value=percent,
+            metric_unit="score_0_100", overall_popularity_score=percent * .35,
+            source_url=f"https://musicbrainz.org/recording/{mbid}", retrieved_at=TODAY,
+            source_notes="MusicBrainz tag membership and hydrated recording metadata; ListenBrainz popularity score, not listens.",
+            extra={"culture_category": category, "source_tag": evidence["tag"],
+                   "listenbrainz_source_scope": evidence.get("source"),
+                   "source_popularity_band": evidence["band"]}))
+        if len(rows) >= needed:
+            break
     return rows
 
 
 def _build_tag_list(catalog: pd.DataFrame, status: Any, name: str) -> list[SongRow]:
     target = TAG_TARGETS[name]
     tags = TAG_LISTS[name]
+    if name == "unserious":
+        tags = [tag for tag in tags if tag not in {"comedy", "funny", "humorous", "satire", "absurdist"}]
     output = TAG_OUTPUTS[name]
 
     rows = _seed_rows(name)
@@ -599,7 +536,13 @@ def _build_tag_list(catalog: pd.DataFrame, status: Any, name: str) -> list[SongR
     candidates: list[tuple[float, pd.Series, list[str]]] = []
     for _, row in catalog.iterrows():
         row_genres = _parse_genres(row.get("genres"))
-        genre_match = _genre_matches(row_genres, tags)
+        # Reject malformed source identities instead of preserving replacement characters.
+        if "\ufffd" in f"{row.get('title') or ''}{row.get('main_artist') or ''}":
+            continue
+        catalog_tags=[tag for tag in tags if tag != "doujin"] if name == "internet_native" else tags
+        # An ambiguous artist-level doujin tag alone has misclassified Punjabi pop.
+        # Recording/release tag corroboration remains available through ListenBrainz.
+        genre_match = _genre_matches(row_genres, catalog_tags)
         title_match = name == "unserious" and _unserious_title_match(row.get("title"))
         if genre_match or title_match:
             score = _catalog_score(row) + (10.0 if title_match else 0.0)
@@ -1588,8 +1531,6 @@ GAME_LISTENBRAINZ_TAGS = [
     "game score",
     "original game soundtrack",
     "game ost",
-    "gaming",
-    "chiptune",
 ]
 GAME_FRANCHISE_ARTISTS = {
     "league of legends": "League of Legends",
@@ -1723,7 +1664,11 @@ def _game_title_from_explicit_soundtrack_release(album: Any) -> str | None:
     marker = GAME_EXPLICIT_SOUNDTRACK_RELEASE.search(value)
     if not value or not marker:
         return None
-    candidate = value[:marker.start()].strip(" \t-–—:|,()[]{}'\"“”・")
+    prefix = value[:marker.start()]
+    prefix = re.sub(r"\s*[\[(][^\])]*(?:edition|volume|vol\.?|remixes)[^\])]*[\])]", "", prefix, flags=re.I)
+    # Drop edition brackets that belong to the soundtrack packaging.
+    prefix = re.sub(r"[\[(][^\])]*$", "", prefix)
+    candidate = prefix.strip(" \t-–—:|,()[]{}'\"“”・")
     candidate = re.sub(
         r"\s*(?:collector'?s|deluxe|complete|remastered|expanded)\s+edition\s*$",
         "",
@@ -1750,243 +1695,44 @@ def _game_title_from_explicit_soundtrack_release(album: Any) -> str | None:
 
 
 def _listenbrainz_video_game_rows(status: Any) -> list[SongRow]:
-    """Fetch release-group-tagged recordings with explicit soundtrack albums.
-
-    Tag-radio evidence is restricted to release-group tags; artist-only tags are too
-    broad. MusicBrainz recording/release metadata then has to contain an explicit
-    soundtrack marker, and common film/TV/anime and arrangement markers are rejected.
-    """
-    cache_path = CACHE / "listenbrainz_video_game_music.json"
-    cache: dict[str, Any] = {
-        "schema_version": 1,
-        "tag_results": {},
-        "metadata": {},
-    }
-    try:
-        if cache_path.exists():
-            value = json.loads(cache_path.read_text(encoding="utf-8"))
-            if isinstance(value, dict) and value.get("schema_version") == 1:
-                cache = value
-    except Exception as exc:
-        status.warnings.append(f"ListenBrainz video-game checkpoint ignored: {exc}")
-
-    tag_cache = cache.setdefault("tag_results", {})
-    metadata_cache = cache.setdefault("metadata", {})
-    if not isinstance(tag_cache, dict) or not isinstance(metadata_cache, dict):
-        tag_cache = {}
-        metadata_cache = {}
-        cache = {
-            "schema_version": 1,
-            "tag_results": tag_cache,
-            "metadata": metadata_cache,
-        }
-
-    def save_cache() -> None:
-        CACHE.mkdir(parents=True, exist_ok=True)
-        cache["updated_at"] = TODAY
-        temp_path = cache_path.with_suffix(".tmp")
-        temp_path.write_text(
-            json.dumps(cache, ensure_ascii=False, separators=(",", ":")) + "\n",
-            encoding="utf-8",
-        )
-        temp_path.replace(cache_path)
-
-    source_errors: list[str] = []
-    with httpx.Client(
-        timeout=90,
-        follow_redirects=True,
-        headers={
-            "User-Agent": (
-                "BeatHit-Dataset/1.0 "
-                "(+https://github.com/Dummy1-sudo/BeatHit-Dataset)"
-            )
-        },
-    ) as client:
-        for tag in GAME_LISTENBRAINZ_TAGS:
-            try:
-                response = client.get(
-                    f"{LISTENBRAINZ_API}/lb-radio/tags",
-                    params={
-                        "tag": tag,
-                        "operator": "OR",
-                        "count": 1000,
-                        "pop_begin": 0,
-                        "pop_end": 100,
-                    },
-                )
-                response.raise_for_status()
-                payload = response.json()
-                if not isinstance(payload, list):
-                    raise ValueError("expected a list of tag-radio candidates")
-                tag_cache[tag] = payload
-                save_cache()
-            except Exception as exc:
-                source_errors.append(f"tag {tag}: {exc}")
-                if tag not in tag_cache:
-                    status.warnings.append(
-                        f"ListenBrainz video-game tag {tag!r}: {exc}"
-                    )
-
-        evidence: dict[str, dict[str, Any]] = {}
-        for tag in GAME_LISTENBRAINZ_TAGS:
-            values = tag_cache.get(tag) or []
-            if not isinstance(values, list):
-                continue
-            for value in values:
-                if not isinstance(value, dict):
-                    continue
-                if str(value.get("source") or "").casefold() != "release-group":
-                    continue
-                mbid = str(value.get("recording_mbid") or "").strip().casefold()
-                if not re.fullmatch(
-                    r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-"
-                    r"[0-9a-f]{4}-[0-9a-f]{12}",
-                    mbid,
-                ):
-                    continue
-                item = evidence.setdefault(
-                    mbid,
-                    {"percent": 0.0, "tag_count": 0, "tags": []},
-                )
-                item["percent"] = max(
-                    float(item["percent"]),
-                    _safe_float(value.get("percent")) or 0.0,
-                )
-                item["tag_count"] = max(
-                    int(item["tag_count"]),
-                    _safe_int(value.get("tag_count")) or 0,
-                )
-                if tag not in item["tags"]:
-                    item["tags"].append(tag)
-
-        missing = [mbid for mbid in evidence if mbid not in metadata_cache]
-        for start in range(0, len(missing), 500):
-            batch = missing[start:start + 500]
-            try:
-                response = client.post(
-                    f"{LISTENBRAINZ_API}/metadata/recording/",
-                    json={
-                        "recording_mbids": batch,
-                        "inc": "artist release tag",
-                    },
-                )
-                response.raise_for_status()
-                payload = response.json()
-                if not isinstance(payload, dict):
-                    raise ValueError("expected a recording metadata object")
-                for mbid in batch:
-                    metadata_cache[mbid] = payload.get(mbid)
-                save_cache()
-            except Exception as exc:
-                source_errors.append(f"metadata batch {start // 500 + 1}: {exc}")
-                status.warnings.append(
-                    f"ListenBrainz video-game metadata batch {start // 500 + 1}: {exc}"
-                )
-
-    rows: list[SongRow] = []
-    rejection_counts: dict[str, int] = defaultdict(int)
-    for mbid, tag_evidence in evidence.items():
-        metadata = metadata_cache.get(mbid)
-        if not isinstance(metadata, dict):
-            rejection_counts["missing_metadata"] += 1
-            continue
-        recording = metadata.get("recording") or {}
-        artist_data = metadata.get("artist") or {}
+    from .listenbrainz import TagRadio
+    radio = TagRadio(CACHE, status, "video_game_music")
+    rows = []
+    rejections = defaultdict(int)
+    for mbid, metadata, evidence in radio.recordings(GAME_LISTENBRAINZ_TAGS, scopes={"release-group"}):
+        recording = metadata["recording"]
+        artist = metadata["artist"]["name"]
         release = metadata.get("release") or {}
-        title = str(recording.get("name") or "").strip()
-        artist = str(artist_data.get("name") or "").strip()
-        album = str(release.get("name") or "").strip()
+        title, album = recording["name"], str(release.get("name") or "")
         combined = f"{album} | {title} | {artist}"
-        if not title or not artist or not album:
-            rejection_counts["blank_metadata"] += 1
+        if GAME_MEDIA_REJECT.search(combined) or GAME_ARRANGEMENT_REJECT.search(combined):
+            rejections["non_game_or_arrangement"] += 1
             continue
-        if GAME_MEDIA_REJECT.search(combined):
-            rejection_counts["non_game_media"] += 1
+        game = _game_title_from_explicit_soundtrack_release(album)
+        if not game:
+            rejections["no_explicit_soundtrack_release"] += 1
             continue
-        if GAME_ARRANGEMENT_REJECT.search(combined):
-            rejection_counts["arrangement_or_cover"] += 1
-            continue
-        game_title = _game_title_from_explicit_soundtrack_release(album)
-        if not game_title:
-            rejection_counts["no_explicit_soundtrack_marker"] += 1
-            continue
-
-        first_release = str(recording.get("first_release_date") or "").strip()
+        percent = _safe_float(evidence.get("percent")) or 0.0
         isrcs = recording.get("isrcs") or []
-        isrc = (
-            str(isrcs[0]).strip().upper()
-            if isinstance(isrcs, list) and isrcs
-            else None
-        )
-        tags = list(tag_evidence.get("tags") or [])
-        percent = float(tag_evidence.get("percent") or 0.0)
-        rows.append(
-            SongRow(
-                title=title,
-                main_artist=artist,
-                album=album,
-                release_date=first_release or None,
-                release_year=_safe_int(first_release[:4]) if first_release else None,
-                genres=tags,
-                languages=["und"],
-                screen_work=game_title,
-                metric_name="listenbrainz_tag_popularity_percent",
-                metric_value=max(percent, 0.01),
-                metric_unit="score_0_100",
-                overall_popularity_score=max(percent, 0.01),
-                musicbrainz_recording_mbid=mbid,
-                isrc=isrc,
-                source_url=f"https://musicbrainz.org/recording/{mbid}",
-                retrieved_at=TODAY,
-                source_notes=(
-                    "ListenBrainz release-group tag-radio popularity evidence plus "
-                    "MusicBrainz recording/release metadata. The score is a popularity "
-                    "percentage, not a stream or listen count."
-                ),
-                extra={
-                    "culture_category": "video_game_music",
-                    "video_game": game_title,
-                    "selection": (
-                        "release-group game-music tag plus explicit soundtrack "
-                        "release marker"
-                    ),
-                    "game_association_kind": "listenbrainz_release_group_tag",
-                    "listenbrainz_source_scope": "release-group",
-                    "listenbrainz_source_tags": tags,
-                    "listenbrainz_tag_count": int(
-                        tag_evidence.get("tag_count") or 0
-                    ),
-                    "listenbrainz_tag_popularity_percent": percent,
-                    "musicbrainz_release_mbid": release.get("mbid"),
-                    "musicbrainz_release_group_mbid": release.get(
-                        "release_group_mbid"
-                    ),
-                    "explicit_soundtrack_release": album,
-                },
-            )
-        )
-
-    rows.sort(
-        key=lambda row: (
-            float(row.metric_value or 0.0),
-            int((row.extra or {}).get("listenbrainz_tag_count") or 0),
-        ),
-        reverse=True,
-    )
-    status.sources["listenbrainz_video_game_music"] = {
-        "source": "ListenBrainz tag radio + recording metadata API",
-        "tags": GAME_LISTENBRAINZ_TAGS,
-        "release_group_tagged_recordings": len(evidence),
-        "metadata_records": sum(
-            1 for value in metadata_cache.values() if isinstance(value, dict)
-        ),
-        "qualified_rows": len(rows),
-        "rejections": dict(sorted(rejection_counts.items())),
-        "checkpoint": str(cache_path.relative_to(ROOT)),
-        "errors": source_errors,
-        "ok": bool(rows),
-    }
-    return rows
+        rows.append(SongRow(
+            title=title, main_artist=artist, album=album, screen_work=game,
+            genres=[evidence["tag"]], languages=["und"],
+            musicbrainz_recording_mbid=mbid, isrc=(isrcs[0] if isrcs else None),
+            metric_name="listenbrainz_tag_popularity_percent", metric_value=percent,
+            metric_unit="score_0_100", overall_popularity_score=percent * .35,
+            source_url=f"https://musicbrainz.org/recording/{mbid}", retrieved_at=TODAY,
+            source_notes="Release-group game-music tag plus explicit soundtrack release; popularity is a score, not listens.",
+            extra={"culture_category": "video_game_music", "video_game": game,
+                   "game_association_kind": "listenbrainz_release_group_tag",
+                   "listenbrainz_source_scope": "release-group",
+                   "listenbrainz_source_tags": [evidence["tag"]],
+                   "musicbrainz_release_group_mbid": release.get("release_group_mbid"),
+                   "explicit_soundtrack_release": album}))
+        # Bounded sample with room for per-game caps and identity deduplication.
+        if len(rows) >= 50_000:
+            break
+    radio.stats.update(qualified_rows=len(rows), rejections=dict(rejections))
+    return sorted(rows, key=lambda r: r.metric_value, reverse=True)
 
 
 def build_video_game_music(catalog: pd.DataFrame, status: Any) -> list[SongRow]:
@@ -2014,10 +1760,10 @@ def build_video_game_music(catalog: pd.DataFrame, status: Any) -> list[SongRow]:
         if GAME_LICENSED_COMPILATION.search(album) and not genre_hit:
             continue
         explicit_title_game = _game_from_track_title(title)
-        if not genre_hit and not GAME_SOUNDTRACK_MARKER.search(album) and not explicit_title_game:
+        if not genre_hit and not GAME_SOUNDTRACK_MARKER.search(album) and norm(str(row.get("main_artist") or "")) not in GAME_FRANCHISE_ARTISTS:
             continue
 
-        game_title = _infer_game_title(row)
+        game_title = _game_title_from_explicit_soundtrack_release(album) or _infer_game_title(row)
         if not game_title:
             continue
         association_kind = _game_candidate_kind(row, game_title)
@@ -2188,7 +1934,7 @@ def build_video_game_music(catalog: pd.DataFrame, status: Any) -> list[SongRow]:
             break
         game_key = norm(game_title)
         game = game_evidence.get(game_key)
-        if association_kind == "genre_album" and per_game.get(game_key, 0) == 0:
+        if association_kind == "genre_album" and not (game or {}).get("wikidata_id"):
             continue
         if association_kind == "explicit_track_reference" and not genre_hit and per_game.get(game_key, 0) == 0:
             continue

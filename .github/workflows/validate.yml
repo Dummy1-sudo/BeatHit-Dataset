@@ -1,6 +1,7 @@
 name: validate-datasets
 on:
   push:
+    paths: ['data/**', 'STATUS.json']
   pull_request:
 jobs:
   validate:
@@ -11,5 +12,5 @@ jobs:
         with:
           python-version: '3.12'
       - run: pip install -e . pytest
-      - run: python -m music_megalist validate
       - run: pytest -q
+      - run: python -m music_megalist validate

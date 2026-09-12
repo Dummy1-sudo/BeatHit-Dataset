@@ -129,6 +129,10 @@ MATERIALIZED_OUTPUTS = {
     "special_required": DATA / "special_required" / "special_required.csv",
 }
 
+BUILDER_REVISIONS = {name: "repair-v3" for name in (
+    "anime", "vocaloid", "screen_soundtracks", "vtuber_original", "vtuber_non_original",
+    "video_game_music", "internet_native", "jazz_depth", "children_childhood", "unserious")}
+
 WORLDWIDE_BUCKETS = [
     ("current", None, None, 10_000),
     ("2020s", 2020, 2029, 10_000),
@@ -176,6 +180,7 @@ class DatasetStatus:
     target: int | str
     rows: int = 0
     complete: bool = False
+    builder_revision: str | None = None
     metric_coverage: dict[str, int] = field(default_factory=dict)
     notes: list[str] = field(default_factory=list)
 
@@ -191,7 +196,8 @@ class BuildStatus:
     def save(self) -> None:
         REPORT.parent.mkdir(parents=True, exist_ok=True)
         payload = asdict(self)
-        REPORT.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+        from .listenbrainz import atomic_json
+        atomic_json(REPORT,payload)
 
 
 def _now() -> str:
@@ -1373,89 +1379,44 @@ def _screen_work_from_album(album: str) -> str | None:
     return s or album
 
 
-def _listenbrainz_soundtracks(limit: int, used: set[str], status: BuildStatus) -> list[SongRow]:
-    """Fill soundtrack coverage from MusicBrainz/ListenBrainz soundtrack tags.
+SCREEN_TAGS = ["film soundtrack", "movie soundtrack", "television soundtrack", "tv soundtrack",
+               "film score", "movie score", "television score", "tv score", "film music",
+               "motion picture soundtrack", "series soundtrack", "anime soundtrack", "anime score"]
+SCREEN_ALBUM_RE = re.compile(r"\b(?:motion picture|film|movie|television|tv series|original series|anime)\b", re.I)
 
-    This fallback is only used after explicit soundtrack/score album metadata is exhausted.
-    The tags are deliberately screen-specific; generic mood/instrument tags are not accepted.
-    A release/album title is retained as ``screen_work`` only when the response provides one.
-    """
+
+def _listenbrainz_soundtracks(limit: int, used: set[str], status: BuildStatus) -> list[SongRow]:
+    from .listenbrainz import TagRadio
+    from .culturelists import GAME_SOUNDTRACK_MARKER
     if limit <= 0:
         return []
-    tags = [
-        "soundtrack", "film soundtrack", "movie soundtrack", "television soundtrack",
-        "tv soundtrack", "original soundtrack", "film score", "movie score",
-        "television score", "tv score", "original score", "film music",
-        "cinema soundtrack", "motion picture soundtrack", "series soundtrack",
-        "anime soundtrack", "anime score", "television music", "movie music",
-        "screen soundtrack",
-    ]
-    out: list[SongRow] = []
-    client = httpx.Client(timeout=60, follow_redirects=True, headers={"User-Agent":"BeatHit-Dataset/1.0"})
-    try:
-        # The service caps a response at 1,000 rows.  Spread requests across
-        # popularity bands so overlapping soundtrack tags do not repeatedly return
-        # the same head sample.
-        tag_bands = [(tag, low, high) for tag in tags for low, high in
-                     ((80, 100), (60, 80), (40, 60), (20, 40), (0, 20))]
-        for tag, pop_begin, pop_end in tag_bands:
-            if len(out) >= limit:
-                break
-            try:
-                r = client.get(
-                    f"{LISTENBRAINZ_API}/lb-radio/tags",
-                    params={"tag":tag,"operator":"OR","count":1000,
-                            "pop_begin":pop_begin,"pop_end":pop_end},
-                )
-                r.raise_for_status(); data = r.json()
-            except Exception as exc:
-                status.warnings.append(f"ListenBrainz soundtrack tag {tag}: {exc}")
-                continue
-            payload = data.get("payload", data) if isinstance(data, dict) else data
-            tracks = payload.get("jspf", {}).get("playlist", {}).get("track", []) if isinstance(payload, dict) else []
-            if not tracks and isinstance(payload, list):
-                tracks = payload
-            for pos, x in enumerate(tracks, 1):
-                title = x.get("title") or x.get("track_name") or x.get("recording_name")
-                artist = x.get("creator") or x.get("artist_name") or x.get("artist_credit_name")
-                if not title or not artist:
-                    continue
-                mbid = x.get("identifier") or x.get("recording_mbid")
-                if isinstance(mbid, list):
-                    mbid = mbid[0] if mbid else None
-                if isinstance(mbid, str) and "/" in mbid:
-                    mbid = mbid.rsplit("/", 1)[-1]
-                aliases=[_identity(title, artist)]
-                if mbid:
-                    aliases.append(f"mbid:{mbid}")
-                if any(alias in used for alias in aliases):
-                    continue
-                used.update(aliases)
-                album = x.get("album") or x.get("release_name")
-                if isinstance(album, dict):
-                    album = album.get("title") or album.get("name")
-                album = str(album).strip() if album else None
-                row = SongRow(
-                    title=str(title).strip(), main_artist=str(artist).strip(), album=album,
-                    genres=[tag], metric_name="listenbrainz_soundtrack_tag_rank",
-                    metric_value=float(max(1, 1001-pos)), metric_unit="rank_score",
-                    musicbrainz_recording_mbid=str(mbid) if mbid else None,
-                    screen_work=_screen_work_from_album(album or "") if album else None,
-                    source_url="https://listenbrainz.org/", retrieved_at=TODAY,
-                    source_notes=(
-                        "Recording returned by ListenBrainz/MusicBrainz soundtrack-tag radio. "
-                        "The rank is a popularity-oriented tag-radio signal, not a Spotify stream count; "
-                        "screen-work title is only populated when release metadata supplies one."
-                    ),
-                    extra={"association_method":"listenbrainz_screen_soundtrack_tag","tag":tag,
-                           "source_popularity_band":[pop_begin,pop_end]},
-                )
-                out.append(row)
-                if len(out) >= limit:
-                    break
-    finally:
-        client.close()
-    return out
+    rows = []
+    radio = TagRadio(CACHE, status, "screen_soundtracks")
+    for mbid, metadata, evidence in radio.recordings(SCREEN_TAGS, scopes={"recording", "release-group"}):
+        title = metadata["recording"]["name"]
+        artist = metadata["artist"]["name"]
+        album = str((metadata.get("release") or {}).get("name") or "")
+        if GAME_SOUNDTRACK_MARKER.search(album):
+            continue
+        aliases = [_identity(title, artist), f"mbid:{mbid}"]
+        if any(x in used for x in aliases):
+            continue
+        used.update(aliases)
+        percent = _safe_float(evidence.get("percent")) or 0.0
+        rows.append(SongRow(
+            title=title, main_artist=artist, album=album or None,
+            # Generic release titles do not establish which screen work used the song.
+            screen_work=_screen_work_from_album(album) if SCREEN_ALBUM_RE.search(album) else None,
+            genres=[evidence["tag"]], musicbrainz_recording_mbid=mbid,
+            metric_name="listenbrainz_tag_popularity_percent", metric_value=percent,
+            metric_unit="score_0_100", overall_popularity_score=percent * .35,
+            source_url=f"https://musicbrainz.org/recording/{mbid}", retrieved_at=TODAY,
+            source_notes="Recording/release-group screen-specific tag, with MusicBrainz recording metadata; score is not listens.",
+            extra={"association_method": "listenbrainz_screen_soundtrack_tag", "tag": evidence["tag"],
+                   "listenbrainz_source_scope": evidence.get("source")}))
+        if len(rows) >= limit:
+            break
+    return rows
 
 
 def build_screen_soundtracks(catalog: pd.DataFrame, status: BuildStatus) -> list[SongRow]:
@@ -1489,14 +1450,17 @@ def build_screen_soundtracks(catalog: pd.DataFrame, status: BuildStatus) -> list
                 selected.append(row)
     album = catalog["album_name"].fillna("").astype(str)
     genre = catalog["genres"].fillna("").astype(str)
-    mask = album.str.contains(SOUNDTRACK_RE, na=False) | genre.str.contains(
-        r"soundtrack|film score|movie|television score|tv score|cinematic", case=False, regex=True, na=False
-    )
+    # Generic soundtrack/cinematic tags also describe games and unrelated albums.
+    mask = album.str.contains(SCREEN_ALBUM_RE, na=False) | genre.str.contains(
+        r"film score|movie soundtrack|film soundtrack|television score|tv score|anime soundtrack",
+        case=False, regex=True, na=False)
+    mask &= ~album.str.contains(r"(?:video game|game soundtrack|game score)", case=False, regex=True, na=False)
     cand = _rank_frame(catalog[mask].copy())
     for _, r in cand.iterrows():
         if not _claim_selection(r, used): continue
         row=_catalog_row_to_song(r, extra={"association_method":"album_or_genre_soundtrack_metadata"})
-        row.screen_work=_screen_work_from_album(str(r.album_name or ""))
+        row.screen_work=(_screen_work_from_album(str(r.album_name or ""))
+                         if SCREEN_ALBUM_RE.search(str(r.album_name or "")) else None)
         selected.append(row)
         if len(selected)>=10_000: break
     if len(selected) < 10_000:
@@ -1522,6 +1486,12 @@ ANILIST_QUERY = r'''query ($page: Int = 1, $perPage: Int = 50) {
 }'''
 
 
+class SourceHTTPError(RuntimeError):
+    def __init__(self, status_code: int, message: str):
+        self.status_code=status_code
+        super().__init__(message)
+
+
 def _http_json(client: httpx.Client, method: str, url: str, **kwargs: Any) -> Any:
     last=None
     for attempt in range(8):
@@ -1539,7 +1509,8 @@ def _http_json(client: httpx.Client, method: str, url: str, **kwargs: Any) -> An
             r.raise_for_status(); return r.json()
         except httpx.HTTPStatusError as exc:
             body=(exc.response.text or "").strip().replace("\n", " ")[:800]
-            last=RuntimeError(f"HTTP {exc.response.status_code}: {body or exc}")
+            # Do not copy request URLs containing API keys into committed reports.
+            last=SourceHTTPError(exc.response.status_code,f"HTTP {exc.response.status_code}: {body or 'empty error response'}")
             # Authentication/permission/not-found errors are not transient. Retrying them only
             # wastes build time and can aggravate source-side rate controls.
             _progress(f"HTTP error {method} {url} status={exc.response.status_code} attempt={attempt+1}/8")
@@ -1555,6 +1526,8 @@ def _http_json(client: httpx.Client, method: str, url: str, **kwargs: Any) -> An
             wait=min(60,2**attempt)
             _progress(f"HTTP exception {method} {url} attempt={attempt+1}/8 {type(exc).__name__}: {exc}; wait={wait}s")
             time.sleep(wait)
+    if isinstance(last,SourceHTTPError):
+        raise last
     raise RuntimeError(f"{method} {url} failed: {last}")
 
 
@@ -1607,17 +1580,30 @@ def fetch_animethemes_all(status: BuildStatus) -> tuple[dict[int,list[dict]],dic
     """
     by_anilist=defaultdict(list); by_mal=defaultdict(list); page=1
     _progress("AnimeThemes START full index fetch")
-    endpoints=(ANIMETHEMES_API, "https://api.animethemes.moe/api/anime")
+    from .listenbrainz import atomic_json
+    cache_dir = CACHE / "animethemes_pages"
+    endpoints=(ANIMETHEMES_API,)
     with httpx.Client(timeout=90,follow_redirects=True,headers={"User-Agent":"BeatHit-Dataset/1.0"}) as c:
         while True:
             params={"include":"animethemes.song.artists,resources","page[size]":"100","page[number]":str(page)}
             d=None; failures=[]
-            for endpoint in endpoints:
+            cache_path=cache_dir/f"{page:04d}.json"
+            try:
+                cached=json.loads(cache_path.read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                cached={}
+            if time.time()-cached.get("checked_at",0)<7*86400:
+                d=cached.get("data")
+            for endpoint in (() if d is not None else endpoints):
                 try:
                     d=_http_json(c,"GET",endpoint,params=params)
+                    atomic_json(cache_path,{"checked_at":time.time(),"data":d})
                     break
                 except Exception as exc:
                     failures.append(f"{endpoint}: {exc}")
+            if d is None and cached.get("data"):
+                d=cached["data"]
+                status.warnings.append(f"AnimeThemes page {page}: reusing stale successful page")
             if d is None:
                 status.warnings.append(f"AnimeThemes page {page}: {'; '.join(failures)}"); break
             items=d.get("anime") or d.get("data") or []
@@ -1646,7 +1632,7 @@ def fetch_animethemes_all(status: BuildStatus) -> tuple[dict[int,list[dict]],dic
                 page+=1
             elif meta.get("current_page") and meta.get("last_page") and meta["current_page"]<meta["last_page"]:
                 page+=1
-            elif len(items)>=100:
+            elif "next" not in links and len(items)>=100:
                 page+=1
             else: break
             if page>1000: break
@@ -1848,9 +1834,9 @@ def _anime_row_from_candidates(
         title=_clean_theme_component(source_candidate.get("title"))
         artists=[_clean_theme_component(x) for x in (source_candidate.get("artists") or [])]
         artists=[x for x in artists if x]
-        if not title:
+        if not title or not artists:
             continue
-        key=(norm(title),norm(artists[0] if artists else ""))
+        key=(norm(title),norm(artists[0]))
         if key in seen:
             continue
         seen.add(key)
@@ -1948,13 +1934,15 @@ def _anime_row_from_candidates(
 def _jikan_theme_candidates(
     mal_id: int,
     client: httpx.Client,
-    cache: dict[str,list[dict]],
+    cache: dict[str,Any],
     status: BuildStatus,
 ) -> tuple[list[dict],bool,bool]:
     key=str(mal_id)
-    if key in cache:
-        _progress(f"Jikan MAL={mal_id} cache_hit themes={len(cache[key])}")
-        return cache[key],True,False
+    entry=cache.get(key)
+    if isinstance(entry,list) and entry:
+        return entry,True,False  # migrate successful legacy entries
+    if isinstance(entry,dict) and time.time()-entry.get("checked_at",0)<30*86400:
+        return entry.get("themes",[]),True,False
 
     url=f"{JIKAN_API}/anime/{mal_id}/themes"
     for attempt in (1,2):
@@ -1967,7 +1955,6 @@ def _jikan_theme_candidates(
                     f"Jikan themes MAL {mal_id}: HTTP 429 rate limited; skipping optional fallback"
                 )
                 _progress(f"Jikan MAL={mal_id} RATE_LIMITED; no retry in this build")
-                cache[key]=[]
                 return [],False,True
 
             if 500 <= r.status_code < 600:
@@ -1975,7 +1962,6 @@ def _jikan_theme_candidates(
                 if attempt==1:
                     time.sleep(1.0)
                     continue
-                cache[key]=[]
                 status.warnings.append(f"Jikan themes MAL {mal_id}: HTTP {r.status_code} after 2 attempts")
                 return [],False,True
 
@@ -1994,12 +1980,11 @@ def _jikan_theme_candidates(
                             "sequence":seq if len(parsed)==1 else (seq*100+sub_seq),
                             "animethemes_url":f"https://myanimelist.net/anime/{mal_id}",
                         })
-            cache[key]=out
+            cache[key]={"themes":out,"checked_at":time.time()}
             _progress(f"Jikan MAL={mal_id} DONE themes={len(out)}")
             time.sleep(1.05)
             return out,True,True
         except httpx.HTTPStatusError as exc:
-            cache[key]=[]
             status.warnings.append(
                 f"Jikan themes MAL {mal_id}: HTTP {exc.response.status_code}; no further retry"
             )
@@ -2010,12 +1995,51 @@ def _jikan_theme_candidates(
             if attempt==1:
                 time.sleep(1.0)
                 continue
-            cache[key]=[]
             status.warnings.append(f"Jikan themes MAL {mal_id}: {type(exc).__name__}: {exc}")
             return [],False,True
 
-    cache[key]=[]
     return [],False,True
+
+
+def _jikan_ranked_anime(status: BuildStatus) -> list[dict]:
+    """Current popularity index supplements the old MAL snapshot when AniList fails."""
+    from .listenbrainz import atomic_json, request_json
+    out=[]
+    page_budget=max(0,int(os.getenv("BEATHIT_JIKAN_INDEX_PAGES","240")))
+    errors=[]
+    with httpx.Client(timeout=30,follow_redirects=True) as client:
+        for page in range(1,page_budget+1):
+            path=CACHE/"jikan_index"/f"{page:04d}.json"
+            try:
+                cached=json.loads(path.read_text(encoding="utf-8"))
+            except (OSError,ValueError):
+                cached={}
+            payload=cached.get("data")
+            if not payload or time.time()-cached.get("checked_at",0)>30*86400:
+                try:
+                    payload=request_json(client,"GET",f"{JIKAN_API}/top/anime",
+                        params={"filter":"bypopularity","sfw":"true","limit":25,"page":page})
+                    if not isinstance(payload.get("data"),list):
+                        raise ValueError("Jikan popularity page lacks data")
+                    atomic_json(path,{"checked_at":time.time(),"data":payload})
+                    time.sleep(1.05)
+                except (httpx.HTTPError,ValueError) as exc:
+                    errors.append(f"page {page}: {exc}")
+                    if not payload:
+                        break
+            for item in payload.get("data",[]):
+                mid=_safe_int(item.get("mal_id"))
+                if not mid:
+                    continue
+                out.append({"id":None,"idMal":mid,
+                    "title":{"english":item.get("title_english"),"romaji":item.get("title"),"native":item.get("title_japanese")},
+                    "popularity":item.get("members") or 0,
+                    "_popularity_source":"myanimelist_members_snapshot",
+                    "_popularity_source_url":item.get("url") or f"https://myanimelist.net/anime/{mid}"})
+            if not (payload.get("pagination") or {}).get("has_next_page"):
+                break
+    status.sources["jikan_popularity_index"]={"rows":len(out),"page_budget":page_budget,"errors":errors,"ok":bool(out)}
+    return out
 
 
 def build_anime(catalog: pd.DataFrame, sources:dict[str,Path], status:BuildStatus) -> list[SongRow]:
@@ -2026,7 +2050,6 @@ def build_anime(catalog: pd.DataFrame, sources:dict[str,Path], status:BuildStatu
     output_path=DATA/"anime"/"anime_songs.csv"
     partial_path=DATA/"anime"/"anime_songs.partial.csv"
     output_path.parent.mkdir(parents=True,exist_ok=True)
-    output_path.unlink(missing_ok=True)
     partial_path.unlink(missing_ok=True)
 
     _progress(
@@ -2036,6 +2059,8 @@ def build_anime(catalog: pd.DataFrame, sources:dict[str,Path], status:BuildStatu
 
     mal_path=sources.get("mal_theme_fallback")
     anime=fetch_anilist_top(live_anilist_limit,status)
+    if not anime:
+        anime=_jikan_ranked_anime(status)
 
     mal_ranked=_load_mal_anime_rank_fallback(mal_path,candidate_limit)
     seen_mal={_safe_int(a.get("idMal")) for a in anime if _safe_int(a.get("idMal"))}
@@ -2066,6 +2091,14 @@ def build_anime(catalog: pd.DataFrame, sources:dict[str,Path], status:BuildStatu
     by_al,by_mal=fetch_animethemes_all(status)
     _progress("Anime LOCAL PASS loading MAL theme snapshot")
     fallback=_load_mal_theme_fallback(mal_path)
+    if output_path.exists():
+        for old in read_rows(output_path):
+            mid=_safe_int((old.extra or {}).get("mal_id"))
+            if mid and old.title and old.main_artist and old.main_artist != "Unknown verified theme artist":
+                fallback.setdefault(mid,[]).append({"title":old.title,"artists":[old.main_artist],
+                    "type":(old.extra or {}).get("theme_type"),
+                    "sequence":(old.extra or {}).get("theme_sequence"),
+                    "animethemes_url":(old.extra or {}).get("theme_metadata_url") or old.source_url})
     title_map,exact=_catalog_match_index(catalog)
 
     rows=[]
@@ -2087,8 +2120,7 @@ def build_anime(catalog: pd.DataFrame, sources:dict[str,Path], status:BuildStatu
             )[:target]
             for i,r in enumerate(snapshot,1):
                 r.rank=i
-            write_rows(snapshot,output_path)
-            _progress(f"Anime SNAPSHOT canonical_rows={len(snapshot)} partial_rows={n}")
+            _progress(f"Anime CHECKPOINT partial_rows={n}")
 
     # PASS 1: no per-anime network calls.
     for anime_rank,a in enumerate(anime,1):
@@ -2097,8 +2129,8 @@ def build_anime(catalog: pd.DataFrame, sources:dict[str,Path], status:BuildStatu
         mid=_safe_int(a.get("idMal"))
         candidates=(
             list(by_al.get(aid,[]))
-            or list(by_mal.get(mid,[]))
-            or list(fallback.get(mid,[]))
+            + list(by_mal.get(mid,[]))
+            + list(fallback.get(mid,[]))
         )
         if not candidates:
             unresolved.append((anime_rank,a))
@@ -2113,6 +2145,8 @@ def build_anime(catalog: pd.DataFrame, sources:dict[str,Path], status:BuildStatu
             )
             if row is not None:
                 persist(row,"LOCAL")
+            else:
+                unresolved.append((anime_rank,a))
 
         if anime_rank==1 or anime_rank%100==0:
             _progress(
@@ -2145,8 +2179,8 @@ def build_anime(catalog: pd.DataFrame, sources:dict[str,Path], status:BuildStatu
     except Exception:
         jikan_cache={}
 
-    jikan_query_budget=max(0,_safe_int(os.getenv("BEATHIT_JIKAN_MAX_QUERIES")) or 50)
-    jikan_time_budget=max(0,_safe_int(os.getenv("BEATHIT_JIKAN_MAX_SECONDS")) or 120)
+    jikan_query_budget=max(0,int(os.getenv("BEATHIT_JIKAN_MAX_QUERIES","1000")))
+    jikan_time_budget=max(0,int(os.getenv("BEATHIT_JIKAN_MAX_SECONDS","1800")))
     jikan_failure_breaker=max(1,_safe_int(os.getenv("BEATHIT_JIKAN_FAILURE_BREAKER")) or 4)
 
     jikan_queries=0
@@ -2167,26 +2201,30 @@ def build_anime(catalog: pd.DataFrame, sources:dict[str,Path], status:BuildStatu
         headers={"User-Agent":"BeatHit-Dataset/1.0"},
     ) as jikan_client:
         for anime_rank,a in unresolved:
-            if jikan_queries>=jikan_query_budget:
-                jikan_stop_reason="query_budget_exhausted"
-                break
-            if time.monotonic()>=deadline:
-                jikan_stop_reason="time_budget_exhausted"
-                break
-            if consecutive_failures>=jikan_failure_breaker:
-                jikan_stop_reason=f"circuit_breaker_after_{consecutive_failures}_consecutive_failures"
-                break
-
             mid=_safe_int(a.get("idMal"))
             if not mid:
                 continue
+            entry=jikan_cache.get(str(mid))
+            cached_ok=(isinstance(entry,list) and bool(entry)) or (
+                isinstance(entry,dict) and time.time()-entry.get("checked_at",0)<30*86400)
+            if not cached_ok:
+                if jikan_queries>=jikan_query_budget:
+                    jikan_stop_reason="query_budget_exhausted"
+                    continue
+                if time.monotonic()>=deadline:
+                    jikan_stop_reason="time_budget_exhausted"
+                    continue
+                if consecutive_failures>=jikan_failure_breaker:
+                    jikan_stop_reason=f"circuit_breaker_after_{consecutive_failures}_consecutive_failures"
+                    continue
 
-            was_cached=str(mid) in jikan_cache
             candidates,request_ok,network_made=_jikan_theme_candidates(
                 mid,jikan_client,jikan_cache,status
             )
-            if network_made and not was_cached:
+            if network_made:
                 jikan_queries+=1
+                from .listenbrainz import atomic_json
+                atomic_json(cache_path,jikan_cache)
 
             if not request_ok:
                 consecutive_failures+=1
@@ -2217,7 +2255,8 @@ def build_anime(catalog: pd.DataFrame, sources:dict[str,Path], status:BuildStatu
                 break
 
     cache_path.parent.mkdir(parents=True,exist_ok=True)
-    cache_path.write_text(json.dumps(jikan_cache,ensure_ascii=False),encoding="utf-8")
+    from .listenbrainz import atomic_json
+    atomic_json(cache_path,jikan_cache)
 
     if jikan_stop_reason is None:
         jikan_stop_reason="unresolved_candidates_exhausted"
@@ -2604,7 +2643,7 @@ def _youtube_views_official(ids:list[str],status:BuildStatus)->tuple[dict[str,in
         temp_path=cache_path.with_suffix(".tmp")
         temp_path.write_text(
             json.dumps(
-                {"schema_version":1,"updated_at":now,"videos":entries},
+                {"schema_version":2,"updated_at":now,"videos":entries},
                 ensure_ascii=False,
                 separators=(",",":"),
             )+"\n",
@@ -2616,6 +2655,7 @@ def _youtube_views_official(ids:list[str],status:BuildStatus)->tuple[dict[str,in
     pending=[]
     fresh_hits=0
     fresh_missing=0
+    unavailable=set()
     for video_id in ids:
         entry=entries.get(video_id) if isinstance(entries.get(video_id),dict) else {}
         views=_safe_int(entry.get("views"))
@@ -2623,11 +2663,12 @@ def _youtube_views_official(ids:list[str],status:BuildStatus)->tuple[dict[str,in
         if views is not None:
             # Keep the last official value as a resilience fallback even when refresh fails.
             out[video_id]=views
-        if checked_at and now-checked_at<=ttl_seconds:
-            if views is None:
-                fresh_missing+=1
-            else:
-                fresh_hits+=1
+        if checked_at and now-checked_at<=ttl_seconds and views is not None:
+            fresh_hits+=1
+            continue
+        if entry.get("availability")=="unavailable" and now-checked_at<=7*86400:
+            unavailable.add(video_id)
+            fresh_missing+=1
             continue
         pending.append(video_id)
 
@@ -2635,21 +2676,23 @@ def _youtube_views_official(ids:list[str],status:BuildStatus)->tuple[dict[str,in
         status.warnings.append(
             "Vocaloid build has no YOUTUBE_API_KEY; reusing cached official API values only."
         )
-        unresolved=len([video_id for video_id in ids if video_id not in out])
+        unresolved=len([video_id for video_id in ids if video_id not in out and video_id not in unavailable])
         status.sources["vocaloid_youtube_view_counts"]={
             "source":"cached YouTube Data API v3 videos.list(part=statistics)",
             "requested":len(ids),
             "resolved":len(out),
             "unresolved":unresolved,
+            "unavailable":len(unavailable),
             "fresh_cache_hits":fresh_hits,
             "live_requested":0,
             "cache":str(cache_path.relative_to(ROOT)),
-            "ok":False,
+            "ok":unresolved==0 and not pending,
             "error":"missing YOUTUBE_API_KEY",
         }
         return out,unresolved
 
     failed_batches=0
+    live_requested=0
     quota_stopped=False
     with httpx.Client(
         timeout=60,
@@ -2663,6 +2706,7 @@ def _youtube_views_official(ids:list[str],status:BuildStatus)->tuple[dict[str,in
     ) as client:
         for start in range(0,len(pending),50):
             batch=pending[start:start+50]
+            live_requested+=len(batch)
             data=None
             last_error=None
             for attempt in range(3):
@@ -2680,6 +2724,8 @@ def _youtube_views_official(ids:list[str],status:BuildStatus)->tuple[dict[str,in
                     break
                 except Exception as exc:
                     last_error=exc
+                    if isinstance(exc,SourceHTTPError) and exc.status_code in {401,403}:
+                        break
                     time.sleep(1.0*(attempt+1))
             if data is None:
                 failed_batches+=1
@@ -2698,8 +2744,14 @@ def _youtube_views_official(ids:list[str],status:BuildStatus)->tuple[dict[str,in
                         "and stopped so the next run resumes at the first unresolved video."
                     )
                     break
+                if isinstance(last_error,SourceHTTPError) and last_error.status_code in {401,403}:
+                    break
                 continue
 
+            if not isinstance(data.get("items"),list):
+                failed_batches+=1
+                status.warnings.append("YouTube statistics response lacks items; batch remains retryable")
+                continue
             resolved_batch={}
             for item in data.get("items",[]) or []:
                 video_id=str(item.get("id") or "")
@@ -2707,9 +2759,13 @@ def _youtube_views_official(ids:list[str],status:BuildStatus)->tuple[dict[str,in
                 if video_id and views is not None:
                     resolved_batch[video_id]=views
 
+            returned_ids={str(item.get("id") or "") for item in data.get("items",[])}
             for video_id in batch:
                 views=resolved_batch.get(video_id)
-                entries[video_id]={"views":views,"checked_at":now}
+                availability="available" if views is not None else ("unavailable" if video_id not in returned_ids else "unresolved")
+                entries[video_id]={"views":views,"checked_at":now,"availability":availability}
+                if availability=="unavailable":
+                    unavailable.add(video_id)
                 if views is None:
                     out.pop(video_id,None)
                 else:
@@ -2724,21 +2780,23 @@ def _youtube_views_official(ids:list[str],status:BuildStatus)->tuple[dict[str,in
             )
 
     save_cache()
-    unresolved=len([video_id for video_id in ids if video_id not in out])
+    unresolved=len([video_id for video_id in ids if video_id not in out and video_id not in unavailable])
     status.sources["vocaloid_youtube_view_counts"]={
         "source":"YouTube Data API v3 videos.list(part=statistics) with persistent official-value cache",
         "requested":len(ids),
         "resolved":len(out),
         "unresolved":unresolved,
+        "unavailable":len(unavailable),
         "fresh_cache_hits":fresh_hits,
         "fresh_cached_missing":fresh_missing,
-        "live_requested":len(pending),
+        "live_requested":live_requested,
         "failed_batches":failed_batches,
         "quota_stopped":quota_stopped,
         "cache_days":cache_days,
         "cache":str(cache_path.relative_to(ROOT)),
         "ok":bool(out) and unresolved==0 and failed_batches==0,
         "threshold":None,
+        "unavailable_video_ids":sorted(unavailable),
         "note":"Only official YouTube API values are cached; no third-party or Spotify fallback.",
     }
     return out,unresolved
@@ -2911,12 +2969,8 @@ def build_vocaloid(catalog:pd.DataFrame,status:BuildStatus)->list[SongRow]:
             },
         )
         rows.append(row)
-        append_row(row,partial_path)
-        _progress(
-            f"Vocaloid INCLUDE provisional={len(rows)} audit_total_views={total_views} "
-            f"best_upload_views={best_views} title={title!r} artist={main_artist!r} "
-            f"video={best_pv['video_id']}"
-        )
+        if len(rows)%5000==0:
+            _progress(f"Vocaloid finalized_candidates={len(rows)}; official API and VocaDB checkpoints saved")
 
     # VocaDB song IDs, rather than title/artist text, define entries in this corpus.
     # This retains legitimately distinct originals that share a title or producer.
@@ -2927,9 +2981,9 @@ def build_vocaloid(catalog:pd.DataFrame,status:BuildStatus)->list[SongRow]:
         if vocadb_id is None:
             without_vocadb_id.append(row)
             continue
-        current=by_vocadb_id.get(str(vocadb_id))
-        if current is None or int(row.view_count or 0)>int(current.view_count or 0):
-            by_vocadb_id[str(vocadb_id)]=row
+        # Current source evidence follows preserved rows and wins even if a view
+        # count was corrected downward. Keeping only maxima makes stale data permanent.
+        by_vocadb_id[str(vocadb_id)]=row
     rows=list(by_vocadb_id.values())+dedupe(without_vocadb_id)
     rows.sort(key=lambda row:int(row.view_count or row.metric_value),reverse=True)
     for rank,row in enumerate(rows,1):
@@ -2945,7 +2999,7 @@ def build_vocaloid(catalog:pd.DataFrame,status:BuildStatus)->list[SongRow]:
         old_threshold_path.unlink(missing_ok=True)
     partial_path.unlink(missing_ok=True)
 
-    complete=bool(rows and vocadb_exhaustive and unresolved_video_ids==0 and os.getenv("YOUTUBE_API_KEY","").strip())
+    complete=bool(rows and vocadb_exhaustive and unresolved_video_ids==0 and (status.sources.get("vocaloid_youtube_view_counts") or {}).get("ok"))
     status.datasets["vocaloid"]=DatasetStatus(
         target="every VocaDB Original voice-synth song with a resolved official Original YouTube PV, ordered by views",
         rows=len(rows),
@@ -2976,24 +3030,48 @@ def _holodex_headers()->dict[str,str]:
 
 
 def _fetch_holodex_topic(topic:str,status:BuildStatus,max_items:int=50_000)->list[dict]:
-    out=[];offset=0;limit=50
-    _progress(f"Holodex {topic} START max_items={max_items}")
-    with httpx.Client(timeout=90,follow_redirects=True,headers=_holodex_headers()) as c:
-        while len(out)<max_items:
+    from .listenbrainz import atomic_json
+    path=CACHE/f"holodex_{topic}.json"
+    try:
+        cached=json.loads(path.read_text(encoding="utf-8"))
+    except (OSError,ValueError):
+        cached={}
+    videos={v["id"]:v for v in cached.get("videos",[]) if v.get("id")}
+    complete=bool(cached.get("complete"))
+    stats={"complete":complete,"cached_rows":len(videos),"errors":[]}
+    status.sources[f"holodex_{topic}"]=stats
+    if complete and time.time()-cached.get("checked_at",0)<7*86400:
+        return list(videos.values())
+    # Resume incomplete scans; overlap protects against offset shifts as new uploads arrive.
+    offset=max(0,int(cached.get("next_offset",0))-100) if not complete else 0
+    complete=False
+    received=0
+    limit=50
+    with httpx.Client(timeout=60,follow_redirects=True,headers=_holodex_headers()) as client:
+        while received<max_items:
             params={"topic":topic,"status":"past","limit":limit,"offset":offset,"paginated":"1","include":"channel_stats,mentions"}
-            try:d=_http_json(c,"GET",f"{HOLODEX_API}/videos",params=params)
-            except Exception as exc:
-                status.warnings.append(f"Holodex {topic}: {exc}");break
-            items=d.get("items",[]) if isinstance(d,dict) else d
-            if not items:break
-            out.extend(items);offset+=len(items)
-            total=_safe_int(d.get("total")) if isinstance(d,dict) else None
-            _progress(f"Holodex {topic} batch={len(items)} loaded={len(out)} api_total={total}")
-            if total is not None and offset>=total:break
-            if len(items)<limit:break
-            time.sleep(.15)
-    _progress(f"Holodex {topic} DONE loaded={len(out[:max_items])}")
-    return out[:max_items]
+            try:
+                payload=_http_json(client,"GET",f"{HOLODEX_API}/videos",params=params)
+                items=payload.get("items",[]) if isinstance(payload,dict) else payload
+                if not isinstance(items,list):
+                    raise ValueError("Holodex response lacks video list")
+            except (httpx.HTTPError,ValueError,RuntimeError) as exc:
+                stats["errors"].append(str(exc))
+                status.warnings.append(f"Holodex {topic}: {exc}; retaining cached videos")
+                break
+            for video in items:
+                if video.get("id"):
+                    videos[video["id"]]=video
+            offset+=len(items);received+=len(items)
+            total=_safe_int(payload.get("total")) if isinstance(payload,dict) else None
+            complete=len(items)<limit or (total is not None and offset>=total)
+            atomic_json(path,{"videos":list(videos.values()),"next_offset":offset,
+                              "complete":complete,"checked_at":time.time()})
+            if complete:
+                break
+            time.sleep(.2)
+    stats.update(complete=complete,rows=len(videos),fetched=received,next_offset=offset)
+    return list(videos.values())
 
 
 def _youtube_views(ids:list[str],status:BuildStatus)->dict[str,int]:
@@ -3004,7 +3082,26 @@ def _youtube_views(ids:list[str],status:BuildStatus)->dict[str,int]:
     is not confused with an official API response.
     """
     ids=list(dict.fromkeys(x for x in ids if x))
+    from .listenbrainz import atomic_json
+    path=CACHE/"vtuber_youtube_views.json"
+    try:
+        cached=json.loads(path.read_text(encoding="utf-8"))
+    except (OSError,ValueError):
+        cached={}
     key=os.getenv("YOUTUBE_API_KEY","").strip();out={}
+    now=time.time()
+    original_ids=list(ids)
+    for vid in ids:
+        entry=cached.get(vid) or {}
+        if now-entry.get("checked_at",0)<86400 and entry.get("views") is not None:
+            if not key or entry.get("source")=="YouTube Data API v3":
+                out[vid]=int(entry["views"])
+    ids=[vid for vid in ids if vid not in out]
+    def save(source):
+        for vid,views in out.items():
+            if vid in ids:
+                cached[vid]={"views":views,"checked_at":now,"source":source}
+        atomic_json(path,cached)
     _progress(f"YouTube views START ids={len(ids)} official_api={'yes' if key else 'no'}")
     if key:
         with httpx.Client(timeout=60) as c:
@@ -3014,12 +3111,14 @@ def _youtube_views(ids:list[str],status:BuildStatus)->dict[str,int]:
                     for x in d.get("items",[]):
                         v=_safe_int((x.get("statistics") or {}).get("viewCount"))
                         if v is not None:out[x["id"]]=v
-                    _progress(f"YouTube views batch_start={i} batch_size={len(ids[i:i+50])} resolved={len(out)}/{len(ids)}")
+                    save("YouTube Data API v3")
                 except Exception as exc:
                     status.warnings.append(f"YouTube API batch {i}: {exc}")
-                    _progress(f"YouTube views batch_start={i} ERROR {type(exc).__name__}: {exc}")
-        status.sources["youtube_view_counts"]={"source":"YouTube Data API v3","requested":len(ids),"resolved":len(out),"ok":bool(out)}
+                    if isinstance(exc,SourceHTTPError) and exc.status_code in {401,403}:
+                        break
+        status.sources["youtube_view_counts"]={"source":"YouTube Data API v3","requested":len(original_ids),"resolved":len(out),"ok":bool(out)}
         _progress(f"YouTube views DONE resolved={len(out)}/{len(ids)}")
+        save("YouTube Data API v3")
         return out
 
     # High-throughput no-key fallback. RYD returns a cached viewCount field obtained for the
@@ -3041,7 +3140,7 @@ def _youtube_views(ids:list[str],status:BuildStatus)->dict[str,int]:
                     vid,v=f.result()
                     if v is not None:out[vid]=v
             status.sources["youtube_view_counts"]={"source":"Return YouTube Dislike API viewCount fallback","url":RYD_API,
-                "requested":len(ids),"resolved":len(out),"ok":bool(out),"note":"third-party cached viewCount; official YouTube API preferred when key supplied"}
+                "requested":len(original_ids),"resolved":len(out),"ok":bool(out),"note":"third-party cached viewCount; official YouTube API preferred when key supplied"}
         except Exception as exc:
             status.warnings.append(f"Return YouTube Dislike view fallback: {exc}")
 
@@ -3062,13 +3161,18 @@ def _youtube_views(ids:list[str],status:BuildStatus)->dict[str,int]:
         except Exception as exc:status.warnings.append(f"yt-dlp YouTube view fallback: {exc}")
     elif missing and not out:
         status.warnings.append("No official YouTube API key and no view-count fallback resolved; VTuber rows use Spotify counts/proxies where available.")
+    save("Return YouTube Dislike API cached viewCount")
     return out
+
+
+VTUBER_COVER_MARKER = re.compile(r"(?:\(\s*cover\s*\)|[【\[][^】\]]*cover[^】\]]*[】\]]|\bcovered by\b|歌ってみた)",re.I)
 
 
 def _clean_vtuber_title(title:str)->str:
     s=re.sub(r"[【\[].*?(?:cover|original|歌ってみた|オリジナル).*?[】\]]","",title,flags=re.I)
     s=re.sub(r"\s*[|｜].*$","",s).strip()
-    return s or title.strip()
+    s=re.sub(r"\s*\((?:original song|original music|cover|オリジナル曲)(?:\s*[:：].*)?\)\s*$","",s,flags=re.I)
+    return s.strip() or title.strip()
 
 
 
@@ -3119,15 +3223,22 @@ def build_vtuber(catalog:pd.DataFrame,status:BuildStatus,*,original:bool)->list[
     partial_path.parent.mkdir(parents=True,exist_ok=True)
     partial_path.unlink(missing_ok=True)
     _progress(f"VTuber {topic} START target={target} partial={partial_path}")
-    videos=_fetch_holodex_topic(topic,status,max_items=60_000)
+    from .hololive import load_roster, credited_members
+    roster=load_roster(DATA)
+    videos=_fetch_holodex_topic(topic,status,max_items=int(os.getenv("BEATHIT_HOLODEX_SCAN_BUDGET","100000")))
     _progress(f"VTuber {topic} candidates={len(videos)}")
     if not videos:
-        rows=_fetch_holostats_rows(original=original,status=status)
+        existing=DATA/folder/filename
+        rows=read_rows(existing) if existing.exists() else []
+        rows.extend(_fetch_holostats_rows(original=original,status=status))
         for pos,row in enumerate(rows,1):
             append_row(row,partial_path)
             _progress(f"VTuber {topic} WRITE fallback={pos} title={row.title!r} artist={row.main_artist!r}")
+        if original:
+            rows=[row for row in rows if not VTUBER_COVER_MARKER.search(row.title)]
         rows=dedupe(rows)
         rows.sort(key=lambda r:r.metric_value,reverse=True)
+        write_rows(rows,CACHE/(folder+"_candidates.jsonl.gz"))
         for i,r in enumerate(rows[:target],1):r.rank=i
         rows=rows[:target]
     else:
@@ -3136,6 +3247,10 @@ def build_vtuber(catalog:pd.DataFrame,status:BuildStatus,*,original:bool)->list[
         title_map,exact=_catalog_match_index(catalog)
         rows=[]
         for pos,v in enumerate(videos,1):
+            if original and VTUBER_COVER_MARKER.search(str(v.get("title") or "")):
+                rejected=status.sources.setdefault("vtuber_original_topic_conflicts",{"videos":[]})
+                rejected["videos"].append({"id":v.get("id"),"title":v.get("title")})
+                continue
             ch={}
             if isinstance(v.get("channel_stats"),dict): ch.update(v.get("channel_stats") or {})
             if isinstance(v.get("channel"),dict): ch.update(v.get("channel") or {})
@@ -3147,14 +3262,26 @@ def build_vtuber(catalog:pd.DataFrame,status:BuildStatus,*,original:bool)->list[
                 if not isinstance(m,dict): continue
                 nm=m.get("english_name") or m.get("name")
                 if nm: mention_names.append(str(nm))
-            artist=(mention_names[0] if len(mention_names)==1 else None) or ch.get("english_name") or ch.get("name") or v.get("channel_name") or v.get("channel_id") or "Unknown VTuber"
+            named_mentions=[name for name in mention_names if norm(name) and norm(name) in norm(str(v.get("title") or ""))]
+            artist=(named_mentions[0] if len(named_mentions)==1 else None) or ch.get("english_name") or ch.get("name") or v.get("channel_name") or v.get("channel_id") or "Unknown VTuber"
+            member_ids=credited_members(v,roster)
+            if member_ids:
+                artist=roster[member_ids[0]]["name"]
             title=_clean_vtuber_title(str(v.get("title") or "Untitled"))
+            for separator in (" - "," / ","／"):
+                if separator in title and member_ids:
+                    left,right=title.rsplit(separator,1)
+                    if any(norm(alias) and norm(alias) in norm(right) for mid in member_ids for alias in roster[mid]["aliases"]):
+                        title=left.strip()
             view=views.get(v.get("id"))
             matched,method=_match_song(title,[artist],catalog,title_map,exact)
+            if matched is not None and (norm(str(matched.get("title") or "")),norm(str(matched.get("main_artist") or ""))) != (norm(title),norm(artist)):
+                matched=None
+            trusted_streams=_safe_int(matched.get("trusted_cumulative_streams")) if matched is not None else None
             if view is not None:
                 metric=("youtube_views",float(view),"views")
-            elif matched is not None and _safe_float(matched.get("streams")) is not None:
-                metric=("spotify_streams",float(matched.streams),"streams")
+            elif trusted_streams is not None:
+                metric=("spotify_streams",float(trusted_streams),"streams")
             else:
                 subs=_safe_int(ch.get("subscriber_count") or ch.get("subscribers") or ch.get("subscriberCount"))
                 if subs is not None:
@@ -3186,10 +3313,27 @@ def build_vtuber(catalog:pd.DataFrame,status:BuildStatus,*,original:bool)->list[
                     release_date=(str(v.get("published_at"))[:10] if v.get("published_at") else None), release_year=_parse_year(v.get("published_at")),
                     extra={"holodex_video_id":v.get("id"),"holodex_topic":topic,"mentions":mention_names})
             row.vtuber=artist;row.is_original=original
+            if view is not None:
+                row.source_url=f"https://www.youtube.com/watch?v={v.get('id')}"
+            if trusted_streams is not None:
+                trusted_url=str(matched.get("trusted_streams_source_url") or "")
+                row.extra["hololive_spotify_source_url"]=trusted_url
+                if metric[0]=="spotify_streams" and trusted_url:
+                    row.source_url=trusted_url
+            row.extra.update({"hololive_member_ids":member_ids,"holodex_channel_id":ch.get("id") or v.get("channel_id"),
+                              "hololive_trusted_spotify_streams":trusted_streams,"hololive_youtube_views":view})
+            if member_ids:
+                row.featured_artists=list(dict.fromkeys([*row.featured_artists,*[roster[mid]["name"] for mid in member_ids[1:]]]))
             rows.append(row)
             append_row(row,partial_path)
             if pos == 1 or pos % 25 == 0:
                 _progress(f"VTuber {topic} WRITE candidate={pos}/{len(videos)} title={row.title!r} artist={row.main_artist!r} metric={row.metric_name}:{row.metric_value}")
+        candidate_path=CACHE/(folder+"_candidates.jsonl.gz")
+        if candidate_path.exists():
+            rows.extend(read_rows(candidate_path))
+        existing=DATA/folder/filename
+        if existing.exists():
+            rows.extend(read_rows(existing))
         # Augment with HoloStats where available; dedupe keeps the stronger row by metric.
         holostats_rows=_fetch_holostats_rows(original=original,status=status)
         for row in holostats_rows:
@@ -3197,8 +3341,11 @@ def build_vtuber(catalog:pd.DataFrame,status:BuildStatus,*,original:bool)->list[
         if holostats_rows:
             _progress(f"VTuber {topic} appended_holostats={len(holostats_rows)}")
         rows.extend(holostats_rows)
+        if original:
+            rows=[row for row in rows if not VTUBER_COVER_MARKER.search(row.title)]
         rows=dedupe(rows)
         rows.sort(key=lambda r:(0 if r.metric_name in {"holodex_source_rank","vtuber_channel_subscribers_proxy"} else 1,r.metric_value),reverse=True)
+        write_rows(rows,CACHE/(folder+"_candidates.jsonl.gz"))
         for i,r in enumerate(rows[:target],1):r.rank=i
         rows=rows[:target]
     write_rows(rows,DATA/folder/filename)
@@ -3320,12 +3467,13 @@ def write_status_json(status: BuildStatus) -> None:
         "spotify_country_lists_complete":countries_complete,
         "all_requested_lists_complete":fixed_complete and vocaloid_complete and kpop_complete and countries_complete,
       },
-      "datasets":{k:{"target":v.target,"materialized_rows":v.rows,"complete":v.complete,"metric_coverage":v.metric_coverage,"notes":v.notes} for k,v in status.datasets.items()},
+      "datasets":{k:{"target":v.target,"materialized_rows":v.rows,"complete":v.complete,"builder_revision":v.builder_revision,"metric_coverage":v.metric_coverage,"notes":v.notes} for k,v in status.datasets.items()},
       "source_status":status.sources,
       "warnings":status.warnings,
       "completion_rule":"Do not treat this repository as fully complete unless completion_summary.all_requested_lists_complete is true and validation/target checks pass. Conditional/finite corpora are never padded.",
     }
-    (ROOT/"STATUS.json").write_text(json.dumps(payload,ensure_ascii=False,indent=2)+"\n",encoding="utf-8")
+    from .listenbrainz import atomic_json
+    atomic_json(ROOT/"STATUS.json",payload)
 
 
 def _previous_dataset_status() -> dict[str, dict[str, Any]]:
@@ -3363,7 +3511,11 @@ def _reuse_complete_output(
         return None
 
     old = previous.get(name) or {}
-    if name in FIXED_TARGETS:
+    if name in BUILDER_REVISIONS and old.get("builder_revision") != BUILDER_REVISIONS[name]:
+        return None
+    if name in {"vtuber_original","vtuber_non_original"}:
+        complete=len(rows)>=FIXED_TARGETS[name] and bool(old.get("complete"))
+    elif name in FIXED_TARGETS:
         complete = len(rows) == FIXED_TARGETS[name]
     else:
         # Conditional corpora cannot be declared complete from row count alone.
@@ -3374,6 +3526,7 @@ def _reuse_complete_output(
     st = status.datasets[name]
     st.rows = len(rows)
     st.complete = True
+    st.builder_revision = old.get("builder_revision")
     st.metric_coverage = dict(_metric_counts(rows))
     st.notes = list(old.get("notes") or st.notes)
     st.notes.append(f"Reused validated materialized output: {path.relative_to(ROOT)}")
@@ -3388,6 +3541,7 @@ def full_build(
     reuse_complete:bool=False,
     force:list[str]|None=None,
 )->BuildStatus:
+    previous = _previous_dataset_status()
     status=BuildStatus(started_at=_now())
     force_set=set(force or [])
     _progress(
@@ -3422,7 +3576,7 @@ def full_build(
     wanted=set(only or ["worldwide","genres","classical","emerging","screen_soundtracks","anime","vocaloid","vtuber_original","vtuber_non_original","video_game_music","kpop","internet_native","electronic_subcultures","alternative_extreme","jazz_depth","children_childhood","unserious","special_required","countries"])
     _progress(f"Selected builders={sorted(wanted)}")
     built:dict[str,list[SongRow]]={}
-    previous = _previous_dataset_status()
+    rebuilt=set()
     def run(name:str, fn):
         if name not in wanted:
             _progress(f"SKIP builder={name}")
@@ -3437,6 +3591,8 @@ def full_build(
         started=time.monotonic()
         try:
             built[name]=fn()
+            rebuilt.add(name)
+            status.datasets[name].builder_revision=BUILDER_REVISIONS.get(name)
             _progress(f"DONE builder={name} rows={len(built[name])} elapsed={time.monotonic()-started:.1f}s")
         except Exception as exc:
             _progress(f"FAIL builder={name} elapsed={time.monotonic()-started:.1f}s {type(exc).__name__}: {exc}")
@@ -3488,7 +3644,7 @@ def full_build(
                     st.rows=len(built[k])
                     st.metric_coverage=dict(_metric_counts(built[k]))
                     if k in FIXED_TARGETS:
-                        st.complete=len(built[k])==FIXED_TARGETS[k]
+                        st.complete=len(built[k])==FIXED_TARGETS[k] and not any("build failed:" in note for note in st.notes)
                 if k=="vocaloid":
                     # Preserve the previous corpus-completeness claim on a partial run by
                     # reading STATUS.json below if available; row count alone cannot prove it.
@@ -3515,6 +3671,15 @@ def full_build(
                 )
         except Exception as exc:
             status.warnings.append(f"existing countries: {exc}")
+    if {"vtuber_original","vtuber_non_original"}.issubset(built) and any(k in rebuilt for k in ("vtuber_original","vtuber_non_original")):
+        from .hololive import finalize, OVERRIDE_VIDEO_ID
+        step=max(1,int(os.getenv("BEATHIT_HOLOLIVE_ROUND_DOWN","100000")))
+        baseline=_youtube_views([OVERRIDE_VIDEO_ID],status).get(OVERRIDE_VIDEO_ID)
+        threshold=(baseline//step)*step if baseline is not None else None
+        finalize(DATA,CACHE,status,built,threshold,{"video_id":OVERRIDE_VIDEO_ID,
+            "source_url":f"https://www.youtube.com/watch?v={OVERRIDE_VIDEO_ID}",
+            "observed_views":baseline,"rounded_down_to":step,"threshold":threshold,
+            "retrieved_at":TODAY,"count_source":"YouTube Data API v3" if os.getenv("YOUTUBE_API_KEY","") else "Return YouTube Dislike cached viewCount"})
     _progress("PHASE megalist START inputs=" + repr({k:len(v) for k,v in built.items()}))
     mega=build_megalist(built,status)
     _progress(f"PHASE megalist DONE unique_rows={len(mega)}")

@@ -7,7 +7,7 @@ DATA=ROOT/'data'
 EXCLUDE={'MANIFEST.json'}
 rows=[]
 for p in sorted(DATA.rglob('*')):
-    if not p.is_file() or p.name in EXCLUDE or p.name.startswith('.') or '/raw/full_build/' in p.as_posix():
+    if not p.is_file() or p.name in EXCLUDE or p.name.startswith('.') or '/raw/full_build/' in p.as_posix() or '.partial.' in p.name:
         continue
     h=hashlib.sha256()
     with p.open('rb') as f:

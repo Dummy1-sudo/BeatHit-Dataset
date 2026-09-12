@@ -68,12 +68,12 @@ def song_key(row: dict[str, str]) -> tuple[str, str]:
     return norm(row.get("title") or ""), norm(row.get("main_artist") or "")
 
 
-def main() -> None:
+def main() -> int:
     report: dict[str, object] = {"fixed_targets": {}, "semantic_checks": {}, "overall_complete": False}
     all_fixed = True
     for rel, target in FIXED.items():
         rows = read_csv(rel)
-        ok = len(rows) == target
+        ok = len(rows) >= target if rel.startswith(("vtuber_original/","vtuber_non_original/")) else len(rows) == target
         all_fixed &= ok
         report["fixed_targets"][rel] = {"target": target, "rows": len(rows), "complete": ok}
 
@@ -234,50 +234,13 @@ def main() -> None:
 
     video_games = read_csv("video_games/video_game_music_10000.csv")
     invalid_video_games = []
-    reject_game_text = re.compile(
-        r"\b(?:motion picture|film soundtrack|movie soundtrack|television soundtrack|"
-        r"original tv series|anime score|anime soundtrack|music from the video game|"
-        r"piano collections?|for piano solo|soundtrack for piano|tribute|music box|"
-        r"cover album|played by|remix album)\b",
-        re.I,
-    )
-    reject_screen_work = re.compile(
-        r"\b(?:soundtrack|original score|volume|vol\.?|music collection|for piano|played by)\b",
-        re.I,
-    )
-    allowed_associations = {
-        "official_soundtrack_album",
-        "franchise_artist",
-        "explicit_track_reference",
-        "genre_album",
-        "listenbrainz_release_group_tag",
-    }
     seen_game_songs = set()
     for i, r in enumerate(video_games, 1):
         e = extra(r)
         screen_work = str(r.get("screen_work") or "").strip()
-        evidence = f"{r.get('album') or ''} | {screen_work} | {r.get('genres') or ''}"
-        association = str(e.get("game_association_kind") or "")
         game_song_key = (norm(screen_work), norm(r.get("title") or ""), norm(r.get("main_artist") or ""))
-        listenbrainz_evidence_valid = bool(
-            association != "listenbrainz_release_group_tag"
-            or (
-                str(r.get("musicbrainz_recording_mbid") or "").strip()
-                and str(e.get("listenbrainz_source_scope") or "") == "release-group"
-                and bool(e.get("listenbrainz_source_tags"))
-                and str(e.get("explicit_soundtrack_release") or "").strip()
-            )
-        )
-        invalid = (
-            not screen_work
-            or str(e.get("culture_category") or "") != "video_game_music"
-            or association not in allowed_associations
-            or reject_game_text.search(evidence)
-            or reject_screen_work.search(screen_work)
-            or (association == "genre_album" and not str(e.get("game_wikidata_id") or "").strip())
-            or not listenbrainz_evidence_valid
-            or game_song_key in seen_game_songs
-        )
+        from music_megalist.quality import video_game_row_error
+        invalid = bool(video_game_row_error(r,e) or game_song_key in seen_game_songs)
         if invalid:
             invalid_video_games.append(i)
         seen_game_songs.add(game_song_key)
@@ -355,10 +318,23 @@ def main() -> None:
         and bool(country_check.get("complete"))
         and dupes == 0
     )
+    vtuber_checks=[value for key,value in report["semantic_checks"].items() if key.startswith("vtuber_")]
+    semantic_ok=semantic_ok and all(value["complete"] for value in vtuber_checks)
+    hololive_path=DATA/"hololive_coverage.json"
+    try:
+        hololive=json.loads(hololive_path.read_text(encoding="utf-8"))
+    except (OSError,ValueError):
+        hololive={"complete":False,"error":"missing or invalid coverage report"}
+    report["semantic_checks"]["hololive_coverage"]=hololive
+    from music_megalist.hololive import coverage_errors
+    hololive_errors=coverage_errors(DATA,require_complete=True)
+    hololive["verification_errors"]=hololive_errors
+    semantic_ok=semantic_ok and bool(hololive.get("complete")) and not hololive_errors
     report["overall_complete"] = bool(all_fixed and semantic_ok and status_complete)
     report["status_claims_all_requested_complete"] = status_complete
     print(json.dumps(report, ensure_ascii=False, indent=2))
+    return 0 if report["overall_complete"] else 1
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

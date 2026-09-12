@@ -74,6 +74,14 @@ def _merge(preferred: SongRow, other: SongRow) -> SongRow:
     out.featured_artists = list(dict.fromkeys([*out.featured_artists, *other.featured_artists]))
     out.genres = sorted(set(out.genres) | set(other.genres))
 
+    for field in ('hololive_member_ids',):
+        values=list(dict.fromkeys([*(out.extra.get(field) or []),*(other.extra.get(field) or [])]))
+        if values:
+            out.extra[field]=values
+    for field in ('hololive_trusted_spotify_streams','hololive_youtube_views','holodex_channel_id','holodex_video_id'):
+        if out.extra.get(field) is None and other.extra.get(field) is not None:
+            out.extra[field]=other.extra[field]
+
     # Keep alternate metrics as provenance instead of combining unlike counters.
     if (other.metric_name, other.metric_value, other.metric_unit) != (out.metric_name, out.metric_value, out.metric_unit):
         alt = out.extra.setdefault("alternate_metrics", [])
@@ -97,6 +105,9 @@ def _merge(preferred: SongRow, other: SongRow) -> SongRow:
 
 def _stable_keys(row: SongRow) -> list[tuple[str, str]]:
     keys: list[tuple[str, str]] = []
+    video_id=str((row.extra or {}).get("holodex_video_id") or "")
+    if row.vtuber and re.fullmatch(r"[A-Za-z0-9_-]{11}",video_id):
+        keys.append(("holodex_video",video_id))
     if row.isrc:
         keys.append(("isrc", row.isrc.upper()))
     if row.spotify_track_id:

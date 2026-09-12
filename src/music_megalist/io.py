@@ -1,5 +1,5 @@
 from __future__ import annotations
-import csv, gzip, io, json
+import csv, gzip, io, json, os, tempfile
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Iterable, Iterator, TextIO
@@ -65,6 +65,21 @@ def append_row(row: SongRow, path: str | Path) -> int:
 
 
 def write_rows(rows: Iterable[SongRow], path: str | Path) -> int:
+    """Replace a canonical file only after the complete serialization succeeds."""
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, name = tempfile.mkstemp(prefix=".beathit-", suffix="-" + path.name, dir=path.parent)
+    os.close(fd)
+    temp = Path(name)
+    try:
+        count = _write_rows(rows, temp)
+        temp.replace(path)
+        return count
+    finally:
+        temp.unlink(missing_ok=True)
+
+
+def _write_rows(rows: Iterable[SongRow], path: str | Path) -> int:
     path = Path(path); path.parent.mkdir(parents=True, exist_ok=True)
     rows = list(rows)
     if path.name.endswith(".jsonl") or path.name.endswith(".jsonl.gz"):

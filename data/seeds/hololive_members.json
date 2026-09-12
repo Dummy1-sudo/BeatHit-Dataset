@@ -1,0 +1,1340 @@
+{
+  "retrieved_at": "2026-09-12",
+  "scope": "Members listed by the official Hololive and Holostars talent directories, including listed alumni; staff excluded.",
+  "members": [
+    {
+      "member_id": "airani-iofifteen",
+      "name": "Airani Iofifteen",
+      "aliases": [
+        "Airani Iofifteen",
+        "アイラニ・イオフィフティーン"
+      ],
+      "channel_ids": [
+        "UCAoy6rzhSf4ydcYjJw3WoVg"
+      ],
+      "source_url": "https://hololive.hololivepro.com/en/talents/airani-iofifteen/",
+      "status": "listed"
+    },
+    {
+      "member_id": "akai-haato",
+      "name": "Akai Haato",
+      "aliases": [
+        "Akai Haato",
+        "赤井はあと"
+      ],
+      "channel_ids": [
+        "UC1CfXB_kRs3C-zaeTG3oGyg"
+      ],
+      "source_url": "https://hololive.hololivepro.com/en/talents/akai-haato/",
+      "status": "listed"
+    },
+    {
+      "member_id": "aki-rosenthal",
+      "name": "Aki Rosenthal",
+      "aliases": [
+        "Aki Rosenthal",
+        "アキ・ローゼンタール"
+      ],
+      "channel_ids": [
+        "UCFTLzh12_nrtzqBPsTCqenA"
+      ],
+      "source_url": "https://hololive.hololivepro.com/en/talents/aki-rosenthal/",
+      "status": "listed"
+    },
+    {
+      "member_id": "amane-kanata",
+      "name": "Amane Kanata",
+      "aliases": [
+        "Amane Kanata",
+        "天音かなた"
+      ],
+      "channel_ids": [
+        "UCZlDXzGoo7d44bwdNObFacg"
+      ],
+      "source_url": "https://hololive.hololivepro.com/en/talents/amane-kanata/",
+      "status": "alum"
+    },
+    {
+      "member_id": "anya-melfissa",
+      "name": "Anya Melfissa",
+      "aliases": [
+        "Anya Melfissa",
+        "アーニャ・メルフィッサ"
+      ],
+      "channel_ids": [
+        "UC727SQYUvx5pDDGQpTICNWg"
+      ],
+      "source_url": "https://hololive.hololivepro.com/en/talents/anya-melfissa/",
+      "status": "listed"
+    },
+    {
+      "member_id": "ayunda-risu",
+      "name": "Ayunda Risu",
+      "aliases": [
+        "Ayunda Risu",
+        "アユンダ・リス"
+      ],
+      "channel_ids": [
+        "UCOyYb1c43VlX9rc_lT6NKQw"
+      ],
+      "source_url": "https://hololive.hololivepro.com/en/talents/ayunda-risu/",
+      "status": "listed"
+    },
+    {
+      "member_id": "azki",
+      "name": "AZKi",
+      "aliases": [
+        "AZKi"
+      ],
+      "channel_ids": [
+        "UC0TXe_LYZ4scaW2XMyi5_kw"
+      ],
+      "source_url": "https://hololive.hololivepro.com/en/talents/azki/",
+      "status": "listed"
+    },
+    {
+      "member_id": "cecilia-immergreen",
+      "name": "Cecilia Immergreen",
+      "aliases": [
+        "Cecilia Immergreen",
+        "セシリア・イマーグリーン"
+      ],
+      "channel_ids": [
+        "UCvN5h1ShZtc7nly3pezRayg"
+      ],
+      "source_url": "https://hololive.hololivepro.com/en/talents/cecilia-immergreen/",
+      "status": "listed"
+    },
+    {
+      "member_id": "ceres-fauna",
+      "name": "Ceres Fauna",
+      "aliases": [
+        "Ceres Fauna",
+        "セレス・ファウナ"
+      ],
+      "channel_ids": [
+        "UCO_aKKYxn4tvrqPjcTzZ6EQ"
+      ],
+      "source_url": "https://hololive.hololivepro.com/en/talents/ceres-fauna/",
+      "status": "alum"
+    },
+    {
+      "member_id": "elizabeth-rose-bloodflame",
+      "name": "Elizabeth Rose Bloodflame",
+      "aliases": [
+        "Elizabeth Rose Bloodflame",
+        "エリザベス・ローズ・ブラッドフレイム"
+      ],
+      "channel_ids": [
+        "UCW5uhrG1eCBYditmhL0Ykjw"
+      ],
+      "source_url": "https://hololive.hololivepro.com/en/talents/elizabeth-rose-bloodflame/",
+      "status": "listed"
+    },
+    {
+      "member_id": "fuwawa-abyssgard",
+      "name": "Fuwawa Abyssgard",
+      "aliases": [
+        "Fuwawa Abyssgard",
+        "フワワ・アビスガード"
+      ],
+      "channel_ids": [
+        "UCt9H_RpQzhxzlyBxFqrdHqA"
+      ],
+      "source_url": "https://hololive.hololivepro.com/en/talents/fuwawa-abyssgard/",
+      "status": "listed"
+    },
+    {
+      "member_id": "gawr-gura",
+      "name": "Gawr Gura",
+      "aliases": [
+        "Gawr Gura",
+        "がうる・ぐら"
+      ],
+      "channel_ids": [
+        "UCoSrY_IQQVpmIRZ9Xf-y93g"
+      ],
+      "source_url": "https://hololive.hololivepro.com/en/talents/gawr-gura/",
+      "status": "alum"
+    },
+    {
+      "member_id": "gigi-murin",
+      "name": "Gigi Murin",
+      "aliases": [
+        "Gigi Murin",
+        "ジジ・ムリン"
+      ],
+      "channel_ids": [
+        "UCDHABijvPBnJm7F-KlNME3w"
+      ],
+      "source_url": "https://hololive.hololivepro.com/en/talents/gigi-murin/",
+      "status": "listed"
+    },
+    {
+      "member_id": "hakos-baelz",
+      "name": "Hakos Baelz",
+      "aliases": [
+        "Hakos Baelz",
+        "ハコス・ベールズ"
+      ],
+      "channel_ids": [
+        "UCgmPnx-EEeOrZSg5Tiw7ZRQ"
+      ],
+      "source_url": "https://hololive.hololivepro.com/en/talents/hakos-baelz/",
+      "status": "listed"
+    },
+    {
+      "member_id": "hakui-koyori",
+      "name": "Hakui Koyori",
+      "aliases": [
+        "Hakui Koyori",
+        "博衣こより"
+      ],
+      "channel_ids": [
+        "UC6eWCld0KwmyHFbAqK3V-Rw"
+      ],
+      "source_url": "https://hololive.hololivepro.com/en/talents/hakui-koyori/",
+      "status": "listed"
+    },
+    {
+      "member_id": "hanazono-sayaka",
+      "name": "Hanazono Sayaka",
+      "aliases": [
+        "Hanazono Sayaka",
+        "花園さやか"
+      ],
+      "channel_ids": [
+        "UCozx5csNhCx1wsVq3SZVkBQ"
+      ],
+      "source_url": "https://hololive.hololivepro.com/en/talents/hanazono-sayaka/",
+      "status": "listed",
+      "youtube_url": "https://www.youtube.com/@holoANroom?sub_confirmation=1"
+    },
+    {
+      "member_id": "himemori-luna",
+      "name": "Himemori Luna",
+      "aliases": [
+        "Himemori Luna",
+        "姫森ルーナ"
+      ],
+      "channel_ids": [
+        "UCa9Y57gfeY0Zro_noHRVrnw"
+      ],
+      "source_url": "https://hololive.hololivepro.com/en/talents/himemori-luna/",
+      "status": "listed"
+    },
+    {
+      "member_id": "hiodoshi-ao",
+      "name": "Hiodoshi Ao",
+      "aliases": [
+        "Hiodoshi Ao",
+        "火威青"
+      ],
+      "channel_ids": [
+        "UCMGfV7TVTmHhEErVJg1oHBQ"
+      ],
+      "source_url": "https://hololive.hololivepro.com/en/talents/hiodoshi-ao/",
+      "status": "alum"
+    },
+    {
+      "member_id": "hoshimachi-suisei",
+      "name": "Hoshimachi Suisei",
+      "aliases": [
+        "Hoshimachi Suisei",
+        "星街すいせい"
+      ],
+      "channel_ids": [
+        "UC5CwaMl1eIgY8h02uZw7u8A"
+      ],
+      "source_url": "https://hololive.hololivepro.com/en/talents/hoshimachi-suisei/",
+      "status": "listed"
+    },
+    {
+      "member_id": "houshou-marine",
+      "name": "Houshou Marine",
+      "aliases": [
+        "Houshou Marine",
+        "宝鐘マリン"
+      ],
+      "channel_ids": [
+        "UCCzUftO8KOVkV4wQG1vkUvg"
+      ],
+      "source_url": "https://hololive.hololivepro.com/en/talents/houshou-marine/",
+      "status": "listed"
+    },
+    {
+      "member_id": "ichijou-ririka",
+      "name": "Ichijou Ririka",
+      "aliases": [
+        "Ichijou Ririka",
+        "一条莉々華"
+      ],
+      "channel_ids": [
+        "UCtyWhCj3AqKh2dXctLkDtng"
+      ],
+      "source_url": "https://hololive.hololivepro.com/en/talents/ichijou-ririka/",
+      "status": "listed",
+      "youtube_url": "https://www.youtube.com/@IchijouRirika?sub_confirmation=1"
+    },
+    {
+      "member_id": "inugami-korone",
+      "name": "Inugami Korone",
+      "aliases": [
+        "Inugami Korone",
+        "戌神ころね"
+      ],
+      "channel_ids": [
+        "UChAnqc_AY5_I3Px5dig3X1Q"
+      ],
+      "source_url": "https://hololive.hololivepro.com/en/talents/inugami-korone/",
+      "status": "listed"
+    },
+    {
+      "member_id": "irys",
+      "name": "IRyS",
+      "aliases": [
+        "IRyS"
+      ],
+      "channel_ids": [
+        "UC8rcEBzJSleTkf_-agPM20g"
+      ],
+      "source_url": "https://hololive.hololivepro.com/en/talents/irys/",
+      "status": "listed"
+    },
+    {
+      "member_id": "isaki-riona",
+      "name": "Isaki Riona",
+      "aliases": [
+        "Isaki Riona",
+        "響咲リオナ"
+      ],
+      "channel_ids": [
+        "UC9LSiN9hXI55svYEBrrK-tw"
+      ],
+      "source_url": "https://hololive.hololivepro.com/en/talents/isaki-riona/",
+      "status": "listed"
+    },
+    {
+      "member_id": "izuki-michiru",
+      "name": "Izuki Michiru",
+      "aliases": [
+        "Izuki Michiru",
+        "井月みちる"
+      ],
+      "channel_ids": [
+        "UCozx5csNhCx1wsVq3SZVkBQ"
+      ],
+      "source_url": "https://hololive.hololivepro.com/en/talents/izuki-michiru/",
+      "status": "listed",
+      "youtube_url": "https://www.youtube.com/@holoANroom?sub_confirmation=1"
+    },
+    {
+      "member_id": "juufuutei-raden",
+      "name": "Juufuutei Raden",
+      "aliases": [
+        "Juufuutei Raden",
+        "儒烏風亭らでん"
+      ],
+      "channel_ids": [
+        "UCdXAk5MpyLD8594lm_OvtGQ"
+      ],
+      "source_url": "https://hololive.hololivepro.com/en/talents/juufuutei-raden/",
+      "status": "listed",
+      "youtube_url": "https://youtube.com/@JuufuuteiRaden?sub_confirmation=1"
+    },
+    {
+      "member_id": "kaela-kovalskia",
+      "name": "Kaela Kovalskia",
+      "aliases": [
+        "Kaela Kovalskia",
+        "カエラ・コヴァルスキア"
+      ],
+      "channel_ids": [
+        "UCZLZ8Jjx_RN2CXloOmgTHVg"
+      ],
+      "source_url": "https://hololive.hololivepro.com/en/talents/kaela-kovalskia/",
+      "status": "listed"
+    },
+    {
+      "member_id": "kazama-iroha",
+      "name": "Kazama Iroha",
+      "aliases": [
+        "Kazama Iroha",
+        "風真いろは"
+      ],
+      "channel_ids": [
+        "UC_vMYWcDjmfdpH6r4TTn1MQ"
+      ],
+      "source_url": "https://hololive.hololivepro.com/en/talents/kazama-iroha/",
+      "status": "listed"
+    },
+    {
+      "member_id": "kazeshiro-yuki",
+      "name": "Kazeshiro Yuki",
+      "aliases": [
+        "Kazeshiro Yuki",
+        "風白ゆき"
+      ],
+      "channel_ids": [
+        "UCozx5csNhCx1wsVq3SZVkBQ"
+      ],
+      "source_url": "https://hololive.hololivepro.com/en/talents/kazeshiro-yuki/",
+      "status": "listed",
+      "youtube_url": "https://www.youtube.com/@holoANroom?sub_confirmation=1"
+    },
+    {
+      "member_id": "kikirara-vivi",
+      "name": "Kikirara Vivi",
+      "aliases": [
+        "Kikirara Vivi",
+        "綺々羅々ヴィヴィ"
+      ],
+      "channel_ids": [
+        "UCGzTVXqMQHa4AgJVJIVvtDQ"
+      ],
+      "source_url": "https://hololive.hololivepro.com/en/talents/kikirara-vivi/",
+      "status": "listed"
+    },
+    {
+      "member_id": "kiryu-coco",
+      "name": "Kiryu Coco",
+      "aliases": [
+        "Kiryu Coco",
+        "桐生ココ"
+      ],
+      "channel_ids": [
+        "UCS9uQI-jC3DE0L4IpXyvr6w"
+      ],
+      "source_url": "https://hololive.hololivepro.com/en/talents/kiryu-coco/",
+      "status": "alum"
+    },
+    {
+      "member_id": "kobo-kanaeru",
+      "name": "Kobo Kanaeru",
+      "aliases": [
+        "Kobo Kanaeru",
+        "こぼ・かなえる"
+      ],
+      "channel_ids": [
+        "UCjLEmnpCNeisMxy134KPwWw"
+      ],
+      "source_url": "https://hololive.hololivepro.com/en/talents/kobo-kanaeru/",
+      "status": "listed"
+    },
+    {
+      "member_id": "koganei-niko",
+      "name": "Koganei Niko",
+      "aliases": [
+        "Koganei Niko",
+        "虎金妃笑虎"
+      ],
+      "channel_ids": [
+        "UCuI_opAVX6qbxZY-a-AxFuQ"
+      ],
+      "source_url": "https://hololive.hololivepro.com/en/talents/koganei-niko/",
+      "status": "listed"
+    },
+    {
+      "member_id": "koseki-bijou",
+      "name": "Koseki Bijou",
+      "aliases": [
+        "Koseki Bijou",
+        "古石ビジュー"
+      ],
+      "channel_ids": [
+        "UC9p_lqQ0FEDz327Vgf5JwqA"
+      ],
+      "source_url": "https://hololive.hololivepro.com/en/talents/koseki-bijou/",
+      "status": "listed"
+    },
+    {
+      "member_id": "kureiji-ollie",
+      "name": "Kureiji Ollie",
+      "aliases": [
+        "Kureiji Ollie",
+        "クレイジー・オリー"
+      ],
+      "channel_ids": [
+        "UCYz_5n-uDuChHtLo7My1HnQ"
+      ],
+      "source_url": "https://hololive.hololivepro.com/en/talents/kureiji-ollie/",
+      "status": "listed"
+    },
+    {
+      "member_id": "la-darknesss",
+      "name": "La+ Darknesss",
+      "aliases": [
+        "La+ Darknesss",
+        "ラプラス・ダークネス"
+      ],
+      "channel_ids": [
+        "UCENwRMx5Yh42zWpzURebzTw"
+      ],
+      "source_url": "https://hololive.hololivepro.com/en/talents/la-darknesss/",
+      "status": "listed"
+    },
+    {
+      "member_id": "minato-aqua",
+      "name": "Minato Aqua",
+      "aliases": [
+        "Minato Aqua",
+        "湊あくあ"
+      ],
+      "channel_ids": [
+        "UC1opHUrw8rvnsadT-iGp7Cg"
+      ],
+      "source_url": "https://hololive.hololivepro.com/en/talents/minato-aqua/",
+      "status": "alum"
+    },
+    {
+      "member_id": "mizumiya-su",
+      "name": "Mizumiya Su",
+      "aliases": [
+        "Mizumiya Su",
+        "水宮枢"
+      ],
+      "channel_ids": [
+        "UCjk2nKmHzgH5Xy-C5qYRd5A"
+      ],
+      "source_url": "https://hololive.hololivepro.com/en/talents/mizumiya-su/",
+      "status": "listed"
+    },
+    {
+      "member_id": "mococo-abyssgard",
+      "name": "Mococo Abyssgard",
+      "aliases": [
+        "Mococo Abyssgard",
+        "モココ・アビスガード"
+      ],
+      "channel_ids": [
+        "UCt9H_RpQzhxzlyBxFqrdHqA"
+      ],
+      "source_url": "https://hololive.hololivepro.com/en/talents/mococo-abyssgard/",
+      "status": "listed"
+    },
+    {
+      "member_id": "momosuzu-nene",
+      "name": "Momosuzu Nene",
+      "aliases": [
+        "Momosuzu Nene",
+        "桃鈴ねね"
+      ],
+      "channel_ids": [
+        "UCAWSyEs_Io8MtpY3m-zqILA"
+      ],
+      "source_url": "https://hololive.hololivepro.com/en/talents/momosuzu-nene/",
+      "status": "listed"
+    },
+    {
+      "member_id": "moona-hoshinova",
+      "name": "Moona Hoshinova",
+      "aliases": [
+        "Moona Hoshinova",
+        "ムーナ・ホシノヴァ"
+      ],
+      "channel_ids": [
+        "UCP0BspO_AMEe3aQqqpo89Dg"
+      ],
+      "source_url": "https://hololive.hololivepro.com/en/talents/moona-hoshinova/",
+      "status": "listed"
+    },
+    {
+      "member_id": "mori-calliope",
+      "name": "Mori Calliope",
+      "aliases": [
+        "Mori Calliope",
+        "森カリオペ"
+      ],
+      "channel_ids": [
+        "UCL_qhgtOy0dy1Agp8vkySQg"
+      ],
+      "source_url": "https://hololive.hololivepro.com/en/talents/mori-calliope/",
+      "status": "listed"
+    },
+    {
+      "member_id": "murasaki-shion",
+      "name": "Murasaki Shion",
+      "aliases": [
+        "Murasaki Shion",
+        "紫咲シオン"
+      ],
+      "channel_ids": [
+        "UCXTpFs_3PqI41qX2d9tL2Rw"
+      ],
+      "source_url": "https://hololive.hololivepro.com/en/talents/murasaki-shion/",
+      "status": "alum"
+    },
+    {
+      "member_id": "nakiri-ayame",
+      "name": "Nakiri Ayame",
+      "aliases": [
+        "Nakiri Ayame",
+        "百鬼あやめ"
+      ],
+      "channel_ids": [
+        "UC7fk0CB07ly8oSl0aqKkqFg"
+      ],
+      "source_url": "https://hololive.hololivepro.com/en/talents/nakiri-ayame/",
+      "status": "listed"
+    },
+    {
+      "member_id": "nanashi-mumei",
+      "name": "Nanashi Mumei",
+      "aliases": [
+        "Nanashi Mumei",
+        "七詩ムメイ"
+      ],
+      "channel_ids": [
+        "UC3n5uGu18FoCy23ggWWp8tA"
+      ],
+      "source_url": "https://hololive.hololivepro.com/en/talents/nanashi-mumei/",
+      "status": "alum"
+    },
+    {
+      "member_id": "natsuiro-matsuri",
+      "name": "Natsuiro Matsuri",
+      "aliases": [
+        "Natsuiro Matsuri",
+        "夏色まつり"
+      ],
+      "channel_ids": [
+        "UCQ0UDLQCjY0rmuxCDE38FGg"
+      ],
+      "source_url": "https://hololive.hololivepro.com/en/talents/natsuiro-matsuri/",
+      "status": "listed"
+    },
+    {
+      "member_id": "nekomata-okayu",
+      "name": "Nekomata Okayu",
+      "aliases": [
+        "Nekomata Okayu",
+        "猫又おかゆ"
+      ],
+      "channel_ids": [
+        "UCvaTdHTWBGv3MKj3KVqJVCw"
+      ],
+      "source_url": "https://hololive.hololivepro.com/en/talents/nekomata-okayu/",
+      "status": "listed"
+    },
+    {
+      "member_id": "nerissa-ravencroft",
+      "name": "Nerissa Ravencroft",
+      "aliases": [
+        "Nerissa Ravencroft",
+        "ネリッサ・レイヴンクロフト"
+      ],
+      "channel_ids": [
+        "UC_sFNM0z0MWm9A6WlKPuMMg"
+      ],
+      "source_url": "https://hololive.hololivepro.com/en/talents/nerissa-ravencroft/",
+      "status": "listed"
+    },
+    {
+      "member_id": "ninomae-inanis",
+      "name": "Ninomae Ina’nis",
+      "aliases": [
+        "Ninomae Ina’nis",
+        "一伊那尓栖"
+      ],
+      "channel_ids": [
+        "UCMwGHR0BTZuLsmjY_NT5Pwg"
+      ],
+      "source_url": "https://hololive.hololivepro.com/en/talents/ninomae-inanis/",
+      "status": "listed"
+    },
+    {
+      "member_id": "omaru-polka",
+      "name": "Omaru Polka",
+      "aliases": [
+        "Omaru Polka",
+        "尾丸ポルカ"
+      ],
+      "channel_ids": [
+        "UCK9V2B22uJYu3N7eR_BT9QA"
+      ],
+      "source_url": "https://hololive.hololivepro.com/en/talents/omaru-polka/",
+      "status": "listed"
+    },
+    {
+      "member_id": "ookami-mio",
+      "name": "Ookami Mio",
+      "aliases": [
+        "Ookami Mio",
+        "大神ミオ"
+      ],
+      "channel_ids": [
+        "UCp-5t9SrOQwXMU7iIjQfARg"
+      ],
+      "source_url": "https://hololive.hololivepro.com/en/talents/ookami-mio/",
+      "status": "listed"
+    },
+    {
+      "member_id": "oozora-subaru",
+      "name": "Oozora Subaru",
+      "aliases": [
+        "Oozora Subaru",
+        "大空スバル"
+      ],
+      "channel_ids": [
+        "UCvzGlP9oQwU--Y0r9id_jnA"
+      ],
+      "source_url": "https://hololive.hololivepro.com/en/talents/oozora-subaru/",
+      "status": "listed"
+    },
+    {
+      "member_id": "otonose-kanade",
+      "name": "Otonose Kanade",
+      "aliases": [
+        "Otonose Kanade",
+        "音乃瀬奏"
+      ],
+      "channel_ids": [
+        "UCWQtYtq9EOB4-I5P-3fh8lA"
+      ],
+      "source_url": "https://hololive.hololivepro.com/en/talents/otonose-kanade/",
+      "status": "listed",
+      "youtube_url": "https://youtube.com/@OtonoseKanade?sub_confirmation=1"
+    },
+    {
+      "member_id": "ouro-kronii",
+      "name": "Ouro Kronii",
+      "aliases": [
+        "Ouro Kronii",
+        "オーロ・クロニー"
+      ],
+      "channel_ids": [
+        "UCmbs8T6MWqUHP1tIQvSgKrg"
+      ],
+      "source_url": "https://hololive.hololivepro.com/en/talents/ouro-kronii/",
+      "status": "listed"
+    },
+    {
+      "member_id": "pavolia-reine",
+      "name": "Pavolia Reine",
+      "aliases": [
+        "Pavolia Reine",
+        "パヴォリア・レイネ"
+      ],
+      "channel_ids": [
+        "UChgTyjG-pdNvxxhdsXfHQ5Q"
+      ],
+      "source_url": "https://hololive.hololivepro.com/en/talents/pavolia-reine/",
+      "status": "listed"
+    },
+    {
+      "member_id": "raora-panthera",
+      "name": "Raora Panthera",
+      "aliases": [
+        "Raora Panthera",
+        "ラオーラ・パンテーラ"
+      ],
+      "channel_ids": [
+        "UCl69AEx4MdqMZH7Jtsm7Tig"
+      ],
+      "source_url": "https://hololive.hololivepro.com/en/talents/raora-panthera/",
+      "status": "listed"
+    },
+    {
+      "member_id": "rindo-chihaya",
+      "name": "Rindo Chihaya",
+      "aliases": [
+        "Rindo Chihaya",
+        "輪堂千速"
+      ],
+      "channel_ids": [
+        "UCKMWFR6lAstLa7Vbf5dH7ig"
+      ],
+      "source_url": "https://hololive.hololivepro.com/en/talents/rindo-chihaya/",
+      "status": "listed"
+    },
+    {
+      "member_id": "roboco-san",
+      "name": "Robocosan",
+      "aliases": [
+        "Robocosan",
+        "ロボ子さん"
+      ],
+      "channel_ids": [
+        "UCDqI2jOz0weumE8s7paEk6g"
+      ],
+      "source_url": "https://hololive.hololivepro.com/en/talents/roboco-san/",
+      "status": "listed"
+    },
+    {
+      "member_id": "sakamata-chloe",
+      "name": "Sakamata Chloe",
+      "aliases": [
+        "Sakamata Chloe",
+        "沙花叉クロヱ"
+      ],
+      "channel_ids": [
+        "UCIBY1ollUsauvVi4hW4cumw"
+      ],
+      "source_url": "https://hololive.hololivepro.com/en/talents/sakamata-chloe/",
+      "status": "affiliate"
+    },
+    {
+      "member_id": "sakuramiko",
+      "name": "Sakura Miko",
+      "aliases": [
+        "Sakura Miko",
+        "さくらみこ"
+      ],
+      "channel_ids": [
+        "UC-hM6YJuNYVAmUWxeIr9FeA"
+      ],
+      "source_url": "https://hololive.hololivepro.com/en/talents/sakuramiko/",
+      "status": "listed"
+    },
+    {
+      "member_id": "shiori-novella",
+      "name": "Shiori Novella",
+      "aliases": [
+        "Shiori Novella",
+        "シオリ・ノヴェラ"
+      ],
+      "channel_ids": [
+        "UCgnfPPb9JI3e9A4cXHnWbyg"
+      ],
+      "source_url": "https://hololive.hololivepro.com/en/talents/shiori-novella/",
+      "status": "listed"
+    },
+    {
+      "member_id": "shirakami-fubuki",
+      "name": "Shirakami Fubuki",
+      "aliases": [
+        "Shirakami Fubuki",
+        "白上フブキ"
+      ],
+      "channel_ids": [
+        "UCdn5BQ06XqgXoAxIhbqw5Rg"
+      ],
+      "source_url": "https://hololive.hololivepro.com/en/talents/shirakami-fubuki/",
+      "status": "listed"
+    },
+    {
+      "member_id": "shiranui-flare",
+      "name": "Shiranui Flare",
+      "aliases": [
+        "Shiranui Flare",
+        "不知火フレア"
+      ],
+      "channel_ids": [
+        "UCvInZx9h3jC2JzsIzoOebWg"
+      ],
+      "source_url": "https://hololive.hololivepro.com/en/talents/shiranui-flare/",
+      "status": "listed"
+    },
+    {
+      "member_id": "shirogane-noel",
+      "name": "Shirogane Noel",
+      "aliases": [
+        "Shirogane Noel",
+        "白銀ノエル"
+      ],
+      "channel_ids": [
+        "UCdyqAaZDKHXg4Ahi7VENThQ"
+      ],
+      "source_url": "https://hololive.hololivepro.com/en/talents/shirogane-noel/",
+      "status": "listed"
+    },
+    {
+      "member_id": "shishiro-botan",
+      "name": "Shishiro Botan",
+      "aliases": [
+        "Shishiro Botan",
+        "獅白ぼたん"
+      ],
+      "channel_ids": [
+        "UCUKD-uaobj9jiqB-VXt71mA"
+      ],
+      "source_url": "https://hololive.hololivepro.com/en/talents/shishiro-botan/",
+      "status": "listed"
+    },
+    {
+      "member_id": "takanashi-kiara",
+      "name": "Takanashi Kiara",
+      "aliases": [
+        "Takanashi Kiara",
+        "小鳥遊キアラ"
+      ],
+      "channel_ids": [
+        "UCHsx4Hqa-1ORjQTh9TYDhww"
+      ],
+      "source_url": "https://hololive.hololivepro.com/en/talents/takanashi-kiara/",
+      "status": "listed"
+    },
+    {
+      "member_id": "takane-lui",
+      "name": "Takane Lui",
+      "aliases": [
+        "Takane Lui",
+        "鷹嶺ルイ"
+      ],
+      "channel_ids": [
+        "UCs9_O1tRPMQTHQ-N_L6FU2g"
+      ],
+      "source_url": "https://hololive.hololivepro.com/en/talents/takane-lui/",
+      "status": "listed"
+    },
+    {
+      "member_id": "todoroki-hajime",
+      "name": "Todoroki Hajime",
+      "aliases": [
+        "Todoroki Hajime",
+        "轟はじめ"
+      ],
+      "channel_ids": [
+        "UC1iA6_NT4mtAcIII6ygrvCw"
+      ],
+      "source_url": "https://hololive.hololivepro.com/en/talents/todoroki-hajime/",
+      "status": "listed",
+      "youtube_url": "https://www.youtube.com/@TodorokiHajime?sub_confirmation=1"
+    },
+    {
+      "member_id": "tokino-sora",
+      "name": "Tokino Sora",
+      "aliases": [
+        "Tokino Sora",
+        "ときのそら"
+      ],
+      "channel_ids": [
+        "UCp6993wxpyDPHUpavwDFqgg"
+      ],
+      "source_url": "https://hololive.hololivepro.com/en/talents/tokino-sora/",
+      "status": "listed"
+    },
+    {
+      "member_id": "tokoyami-towa",
+      "name": "Tokoyami Towa",
+      "aliases": [
+        "Tokoyami Towa",
+        "常闇トワ"
+      ],
+      "channel_ids": [
+        "UC1uv2Oq6kNxgATlCiez59hw"
+      ],
+      "source_url": "https://hololive.hololivepro.com/en/talents/tokoyami-towa/",
+      "status": "listed"
+    },
+    {
+      "member_id": "tsukumo-sana",
+      "name": "Tsukumo Sana",
+      "aliases": [
+        "Tsukumo Sana",
+        "九十九佐命"
+      ],
+      "channel_ids": [
+        "UCsUj0dszADCGbF3gNrQEuSQ"
+      ],
+      "source_url": "https://hololive.hololivepro.com/en/talents/tsukumo-sana/",
+      "status": "alum"
+    },
+    {
+      "member_id": "tsunomaki-watame",
+      "name": "Tsunomaki Watame",
+      "aliases": [
+        "Tsunomaki Watame",
+        "角巻わため"
+      ],
+      "channel_ids": [
+        "UCqm3BQLlJfvkTsX_hvm0UmA"
+      ],
+      "source_url": "https://hololive.hololivepro.com/en/talents/tsunomaki-watame/",
+      "status": "listed"
+    },
+    {
+      "member_id": "usada-pekora",
+      "name": "Usada Pekora",
+      "aliases": [
+        "Usada Pekora",
+        "兎田ぺこら"
+      ],
+      "channel_ids": [
+        "UC1DCedRgGHBdm81E1llLhOQ"
+      ],
+      "source_url": "https://hololive.hololivepro.com/en/talents/usada-pekora/",
+      "status": "listed"
+    },
+    {
+      "member_id": "vestia-zeta",
+      "name": "Vestia Zeta",
+      "aliases": [
+        "Vestia Zeta",
+        "ベスティア・ゼータ"
+      ],
+      "channel_ids": [
+        "UCTvHWSfBZgtxE4sILOaurIQ"
+      ],
+      "source_url": "https://hololive.hololivepro.com/en/talents/vestia-zeta/",
+      "status": "listed"
+    },
+    {
+      "member_id": "watson-amelia",
+      "name": "Watson Amelia",
+      "aliases": [
+        "Watson Amelia",
+        "ワトソン・アメリア"
+      ],
+      "channel_ids": [
+        "UCyl1z3jo3XHR1riLFKG5UAg"
+      ],
+      "source_url": "https://hololive.hololivepro.com/en/talents/watson-amelia/",
+      "status": "affiliate"
+    },
+    {
+      "member_id": "yukihana-lamy",
+      "name": "Yukihana Lamy",
+      "aliases": [
+        "Yukihana Lamy",
+        "雪花ラミィ"
+      ],
+      "channel_ids": [
+        "UCFKOVgVbGmX65RxO3EtH3iw"
+      ],
+      "source_url": "https://hololive.hololivepro.com/en/talents/yukihana-lamy/",
+      "status": "listed"
+    },
+    {
+      "member_id": "yuzuki-choco",
+      "name": "Yuzuki Choco",
+      "aliases": [
+        "Yuzuki Choco",
+        "癒月ちょこ"
+      ],
+      "channel_ids": [
+        "UC1suqwovbL1kzsoaZgFZLKg"
+      ],
+      "source_url": "https://hololive.hololivepro.com/en/talents/yuzuki-choco/",
+      "status": "listed"
+    },
+    {
+      "member_id": "aragami-oga",
+      "name": "Aragami Oga",
+      "aliases": [
+        "Aragami Oga",
+        "荒咬オウガ"
+      ],
+      "channel_ids": [
+        "UCwL7dgTxKo8Y4RFIKWaf8gA"
+      ],
+      "source_url": "https://holostars.hololivepro.com/en/talent/aragami-oga/",
+      "status": "listed"
+    },
+    {
+      "member_id": "arurandeisu",
+      "name": "Arurandeisu",
+      "aliases": [
+        "Arurandeisu",
+        "アルランディス"
+      ],
+      "channel_ids": [
+        "UCKeAhJvy8zgXWbh9duVjIaQ"
+      ],
+      "source_url": "https://holostars.hololivepro.com/en/talent/arurandeisu/",
+      "status": "affiliate"
+    },
+    {
+      "member_id": "astel-leda",
+      "name": "Astel Leda",
+      "aliases": [
+        "Astel Leda",
+        "アステル・レダ"
+      ],
+      "channel_ids": [
+        "UCNVEsYbiZjH5QLmGeSgTSzg"
+      ],
+      "source_url": "https://holostars.hololivepro.com/en/talent/astel-leda/",
+      "status": "listed"
+    },
+    {
+      "member_id": "axel-syrios",
+      "name": "Axel Syrios",
+      "aliases": [
+        "Axel Syrios",
+        "アクセル・シリオス"
+      ],
+      "channel_ids": [
+        "UC2hx0xVkMoHGWijwr_lA01w"
+      ],
+      "source_url": "https://holostars.hololivepro.com/en/talent/axel-syrios/",
+      "status": "listed"
+    },
+    {
+      "member_id": "bettel",
+      "name": "Gavis Bettel",
+      "aliases": [
+        "Gavis Bettel",
+        "ガビス・ベッテル"
+      ],
+      "channel_ids": [
+        "UCHP4f7G2dWD4qib7BMatGAw"
+      ],
+      "source_url": "https://holostars.hololivepro.com/en/talent/bettel/",
+      "status": "listed"
+    },
+    {
+      "member_id": "crimzon-ruze",
+      "name": "Crimzon Ruze",
+      "aliases": [
+        "Crimzon Ruze",
+        "クリムゾン・ルーズ"
+      ],
+      "channel_ids": [
+        "UCajbFh6e_R8QZdHAMbbi4rQ"
+      ],
+      "source_url": "https://holostars.hololivepro.com/en/talent/crimzon-ruze/",
+      "status": "listed"
+    },
+    {
+      "member_id": "flayon",
+      "name": "Machina X Flayon",
+      "aliases": [
+        "Machina X Flayon",
+        "マキナ・X・フレオン"
+      ],
+      "channel_ids": [
+        "UC060r4zABV18vcahAWR1n7w"
+      ],
+      "source_url": "https://holostars.hololivepro.com/en/talent/flayon/",
+      "status": "listed"
+    },
+    {
+      "member_id": "goldbullet",
+      "name": "Goldbullet",
+      "aliases": [
+        "Goldbullet",
+        "ゴールドブレット"
+      ],
+      "channel_ids": [
+        "UCJv02SHZgav7Mv3V0kBOR8Q"
+      ],
+      "source_url": "https://holostars.hololivepro.com/en/talent/goldbullet/",
+      "status": "listed"
+    },
+    {
+      "member_id": "hakka",
+      "name": "Banzoin Hakka",
+      "aliases": [
+        "Banzoin Hakka",
+        "万象院ハッカ"
+      ],
+      "channel_ids": [
+        "UC7gxU6NXjKF1LrgOddPzgTw"
+      ],
+      "source_url": "https://holostars.hololivepro.com/en/talent/hakka/",
+      "status": "listed"
+    },
+    {
+      "member_id": "hanasaki-miyabi",
+      "name": "Hanasaki Miyabi",
+      "aliases": [
+        "Hanasaki Miyabi",
+        "花咲みやび"
+      ],
+      "channel_ids": [
+        "UC6t3-_N8A6ME1JShZHHqOMw"
+      ],
+      "source_url": "https://holostars.hololivepro.com/en/talent/hanasaki-miyabi/",
+      "status": "affiliate"
+    },
+    {
+      "member_id": "jurard-t-rexford",
+      "name": "Jurard T Rexford",
+      "aliases": [
+        "Jurard T Rexford",
+        "ジュラルド・ティー・レクスフォード"
+      ],
+      "channel_ids": [
+        "UCTVSOgYuSWmNAt-lnJPkEEw"
+      ],
+      "source_url": "https://holostars.hololivepro.com/en/talent/jurard-t-rexford/",
+      "status": "listed"
+    },
+    {
+      "member_id": "kagami-kira",
+      "name": "Kagami Kira",
+      "aliases": [
+        "Kagami Kira",
+        "鏡見キラ"
+      ],
+      "channel_ids": [
+        "UCEzsociuFqVwgZuMaZqaCsg"
+      ],
+      "source_url": "https://holostars.hololivepro.com/en/talent/kagami-kira/",
+      "status": "alum"
+    },
+    {
+      "member_id": "kageyama-shien",
+      "name": "Kageyama Shien",
+      "aliases": [
+        "Kageyama Shien",
+        "影山シエン"
+      ],
+      "channel_ids": [
+        "UChSvpZYRPh0FvG4SJGSga3g"
+      ],
+      "source_url": "https://holostars.hololivepro.com/en/talent/kageyama-shien/",
+      "status": "affiliate"
+    },
+    {
+      "member_id": "kanade-izuru",
+      "name": "Kanade Izuru",
+      "aliases": [
+        "Kanade Izuru",
+        "奏手イヅル"
+      ],
+      "channel_ids": [
+        "UCZgOv3YDEs-ZnZWDYVwJdmA"
+      ],
+      "source_url": "https://holostars.hololivepro.com/en/talent/kanade-izuru/",
+      "status": "listed"
+    },
+    {
+      "member_id": "kishido-temma",
+      "name": "Kishido Temma",
+      "aliases": [
+        "Kishido Temma",
+        "岸堂天真"
+      ],
+      "channel_ids": [
+        "UCGNI4MENvnsymYjKiZwv9eg"
+      ],
+      "source_url": "https://holostars.hololivepro.com/en/talent/kishido-temma/",
+      "status": "affiliate"
+    },
+    {
+      "member_id": "magni-dezmond",
+      "name": "Magni Dezmond",
+      "aliases": [
+        "Magni Dezmond",
+        "マグニ・デズモンド"
+      ],
+      "channel_ids": [
+        "UC7MMNHR-kf9EN1rXiesMTMw"
+      ],
+      "source_url": "https://holostars.hololivepro.com/en/talent/magni-dezmond/",
+      "status": "alum"
+    },
+    {
+      "member_id": "minase-rio",
+      "name": "Minase Rio",
+      "aliases": [
+        "Minase Rio",
+        "水無世燐央"
+      ],
+      "channel_ids": [
+        "UCdfMHxjcCc2HSd9qFvfJgjg"
+      ],
+      "source_url": "https://holostars.hololivepro.com/en/talent/minase-rio/",
+      "status": "affiliate"
+    },
+    {
+      "member_id": "noir-vesper",
+      "name": "Noir Vesper",
+      "aliases": [
+        "Noir Vesper",
+        "ノワール・ヴェスパー"
+      ],
+      "channel_ids": [
+        "UCDRWSO281bIHYVi-OV3iFYA"
+      ],
+      "source_url": "https://holostars.hololivepro.com/en/talent/noir-vesper/",
+      "status": "alum"
+    },
+    {
+      "member_id": "octavio",
+      "name": "Octavio",
+      "aliases": [
+        "Octavio",
+        "オクタビオ"
+      ],
+      "channel_ids": [
+        "UCLk1hcmxg8rJ3Nm1_GvxTRA"
+      ],
+      "source_url": "https://holostars.hololivepro.com/en/talent/octavio/",
+      "status": "listed"
+    },
+    {
+      "member_id": "regis-altare",
+      "name": "Regis Altare",
+      "aliases": [
+        "Regis Altare",
+        "リージス・アルテア"
+      ],
+      "channel_ids": [
+        "UCyxtGMdWlURZ30WSnEjDOQw"
+      ],
+      "source_url": "https://holostars.hololivepro.com/en/talent/regis-altare/",
+      "status": "listed"
+    },
+    {
+      "member_id": "rikka",
+      "name": "Rikka",
+      "aliases": [
+        "Rikka",
+        "律可"
+      ],
+      "channel_ids": [
+        "UC9mf_ZVpouoILRY9NUIaK-w"
+      ],
+      "source_url": "https://holostars.hololivepro.com/en/talent/rikka/",
+      "status": "affiliate"
+    },
+    {
+      "member_id": "shinri",
+      "name": "Josuiji Shinri",
+      "aliases": [
+        "Josuiji Shinri",
+        "定水寺シンリ"
+      ],
+      "channel_ids": [
+        "UCMqGG8BRAiI1lJfKOpETM_w"
+      ],
+      "source_url": "https://holostars.hololivepro.com/en/talent/shinri/",
+      "status": "listed"
+    },
+    {
+      "member_id": "utsugi-uyu",
+      "name": "Utsugi Uyu",
+      "aliases": [
+        "Utsugi Uyu",
+        "羽継烏有"
+      ],
+      "channel_ids": [
+        "UCgRqGV1gBf2Esxh0Tz1vxzw"
+      ],
+      "source_url": "https://holostars.hololivepro.com/en/talent/utsugi-uyu/",
+      "status": "listed"
+    },
+    {
+      "member_id": "yatogami-fuma",
+      "name": "Yatogami Fuma",
+      "aliases": [
+        "Yatogami Fuma",
+        "夜十神封魔"
+      ],
+      "channel_ids": [
+        "UCc88OV45ICgHbn3ZqLLb52w"
+      ],
+      "source_url": "https://holostars.hololivepro.com/en/talent/yatogami-fuma/",
+      "status": "listed"
+    },
+    {
+      "member_id": "yukoku-roberu",
+      "name": "Yukoku Roberu",
+      "aliases": [
+        "Yukoku Roberu",
+        "夕刻ロベル"
+      ],
+      "channel_ids": [
+        "UCANDOlYTJT7N5jlRC3zfzVA"
+      ],
+      "source_url": "https://holostars.hololivepro.com/en/talent/yukoku-roberu/",
+      "status": "listed"
+    }
+  ],
+  "excluded_navigation_channel_ids": [
+    "UCJFZiqLMntJufDCHc6bQixg"
+  ]
+}

@@ -59,7 +59,7 @@ def _generic_csv_errors(path: Path) -> list[str]:
         try: first_rank=int((rows[0].get('rank') or '').strip())
         except Exception: first_rank=0
         if first_rank<1: errors.append(f'RANK_INVALID {path} row 1: {rows[0].get("rank")}')
-    seen_spotify=set(); seen_mbid=set(); seen_isrc=set(); seen_text=set(); seen_vocadb=set()
+    seen_spotify=set(); seen_mbid=set(); seen_isrc=set(); seen_text=set(); seen_vocadb=set(); seen_anime=set()
     for i,r in enumerate(rows,1):
         rank=(r.get('rank') or '').strip()
         if rank:
@@ -103,8 +103,16 @@ def _generic_csv_errors(path: Path) -> list[str]:
                 anime_extra=json.loads(r.get('extra') or '{}')
             except Exception:
                 anime_extra={}
-            anime_key=str(r.get('anime_title') or anime_extra.get('anilist_id') or '').strip()
+            # English titles collide across specials, seasons and films. Stable
+            # source IDs define anime entries; repeated songs across entries are valid.
+            mal_id=anime_extra.get('mal_id')
+            anilist_id=anime_extra.get('anilist_id')
+            anime_key=(f'mal:{mal_id}' if mal_id else f'anilist:{anilist_id}' if anilist_id
+                       else str(r.get('anime_title') or '').strip())
             scope=(anime_key,) if anime_key else ()
+            if anime_key in seen_anime:
+                errors.append(f'DUP_ANIME {path} row {i}: {anime_key}')
+            seen_anime.add(anime_key)
         else:
             scope=()
         if vocaloid_ids:
@@ -192,6 +200,15 @@ def validate(data_dir: str|Path='data', *, require_complete: bool=False) -> list
                 errors.append(f'VOCALOID_PV_SERVICE row {i}')
             if not selected_video_id:
                 errors.append(f'VOCALOID_VIDEO_ID row {i}')
+    game_path=data/'video_games'/'video_game_music_10000.csv'
+    if game_path.exists():
+        from .quality import video_game_row_error
+        for i,row in enumerate(read_rows(game_path),1):
+            reason=video_game_row_error(row.model_dump(),row.extra)
+            if reason:
+                errors.append(f'VIDEO_GAME_CLASSIFICATION row {i}: {reason}')
+    from .hololive import coverage_errors
+    errors.extend('HOLOLIVE_COVERAGE '+error for error in coverage_errors(data,require_complete=require_complete))
     kp=data/'kpop'/'kpop_youtube_over_100m.csv'
     if kp.exists():
         rows=read_rows(kp)
@@ -285,5 +302,6 @@ def validate(data_dir: str|Path='data', *, require_complete: bool=False) -> list
             p=data/rel
             if not p.exists(): errors.append(f'MISSING {rel}'); continue
             with p.open(encoding='utf-8',newline='') as f: n=max(0,sum(1 for _ in csv.reader(f))-1)
-            if n != target: errors.append(f'COUNT {rel}: {n} != {target}')
+            count_ok=n>=target if rel.startswith(('vtuber_original/','vtuber_non_original/')) else n==target
+            if not count_ok: errors.append(f'COUNT {rel}: {n} does not meet {target}')
     return errors

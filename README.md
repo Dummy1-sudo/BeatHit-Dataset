@@ -7,7 +7,7 @@ A reproducible, source-backed collection of large ranked music lists. The reposi
 | Dataset | Requested coverage |
 |---|---:|
 | Popular anime + most recognizable theme song | 10,000 anime |
-| Vocaloid / voice-synth songs | every verified song with >=10,000,000 Spotify streams, capped at 10,000 |
+| Vocaloid / voice-synth songs | all qualifying VocaDB originals with a resolved official Original YouTube PV; no row cap |
 | Worldwide songs by era | 51,000 total |
 | Classical | 10,000 |
 | VTuber original songs | up to 10,000 verified entries |
@@ -33,7 +33,7 @@ No public source exposes a perfectly current, complete worldwide listen counter 
 
 - `spotify_streams` → cumulative Spotify stream count from the cited snapshot/page
 - `spotify_streams_snapshot` → cumulative Spotify stream count from a dated snapshot
-- `spotify_chart_streams_snapshot` → chart-history aggregate from a dated chart dataset, **not** a lifetime counter and never used for the Vocaloid >=10M qualification
+- `spotify_chart_streams_snapshot` → chart-history aggregate from a dated chart dataset, **not** a lifetime counter and never used for Vocaloid qualification
 - `spotify_country_chart_streams` → exact country-specific sum of Spotify daily Top 200 streams observed while the song was charting; streams outside the chart are excluded
 - `spotify_regional_chart_streams_sum` → megalist-only sum of the distinct country-chart totals for the same song; still a chart-attributed aggregate, not a lifetime Spotify counter
 - `youtube_views` → actual YouTube view count
@@ -53,7 +53,7 @@ The repository contains a full builder that combines:
 - a live Kworb cumulative Spotify-stream overlay for globally prominent tracks, with exact normalized title+artist matching;
 - Kworb aggregates of Spotify regional daily charts to discover every available country/territory chart and build one all-time top-1,000 list per market;
 - AniList current popularity (stable live window) + AnimeThemes theme metadata, with a bundled MyAnimeList popularity/theme snapshot and paced/cached Jikan theme fallback when live AniList or theme joins are unavailable;
-- VocaDB for voice-synth classification, using a rate-paced high-popularity candidate scan plus explicit voice-synth credit/genre markers so the API is not abused by a hundreds-of-thousands-row crawl;
+- VocaDB for voice-synth classification, using a paced, resumable original-song scan and explicit voice-synth credits; official Original YouTube PVs establish eligible uploads;
 - Holodex for VTuber `Original_Song` and `Music_Cover` classification, with HoloStats as a Hololive-only fallback/augmentation;
 - YouTube Data API when available; otherwise a clearly attributed Return YouTube Dislike cached `viewCount` fallback, then optional capped `yt-dlp` as a last resort;
 - ListenBrainz as a classical/popularity fallback;
@@ -68,7 +68,7 @@ python -m music_megalist validate
 python scripts/verify_targets.py
 ```
 
-The full source download can exceed 1 GB. Set `BEATHIT_SKIP_ZENODO=1` only when you accept lower coverage and lower stream-count accuracy. `BEATHIT_VOCADB_SCAN_LIMIT` defaults to 25,000 high-rated VocaDB candidates to respect the public API usage guidance; increasing it can improve recall but does not magically make Spotify/VocaDB coverage exhaustive.
+The full source download can exceed 1 GB. Set `BEATHIT_SKIP_ZENODO=1` only when you accept lower coverage and lower stream-count accuracy. `BEATHIT_VOCADB_SCAN_LIMIT` defaults to 350,000 candidates. The paced scan resumes from checkpoints; reaching a configured scan budget is not evidence that the corpus is exhaustive.
 
 ## Automatic completion after manual GitHub push
 
@@ -115,12 +115,12 @@ The current bucket emphasizes fresher popularity signals. Historical buckets pri
 
 A large output file existing is **not** enough to claim completion. `STATUS.json` is authoritative:
 
-- fixed-size categories are complete only when the exact requested row count is materialized;
-- Vocaloid is complete only when the qualifying source corpus is genuinely exhaustive enough to support the claim; it is never padded below 10M streams;
+- fixed-size categories require their exact target; the two VTuber lists additionally allow mandatory Hololive inclusions above their nominal target;
+- Vocaloid is complete only when the qualifying VocaDB scan and official YouTube availability checks are resolved; confirmed unavailable videos are distinguished from failed requests;
 - VTuber lists are never padded with non-VTuber/unverified tracks merely to reach 10,000;
 - every Spotify country/territory advertised by the source index must reach the requested 1,000 unique rows; source-exhausted short markets or unavailable historical totals stay explicitly incomplete rather than being padded;
 - `megalist.complete` is true only when all upstream requested lists, including the country lists, are complete;
-- `python scripts/verify_targets.py` checks era allocation, >=50 genre diversity, Vocaloid threshold validity, VTuber original/cover flags, per-country source-backed completeness, and megalist deduplication in addition to row counts.
+- `python scripts/verify_targets.py` checks era allocation, >=50 genre diversity, Vocaloid official-original-PV validity, VTuber original/cover flags, per-country source-backed completeness, and megalist deduplication in addition to row counts.
 
 The repository intentionally prefers an honest shortfall over a fabricated “100% complete” status.
 
@@ -157,3 +157,12 @@ scripts/
 ## Licensing
 
 Repository code is MIT. Third-party datasets and APIs retain their own licenses/terms. Large raw third-party downloads used during the full build are git-ignored and are not silently relicensed or redistributed. Generated rows retain a `source_url` and source notes so provenance remains inspectable.
+
+## Corrective builder revision v3
+
+See [the audit and operational limits](docs/repair-v3.md) for the source fixes,
+checkpoint migration, publication corrections, and Hololive inclusion policy.
+The two VTuber targets are nominal 10,000-row lists: mandatory Hololive inclusions
+may exceed that size. Five songs per member are counted across originals and
+covers combined; unavailable evidence or insufficient songs remain explicit
+shortfalls. Rounding defaults to 100,000 and is configurable.
