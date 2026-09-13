@@ -1,25 +1,25 @@
-DUP_TEXT data/anime/anime_songs.csv row 1567: Butterfly / Wada Kouji bucket=
-DUP_TEXT data/anime/anime_songs.csv row 2490: Hikari no Senritsu / Kalafina bucket=
-DUP_TEXT data/anime/anime_songs.csv row 2555: Insight / WHITE ASH bucket=
-DUP_TEXT data/anime/anime_songs.csv row 2751: Reason why XXX / Sayaka Sasaki bucket=
-DUP_TEXT data/anime/anime_songs.csv row 2958: Renegade / STEREO DIVE FOUNDATION bucket=
-DUP_SPOTIFY data/anime/anime_songs.csv row 3055: 1lSgPFh4QCkurnu4CbGzwM bucket=
-DUP_TEXT data/anime/anime_songs.csv row 3055: Michishirube / Keita Tachibana bucket=
-DUP_TEXT data/anime/anime_songs.csv row 3269: Koi suru Otome no Catharsis" (恋する乙女のカタルシス) / LISP bucket=
-DUP_TEXT data/anime/anime_songs.csv row 3504: Go For It! / GRANRODEO bucket=
-DUP_TEXT data/anime/anime_songs.csv row 4172: Kitei no Tsurugi / ALI PROJECT bucket=
-DUP_TEXT data/anime/anime_songs.csv row 4562: Sweet MAGIC / Unknown verified theme artist bucket=
-DUP_TEXT data/anime/anime_songs.csv row 5448: Melos no You ni —Lonely Way— / Unknown verified theme artist bucket=
+HOLOLIVE_COVERAGE hanazono-sayaka: 0/5 distinct songs
+HOLOLIVE_COVERAGE izuki-michiru: 0/5 distinct songs
+HOLOLIVE_COVERAGE kazeshiro-yuki: 0/5 distinct songs
+HOLOLIVE_COVERAGE kiryu-coco: 2/5 distinct songs
+HOLOLIVE_COVERAGE tsukumo-sana: 3/5 distinct songs
+HOLOLIVE_COVERAGE crimzon-ruze: 2/5 distinct songs
+HOLOLIVE_COVERAGE goldbullet: 0/5 distinct songs
+HOLOLIVE_COVERAGE kagami-kira: 0/5 distinct songs
+HOLOLIVE_COVERAGE magni-dezmond: 4/5 distinct songs
+HOLOLIVE_COVERAGE noir-vesper: 1/5 distinct songs
+HOLOLIVE_COVERAGE regis-altare: 3/5 distinct songs
+HOLOLIVE_COVERAGE shinri: 2/5 distinct songs
+HOLOLIVE_COVERAGE incomplete source scan, member coverage or popularity resolution
 COUNTRY_COUNT CY: 15 != 1000 (source exhausted)
 COUNTRY_COUNT MT: 575 != 1000 (source exhausted)
 COUNTRY_MARKETS built 75 != detected 76
 COUNTRY_UNSUPPORTED 1
 COUNTRY_TOTAL_ROWS 73590 != 76000
-COUNT anime/anime_songs.csv: 6327 != 10000
-COUNT screen_soundtracks/screen_soundtracks_10000.csv: 5669 != 10000
-COUNT video_games/video_game_music_10000.csv: 2347 != 10000
-COUNT internet_native/internet_native_10000.csv: 1083 != 10000
-COUNT jazz_depth/jazz_depth_10000.csv: 5172 != 10000
-COUNT children_childhood/children_childhood_10000.csv: 2104 != 10000
-COUNT unserious/unserious_10000.csv: 1261 != 10000
+COUNT anime/anime_songs.csv: 7616 does not meet 10000
+COUNT video_games/video_game_music_10000.csv: 2721 does not meet 10000
+COUNT internet_native/internet_native_10000.csv: 9948 does not meet 10000
+COUNT jazz_depth/jazz_depth_10000.csv: 9998 does not meet 10000
+COUNT children_childhood/children_childhood_10000.csv: 5283 does not meet 10000
+COUNT unserious/unserious_10000.csv: 9375 does not meet 10000
 Strict fixed-target validation did not pass; see source-backed shortfalls above.
