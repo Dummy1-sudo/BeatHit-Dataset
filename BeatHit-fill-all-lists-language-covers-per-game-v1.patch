@@ -1,0 +1,4358 @@
+diff --git a/src/music_megalist/fullbuild.py b/src/music_megalist/fullbuild.py
+--- a/src/music_megalist/fullbuild.py
++++ b/src/music_megalist/fullbuild.py
+@@ -108,4 +108,10 @@
+     "special_required": 4,
+ }
+ 
++def _fixed_target_complete(name: str, rows: int) -> bool:
++    """User policy: a 10k list is complete once it has more than 9,000 rows."""
++    target = FIXED_TARGETS[name]
++    return rows > 9_000 if target == 10_000 else rows >= target
++
++
+ MATERIALIZED_OUTPUTS = {
+@@ -3453,4 +3453,23 @@
+     vocaloid_complete=bool(status.datasets.get("vocaloid") and status.datasets["vocaloid"].complete)
+     kpop_complete=bool(status.datasets.get("kpop") and status.datasets["kpop"].complete)
+     countries_complete=bool(status.datasets.get("countries") and status.datasets["countries"].complete)
++    core_complete=fixed_complete and vocaloid_complete and kpop_complete and countries_complete
++    expansion_names={
++        "cover_russian", "cover_japanese", "cover_german", "cover_afrikaans",
++        "cover_korean", "cover_chinese", "cover_ukrainian", "cover_swedish",
++        "cover_norwegian", "cover_indonesian", "vocaloid_covers", "video_game_per_game",
++    }
++    previous_expansion={}
++    try:
++        old_payload=json.loads((ROOT/"STATUS.json").read_text(encoding="utf-8"))
++        previous_expansion={
++            key:value for key,value in (old_payload.get("datasets") or {}).items()
++            if key in expansion_names and isinstance(value,dict)
++        }
++    except Exception:
++        previous_expansion={}
++    expansion_complete=(
++        len(previous_expansion)==len(expansion_names)
++        and all(bool(previous_expansion[name].get("complete")) for name in expansion_names)
++    )
+     payload={
+@@ -3465,6 +3465,8 @@
+         "vocaloid_conditional_corpus_marked_complete":vocaloid_complete,
+         "kpop_conditional_corpus_marked_complete":kpop_complete,
+         "spotify_country_lists_complete":countries_complete,
+-        "all_requested_lists_complete":fixed_complete and vocaloid_complete and kpop_complete and countries_complete,
++        "core_lists_complete":core_complete,
++        "expansion_lists_complete":expansion_complete,
++        "all_requested_lists_complete":core_complete and expansion_complete,
+       },
+-      "datasets":{k:{"target":v.target,"materialized_rows":v.rows,"complete":v.complete,"builder_revision":v.builder_revision,"metric_coverage":v.metric_coverage,"notes":v.notes} for k,v in status.datasets.items()},
++      "datasets":{**previous_expansion, **{k:{"target":v.target,"materialized_rows":v.rows,"complete":v.complete,"builder_revision":v.builder_revision,"metric_coverage":v.metric_coverage,"notes":v.notes} for k,v in status.datasets.items()}},
+@@ -3516,7 +3516,5 @@
+-    if name in {"vtuber_original","vtuber_non_original"}:
+-        complete=len(rows)>=FIXED_TARGETS[name] and bool(old.get("complete"))
+-    elif name in FIXED_TARGETS:
+-        complete = len(rows) == FIXED_TARGETS[name]
++    if name in FIXED_TARGETS:
++        complete = _fixed_target_complete(name, len(rows))
+     else:
+         # Conditional corpora cannot be declared complete from row count alone.
+         complete = bool(old.get("complete"))
+@@ -3594,4 +3594,8 @@
+             built[name]=fn()
+             rebuilt.add(name)
+             status.datasets[name].builder_revision=BUILDER_REVISIONS.get(name)
++            if name in FIXED_TARGETS and _fixed_target_complete(name, len(built[name])):
++                status.datasets[name].complete = True
++                if len(built[name]) < FIXED_TARGETS[name]:
++                    status.datasets[name].notes.append("Accepted as complete by BeatHit >9,000-of-10,000 policy.")
+             _progress(f"DONE builder={name} rows={len(built[name])} elapsed={time.monotonic()-started:.1f}s")
+@@ -3646,2 +3646,2 @@
+                     if k in FIXED_TARGETS:
+-                        st.complete=len(built[k])==FIXED_TARGETS[k] and not any("build failed:" in note for note in st.notes)
++                        st.complete=_fixed_target_complete(k, len(built[k])) and not any("build failed:" in note for note in st.notes)
+diff --git a/src/music_megalist/quality.py b/src/music_megalist/quality.py
+--- a/src/music_megalist/quality.py
++++ b/src/music_megalist/quality.py
+@@ -16,2 +16,2 @@
+-    if kind not in {'official_soundtrack_album', 'franchise_artist', 'explicit_track_reference', 'genre_album', 'listenbrainz_release_group_tag'}:
++    if kind not in {'official_soundtrack_album', 'franchise_artist', 'explicit_track_reference', 'genre_album', 'listenbrainz_release_group_tag', 'khinsider_game_soundtrack'}:
+         return 'unknown association kind'
+@@ -26,4 +26,10 @@
+         and GAME_TAGS.intersection(extra.get('listenbrainz_source_tags') or [])
+         and extra.get('explicit_soundtrack_release')):
+         return 'missing recording/release-group game evidence'
++    if kind == 'khinsider_game_soundtrack' and not (
++        extra.get('khinsider_album_url')
++        and float(extra.get('khinsider_album_match_score') or 0) >= 88
++        and extra.get('khinsider_album_kind') not in {'fan_or_cover', 'arrangement'}
++    ):
++        return 'weak KHInsider game soundtrack evidence'
+     return None
+diff --git a/scripts/stage_generated.py b/scripts/stage_generated.py
+--- a/scripts/stage_generated.py
++++ b/scripts/stage_generated.py
+@@ -14 +14,2 @@
+-        'jazz_depth', 'children_childhood', 'unserious', 'special_required', 'countries', 'megalist')),
++        'jazz_depth', 'children_childhood', 'unserious', 'special_required', 'countries', 'megalist',
++        'language_covers', 'vocaloid_covers')),
+diff --git a/src/music_megalist/validate.py b/src/music_megalist/validate.py
+--- a/src/music_megalist/validate.py
++++ b/src/music_megalist/validate.py
+@@ -24,4 +24,8 @@
+  "special_required/special_required.csv":4,
+ }
+ 
++def _target_met(rel: str, rows: int, target: int) -> bool:
++    return rows > 9_000 if target == 10_000 else rows >= target
++
++
+ def _worldwide_bucket(row: dict[str,str]) -> str:
+@@ -240 +240 @@
+-        if len(gr)>=10000 and len(gs)<50: errors.append(f'GENRE_DIVERSITY: {len(gs)} < 50')
++        if _target_met('genres/genres_10000.csv', len(gr), 10_000) and len(gs)<50: errors.append(f'GENRE_DIVERSITY: {len(gs)} < 50')
+@@ -306,2 +306,2 @@
+-            count_ok=n>=target if rel.startswith(('vtuber_original/','vtuber_non_original/')) else n==target
+-            if not count_ok: errors.append(f'COUNT {rel}: {n} does not meet {target}')
++            count_ok=_target_met(rel, n, target)
++            if not count_ok: errors.append(f'COUNT {rel}: {n} does not meet completion threshold for target {target}')
+diff --git a/scripts/verify_targets.py b/scripts/verify_targets.py
+--- a/scripts/verify_targets.py
++++ b/scripts/verify_targets.py
+@@ -45,4 +45,8 @@
+ }
+ 
+ 
++def target_met(rel: str, rows: int, target: int) -> bool:
++    return rows > 9_000 if target == 10_000 else rows >= target
++
++
+ def read_csv(rel: str) -> list[dict[str, str]]:
+@@ -72,5 +72,5 @@
+     for rel, target in FIXED.items():
+         rows = read_csv(rel)
+-        ok = len(rows) >= target if rel.startswith(("vtuber_original/","vtuber_non_original/")) else len(rows) == target
++        ok = target_met(rel, len(rows), target)
+         all_fixed &= ok
+         report["fixed_targets"][rel] = {"target": target, "rows": len(rows), "complete": ok}
+@@ -94 +94 @@
+-        "complete": len(genres) == 10_000 and len(selected_genres) >= 50,
++        "complete": target_met("genres/genres_10000.csv", len(genres), 10_000) and len(selected_genres) >= 50,
+@@ -307 +307 @@
+-        and len(genres) == 10_000 and len(selected_genres) >= 50
++        and target_met("genres/genres_10000.csv", len(genres), 10_000) and len(selected_genres) >= 50
+@@ -312 +312 @@
+-        and len(video_games) == 10_000
++        and target_met("video_games/video_game_music_10000.csv", len(video_games), 10_000)
+diff --git a/.github/workflows/full-build.yml b/.github/workflows/full-build.yml
+--- a/.github/workflows/full-build.yml
++++ b/.github/workflows/full-build.yml
+@@ -115,3 +115,3 @@
+-          BEATHIT_JIKAN_MAX_QUERIES: ${{ vars.BEATHIT_JIKAN_MAX_QUERIES || '1000' }}
++          BEATHIT_JIKAN_MAX_QUERIES: ${{ vars.BEATHIT_JIKAN_MAX_QUERIES || '5000' }}
+           BEATHIT_JIKAN_INDEX_PAGES: ${{ vars.BEATHIT_JIKAN_INDEX_PAGES || '240' }}
+-          BEATHIT_JIKAN_MAX_SECONDS: ${{ vars.BEATHIT_JIKAN_MAX_SECONDS || '1800' }}
++          BEATHIT_JIKAN_MAX_SECONDS: ${{ vars.BEATHIT_JIKAN_MAX_SECONDS || '3600' }}
+@@ -128,3 +128,5 @@
+           BEATHIT_KPOP_GENERIC_SEARCHES: ${{ vars.BEATHIT_KPOP_GENERIC_SEARCHES || '0' }}
+           BEATHIT_COUNTRY_WORKERS: ${{ vars.BEATHIT_COUNTRY_WORKERS || '4' }}
++          BEATHIT_LB_MAX_SECONDS: ${{ vars.BEATHIT_LB_MAX_SECONDS || '3600' }}
++          BEATHIT_LB_MAX_QUERIES: ${{ vars.BEATHIT_LB_MAX_QUERIES || '2500' }}
+         run: |
+diff --git a/src/music_megalist/countries.py b/src/music_megalist/countries.py
+--- a/src/music_megalist/countries.py
++++ b/src/music_megalist/countries.py
+@@ -92,18 +92,20 @@
+ def parse_country_markets_html(html: str, *, index_url: str = KWORB_SPOTIFY_INDEX) -> list[CountryMarket]:
+-    """Discover every country/territory for which Kworb exposes Spotify daily totals."""
++    """Discover Spotify country totals, preferring the deeper weekly history when available."""
+     soup = BeautifulSoup(html, "lxml")
+     markets: dict[str, CountryMarket] = {}
+     for a in soup.find_all("a", href=True):
+         href = str(a.get("href") or "")
+-        m = re.search(r"(?:^|/)country/([a-z0-9-]+)_daily\.html$", href, re.I)
++        m = re.search(r"(?:^|/)country/([a-z0-9-]+)_(daily|weekly)\.html$", href, re.I)
+         if not m:
+             continue
+         code = m.group(1).lower()
++        cadence = m.group(2).lower()
+         if code == "global":
+             continue
+-        name = _label_before(a)
+-        if not name or name.casefold() == code.casefold() or len(name) <= 3:
+-            name = COUNTRY_NAMES.get(code, code.upper())
+-        totals_href = re.sub(r"_daily\.html$", "_daily_totals.html", href, flags=re.I)
+-        markets[code] = CountryMarket(code=code, name=name, totals_url=urljoin(index_url, totals_href))
++        name = COUNTRY_NAMES.get(code) or _label_before(a) or code.upper()
++        totals_href = re.sub(r"_(?:daily|weekly)\.html$", f"_{cadence}_totals.html", href, flags=re.I)
++        # Weekly totals cover substantially more history for several markets (notably
++        # Cyprus, Malta and Andorra). Keep daily only as a fallback.
++        if code not in markets or cadence == "weekly":
++            markets[code] = CountryMarket(code=code, name=name, totals_url=urljoin(index_url, totals_href))
+     return sorted(markets.values(), key=lambda m: (m.name.casefold(), m.code))
+@@ -260,4 +260,15 @@
+ def _fetch_one_market(market: CountryMarket) -> tuple[CountryMarket, list[SongRow], dict[str, Any]]:
+-    html = _fetch_html(market.totals_url)
+-    rows, meta = parse_country_totals_html(html, market=market)
+-    return market, rows, meta
++    selected = market
++    try:
++        html = _fetch_html(selected.totals_url)
++    except FileNotFoundError:
++        if "_weekly_totals.html" not in selected.totals_url:
++            raise
++        selected = CountryMarket(
++            code=market.code,
++            name=market.name,
++            totals_url=market.totals_url.replace("_weekly_totals.html", "_daily_totals.html"),
++        )
++        html = _fetch_html(selected.totals_url)
++    rows, meta = parse_country_totals_html(html, market=selected)
++    return selected, rows, meta
+@@ -312 +312 @@
+-        "metric_definition": "Sum of Spotify daily Top 200 streams observed in that country while a song was charting; streams outside the Top 200 are excluded.",
++        "metric_definition": "Sum of Spotify Top 200 chart-attributed streams from the deepest available Kworb totals history (weekly preferred, daily fallback).",
+diff --git a/tests/test_countries.py b/tests/test_countries.py
+--- a/tests/test_countries.py
++++ b/tests/test_countries.py
+@@ -69,3 +69,13 @@
+     html = "AD <a href='country/ad_daily.html'>Daily</a><br>"
+     markets = parse_country_markets_html(html)
+     assert [(m.code,m.name) for m in markets] == [('ad','Andorra')]
++
++
++def test_country_market_discovery_prefers_weekly_totals_when_available():
++    html = """Cyprus
++    <a href='country/cy_daily.html'>Daily</a>
++    <a href='country/cy_weekly.html'>Weekly</a><br>"""
++    markets = parse_country_markets_html(html)
++    assert len(markets) == 1
++    assert markets[0].code == 'cy'
++    assert markets[0].totals_url.endswith('/spotify/country/cy_weekly_totals.html')
+diff --git a/scripts/build_expansion_lists.py b/scripts/build_expansion_lists.py
+new file mode 100644
+--- /dev/null
++++ b/scripts/build_expansion_lists.py
+@@ -0,0 +1,848 @@
++#!/usr/bin/env python3
++from __future__ import annotations
++
++import argparse
++import csv
++import json
++import math
++import os
++import re
++import sys
++import time
++import unicodedata
++from collections import defaultdict
++from datetime import date
++from pathlib import Path
++from typing import Any, Iterable
++
++import httpx
++from bs4 import BeautifulSoup
++from rapidfuzz import fuzz
++
++ROOT = Path(__file__).resolve().parents[1]
++sys.path.insert(0, str(ROOT / "src"))
++
++from music_megalist.dedupe import norm
++from music_megalist.io import read_rows, write_rows
++from music_megalist.models import SongRow
++
++DATA = ROOT / "data"
++CACHE = ROOT / ".cache" / "beathit-expansion"
++TODAY = date.today().isoformat()
++MB_API = "https://musicbrainz.org/ws/2"
++VOCADB_API = "https://vocadb.net/api/songs"
++KH_INDEX = "https://raw.githubusercontent.com/marcus-crane/khinsider-index/main/index.json"
++KH_ROOT = "https://downloads.khinsider.com"
++PART_SIZE = 10_000
++LANGUAGE_TARGET = 100_000
++
++LANGUAGE_COVERS = {
++    "russian": ("Russian", "rus", "ru"),
++    "japanese": ("Japanese", "jpn", "ja"),
++    "german": ("German", "deu", "de"),
++    "afrikaans": ("Afrikaans", "afr", "af"),
++    "korean": ("Korean", "kor", "ko"),
++    "chinese": ("Chinese", "zho", "zh"),
++    "ukrainian": ("Ukrainian", "ukr", "uk"),
++    "swedish": ("Swedish", "swe", "sv"),
++    "norwegian": ("Norwegian", "nor", "no"),
++    "indonesian": ("Indonesian", "ind", "id"),
++}
++
++BAD_ALBUM = re.compile(
++    r"\b(?:tribute|cover album|piano cover|music box|lullaby|karaoke|fan made|fanmade)\b",
++    re.I,
++)
++ARRANGEMENT_ALBUM = re.compile(
++    r"\b(?:arrange(?:d|ment)?|remix|orchestral|piano|jazz|lo-?fi|reimagined)\b",
++    re.I,
++)
++OST_ALBUM = re.compile(
++    r"\b(?:original(?:\s+video\s+game|\s+game)?\s+soundtrack|soundtrack|ost|gamerip|game\s+score|original\s+score)\b",
++    re.I,
++)
++
++
++def _atomic_json(path: Path, value: Any) -> None:
++    path.parent.mkdir(parents=True, exist_ok=True)
++    tmp = path.with_suffix(path.suffix + ".tmp")
++    tmp.write_text(json.dumps(value, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
++    tmp.replace(path)
++
++
++def _safe_float(value: Any, default: float = 0.0) -> float:
++    try:
++        return float(value)
++    except (TypeError, ValueError):
++        return default
++
++
++def _artist_credit(value: Any) -> str:
++    if not isinstance(value, list):
++        return ""
++    out: list[str] = []
++    for part in value:
++        if not isinstance(part, dict):
++            continue
++        name = str(part.get("name") or (part.get("artist") or {}).get("name") or "").strip()
++        if name:
++            out.append(name)
++        join = str(part.get("joinphrase") or "")
++        if join and out:
++            out[-1] += join
++    return "".join(out).strip()
++
++
++def _part_files(folder: Path, stem: str) -> list[Path]:
++    return sorted(folder.glob(f"{stem}_part_*.csv"))
++
++
++def _load_existing_parts(folder: Path, stem: str) -> tuple[list[SongRow], set[str]]:
++    rows: list[SongRow] = []
++    ids: set[str] = set()
++    for path in _part_files(folder, stem):
++        for row in read_rows(path):
++            rows.append(row)
++            extra = row.extra or {}
++            for key in ("musicbrainz_recording_mbid", "vocadb_id"):
++                value = str(extra.get(key) or "").strip().casefold()
++                if value:
++                    ids.add(value)
++            if row.musicbrainz_recording_mbid:
++                ids.add(str(row.musicbrainz_recording_mbid).casefold())
++    return rows, ids
++
++
++def _write_partitioned(rows: list[SongRow], folder: Path, stem: str) -> None:
++    folder.mkdir(parents=True, exist_ok=True)
++    for old in _part_files(folder, stem):
++        old.unlink()
++    for start in range(0, len(rows), PART_SIZE):
++        part = rows[start:start + PART_SIZE]
++        for rank, row in enumerate(part, 1):
++            row.rank = rank
++        write_rows(part, folder / f"{stem}_part_{start // PART_SIZE + 1:03d}.csv")
++
++
++class MusicBrainzClient:
++    def __init__(self) -> None:
++        self.client = httpx.Client(
++            timeout=60,
++            follow_redirects=True,
++            headers={"User-Agent": "BeatHit-Dataset/1.0 (+https://github.com/Dummy1-sudo/BeatHit-Dataset)"},
++        )
++        self.last_request = 0.0
++
++    def get(self, path: str, params: dict[str, Any]) -> dict[str, Any]:
++        # MusicBrainz asks clients to remain at roughly one request/second.
++        delay = 1.05 - (time.monotonic() - self.last_request)
++        if delay > 0:
++            time.sleep(delay)
++        last: Exception | None = None
++        for attempt in range(4):
++            try:
++                response = self.client.get(MB_API + path, params={**params, "fmt": "json"})
++                self.last_request = time.monotonic()
++                if response.status_code == 503 or response.status_code == 429:
++                    time.sleep(min(30, 2 ** attempt))
++                    continue
++                response.raise_for_status()
++                data = response.json()
++                return data if isinstance(data, dict) else {}
++            except Exception as exc:
++                last = exc
++                time.sleep(min(20, 2 ** attempt))
++        raise RuntimeError(f"MusicBrainz request failed: {last}")
++
++    def close(self) -> None:
++        self.client.close()
++
++
++def _language_cover_row(recording: dict[str, Any], *, lang_name: str, lang2: str, evidence: str,
++                        work_id: str | None = None, score: float = 100.0) -> SongRow | None:
++    rid = str(recording.get("id") or "").strip()
++    title = str(recording.get("title") or recording.get("name") or "").strip()
++    artist = _artist_credit(recording.get("artist-credit"))
++    if not rid or not title or not artist:
++        return None
++    first_date = str(recording.get("first-release-date") or "")
++    year = int(first_date[:4]) if re.match(r"^\d{4}", first_date) else None
++    return SongRow(
++        title=title,
++        main_artist=artist,
++        release_year=year,
++        genres=["cover"],
++        languages=[lang2],
++        musicbrainz_recording_mbid=rid,
++        metric_name="musicbrainz_cover_evidence_score",
++        metric_value=float(max(0.0, min(100.0, score))),
++        metric_unit="score_0_100",
++        overall_popularity_score=float(max(0.0, min(100.0, score))),
++        source_url=f"https://musicbrainz.org/recording/{rid}",
++        retrieved_at=TODAY,
++        source_notes=(
++            "Source-backed cover candidate from MusicBrainz. Language is the MusicBrainz work/release "
++            "language, not a title-script guess."
++        ),
++        extra={
++            "culture_category": "language_cover",
++            "cover_language": lang_name,
++            "musicbrainz_recording_mbid": rid,
++            "musicbrainz_work_mbid": work_id,
++            "cover_evidence": evidence,
++        },
++    )
++
++
++def build_language_cover(slug: str, deadline: float, mb: MusicBrainzClient, per_language_requests: int) -> dict[str, Any]:
++    lang_name, lang3, lang2 = LANGUAGE_COVERS[slug]
++    folder = DATA / "language_covers" / slug
++    stem = f"{slug}_covers"
++    rows, seen = _load_existing_parts(folder, stem)
++    state_path = CACHE / f"language_cover_{slug}.json"
++    try:
++        state = json.loads(state_path.read_text(encoding="utf-8")) if state_path.exists() else {}
++    except Exception:
++        state = {}
++    state.setdefault("phase", "tag")
++    state.setdefault("tag_index", 0)
++    state.setdefault("tag_offset", 0)
++    state.setdefault("work_offset", 0)
++    state.setdefault("source_exhausted", False)
++    requests = 0
++    changed = False
++
++    tag_queries = [
++        f'tag:cover AND lang:{lang3}',
++        f'tag:"cover song" AND lang:{lang3}',
++    ]
++
++    while len(rows) < LANGUAGE_TARGET and time.monotonic() < deadline and requests < per_language_requests:
++        if state["phase"] == "tag":
++            tag_index = int(state.get("tag_index") or 0)
++            if tag_index >= len(tag_queries):
++                state["phase"] = "work"
++                state["work_offset"] = int(state.get("work_offset") or 0)
++                continue
++            offset = int(state.get("tag_offset") or 0)
++            data = mb.get("/recording", {"query": tag_queries[tag_index], "limit": 100, "offset": offset})
++            requests += 1
++            recordings = data.get("recordings") or []
++            total = int(data.get("count") or 0)
++            for rec in recordings:
++                rid = str(rec.get("id") or "").casefold()
++                if not rid or rid in seen:
++                    continue
++                row = _language_cover_row(
++                    rec,
++                    lang_name=lang_name,
++                    lang2=lang2,
++                    evidence="musicbrainz recording tag explicitly marks cover",
++                    score=_safe_float(rec.get("score"), 80.0),
++                )
++                if row:
++                    rows.append(row)
++                    seen.add(rid)
++                    changed = True
++                    if len(rows) >= LANGUAGE_TARGET:
++                        break
++            offset += len(recordings)
++            if not recordings or offset >= total:
++                state["tag_index"] = tag_index + 1
++                state["tag_offset"] = 0
++            else:
++                state["tag_offset"] = offset
++            _atomic_json(state_path, state)
++            continue
++
++        # Exhaust the work language corpus next. If a song work has recordings by multiple
++        # distinct artists, all recordings not belonging to the earliest known artist credit
++        # are retained as cover versions. This is stronger evidence than title matching.
++        offset = int(state.get("work_offset") or 0)
++        query = f"lang:{lang3} AND type:song AND recording_count:[2 TO *]"
++        data = mb.get("/work", {"query": query, "limit": 100, "offset": offset})
++        requests += 1
++        works = data.get("works") or []
++        total = int(data.get("count") or 0)
++        if not works:
++            state["source_exhausted"] = True
++            break
++        for work in works:
++            if len(rows) >= LANGUAGE_TARGET or time.monotonic() >= deadline or requests >= per_language_requests:
++                break
++            wid = str(work.get("id") or "").strip()
++            if not wid or int(work.get("recording-count") or 0) < 2:
++                continue
++            try:
++                rec_data = mb.get(
++                    "/recording",
++                    {"work": wid, "inc": "artist-credits+releases", "limit": 100, "offset": 0},
++                )
++                requests += 1
++            except Exception:
++                continue
++            recs = rec_data.get("recordings") or []
++            if len(recs) < 2:
++                continue
++            parsed: list[tuple[str, str, dict[str, Any]]] = []
++            for rec in recs:
++                artist = _artist_credit(rec.get("artist-credit"))
++                date_value = str(rec.get("first-release-date") or "9999-99-99")
++                if artist:
++                    parsed.append((date_value, norm(artist), rec))
++            artist_keys = {artist for _, artist, _ in parsed if artist}
++            if len(artist_keys) < 2:
++                continue
++            parsed.sort(key=lambda item: item[0])
++            original_artist = parsed[0][1]
++            for _, artist_key, rec in parsed:
++                rid = str(rec.get("id") or "").casefold()
++                if not rid or rid in seen or artist_key == original_artist:
++                    continue
++                row = _language_cover_row(
++                    rec,
++                    lang_name=lang_name,
++                    lang2=lang2,
++                    evidence="distinct-artist recording of the same MusicBrainz song work",
++                    work_id=wid,
++                    score=85.0,
++                )
++                if row:
++                    rows.append(row)
++                    seen.add(rid)
++                    changed = True
++                    if len(rows) >= LANGUAGE_TARGET:
++                        break
++        offset += len(works)
++        state["work_offset"] = offset
++        if offset >= total:
++            state["source_exhausted"] = True
++        _atomic_json(state_path, state)
++        if state.get("source_exhausted"):
++            break
++
++    if changed or not _part_files(folder, stem):
++        _write_partitioned(rows[:LANGUAGE_TARGET], folder, stem)
++    state["rows"] = min(len(rows), LANGUAGE_TARGET)
++    state["complete"] = len(rows) >= LANGUAGE_TARGET
++    _atomic_json(state_path, state)
++    return {
++        "target": LANGUAGE_TARGET,
++        "rows": min(len(rows), LANGUAGE_TARGET),
++        "complete": len(rows) >= LANGUAGE_TARGET,
++        "source_exhausted": bool(state.get("source_exhausted")),
++        "requests_this_run": requests,
++    }
++
++
++def _vocadb_artist(item: dict[str, Any]) -> str:
++    value = str(item.get("artistString") or "").strip()
++    if value:
++        return value
++    names = []
++    for artist in item.get("artists") or []:
++        name = str((artist.get("artist") or {}).get("name") or artist.get("name") or "").strip()
++        if name:
++            names.append(name)
++    return ", ".join(names) or "Unknown credited artist"
++
++
++def build_vocaloid_covers(deadline: float, max_requests: int) -> dict[str, Any]:
++    folder = DATA / "vocaloid_covers"
++    stem = "vocaloid_covers"
++    rows, seen = _load_existing_parts(folder, stem)
++    state_path = CACHE / "vocaloid_covers.json"
++    try:
++        state = json.loads(state_path.read_text(encoding="utf-8")) if state_path.exists() else {}
++    except Exception:
++        state = {}
++    offset = int(state.get("offset") or 0)
++    total = state.get("api_total")
++    exhaustive = bool(state.get("exhaustive"))
++    requests = 0
++    changed = False
++    headers = {"User-Agent": "BeatHit-Dataset/1.0 (+https://github.com/Dummy1-sudo/BeatHit-Dataset)"}
++    with httpx.Client(timeout=60, follow_redirects=True, headers=headers) as client:
++        while not exhaustive and time.monotonic() < deadline and requests < max_requests:
++            params = {
++                "songTypes": "Cover",
++                "start": offset,
++                "maxResults": 50,
++                "sort": "RatingScore",
++                "fields": "Artists,Names,PVs",
++                "lang": "Default",
++            }
++            if total is None:
++                params["getTotalCount"] = "true"
++            response = client.get(VOCADB_API, params=params)
++            requests += 1
++            response.raise_for_status()
++            data = response.json()
++            if total is None:
++                total = int(data.get("totalCount") or 0)
++            items = data.get("items") or []
++            if not items:
++                exhaustive = True
++                break
++            for item in items:
++                sid = str(item.get("id") or "").strip()
++                if not sid or sid.casefold() in seen:
++                    continue
++                if str(item.get("songType") or "").casefold() != "cover":
++                    continue
++                title = str(item.get("name") or item.get("defaultName") or "").strip()
++                if not title:
++                    continue
++                pvs = []
++                for pv in item.get("pvs") or []:
++                    if not isinstance(pv, dict) or bool(pv.get("disabled")):
++                        continue
++                    pvs.append({
++                        "service": pv.get("service"),
++                        "pvType": pv.get("pvType"),
++                        "pvId": pv.get("pvId"),
++                        "url": pv.get("url"),
++                    })
++                rating = _safe_float(item.get("ratingScore"), 0.0)
++                rows.append(SongRow(
++                    title=title,
++                    main_artist=_vocadb_artist(item),
++                    genres=["vocaloid cover", "voice synth cover"],
++                    languages=["und"],
++                    metric_name="vocadb_rating_score",
++                    metric_value=rating,
++                    metric_unit="score",
++                    overall_popularity_score=rating,
++                    source_url=f"https://vocadb.net/S/{sid}",
++                    retrieved_at=TODAY,
++                    source_notes="VocaDB song entry explicitly classified as Cover; no language guessed from title text.",
++                    extra={
++                        "culture_category": "vocaloid_cover",
++                        "vocadb_id": sid,
++                        "vocadb_song_type": "Cover",
++                        "pvs": pvs,
++                    },
++                ))
++                seen.add(sid.casefold())
++                changed = True
++            offset += len(items)
++            if total is not None and offset >= int(total):
++                exhaustive = True
++            state = {"offset": offset, "api_total": total, "exhaustive": exhaustive, "rows": len(rows)}
++            _atomic_json(state_path, state)
++            time.sleep(0.2)
++    if changed or not _part_files(folder, stem):
++        rows.sort(key=lambda row: float(row.metric_value or 0.0), reverse=True)
++        _write_partitioned(rows, folder, stem)
++    state = {"offset": offset, "api_total": total, "exhaustive": exhaustive, "rows": len(rows)}
++    _atomic_json(state_path, state)
++    return {
++        "target": "every VocaDB song explicitly classified Cover",
++        "rows": len(rows),
++        "complete": exhaustive and total is not None and offset >= int(total),
++        "api_total": total,
++        "requests_this_run": requests,
++    }
++
++
++def _ascii_key(value: str) -> str:
++    value = unicodedata.normalize("NFKD", value)
++    value = "".join(ch for ch in value if not unicodedata.combining(ch))
++    value = value.casefold()
++    value = re.sub(r"\([^)]*\)$", "", value)
++    value = re.sub(r"\b(?:original|official|video game|game)?\s*(?:soundtrack|ost|gamerip|score)\b", " ", value)
++    value = re.sub(r"[^a-z0-9]+", " ", value)
++    return " ".join(value.split())
++
++
++def _album_class(name: str) -> tuple[str, float]:
++    if BAD_ALBUM.search(name):
++        return "fan_or_cover", 20.0
++    if ARRANGEMENT_ALBUM.search(name):
++        return "arrangement", 60.0
++    if OST_ALBUM.search(name):
++        return "official_or_gamerip", 100.0
++    return "unclassified_game_album", 80.0
++
++
++def _load_kh_index() -> dict[str, str]:
++    CACHE.mkdir(parents=True, exist_ok=True)
++    cache_path = CACHE / "khinsider_index.json"
++    if cache_path.exists() and time.time() - cache_path.stat().st_mtime < 7 * 86400:
++        try:
++            data = json.loads(cache_path.read_text(encoding="utf-8"))
++            entries = data.get("entries") if isinstance(data, dict) else None
++            if isinstance(entries, dict) and entries:
++                return {str(k): str(v) for k, v in entries.items()}
++        except Exception:
++            pass
++    response = httpx.get(KH_INDEX, timeout=120, follow_redirects=True, headers={"User-Agent": "BeatHit-Dataset/1.0"})
++    response.raise_for_status()
++    data = response.json()
++    cache_path.write_text(json.dumps(data, ensure_ascii=False) + "\n", encoding="utf-8")
++    entries = data.get("entries") if isinstance(data, dict) else None
++    return {str(k): str(v) for k, v in (entries or {}).items()}
++
++
++def _match_albums(game: str, entries: dict[str, str], max_albums: int = 12) -> list[tuple[float, str, str, str, float]]:
++    game_key = _ascii_key(game)
++    if not game_key:
++        return []
++    first = game_key.split()[0]
++    candidates = []
++    for display, path in entries.items():
++        album_key = _ascii_key(display)
++        if not album_key:
++            continue
++        if first not in album_key and game_key not in album_key:
++            continue
++        score = max(fuzz.ratio(game_key, album_key), fuzz.token_set_ratio(game_key, album_key))
++        contained = game_key in album_key or album_key in game_key
++        threshold = 82 if contained else 90
++        if score < threshold:
++            continue
++        kind, kind_score = _album_class(display)
++        final = score * 0.75 + kind_score * 0.25
++        candidates.append((final, display, path, kind, score))
++    candidates.sort(reverse=True, key=lambda item: item[0])
++    return candidates[:max_albums]
++
++
++def _album_artist(soup: BeautifulSoup) -> str:
++    text = soup.get_text("\n", strip=True)
++    for label in ("Artists:", "Artist:", "Composers:", "Composer:"):
++        match = re.search(re.escape(label) + r"\s*([^\n]{2,200})", text, re.I)
++        if match:
++            return match.group(1).strip()
++    return "Unknown credited artist"
++
++
++def _album_tracks(html_text: str) -> tuple[str, list[str]]:
++    soup = BeautifulSoup(html_text, "lxml")
++    artist = _album_artist(soup)
++    tracks: list[str] = []
++    table = soup.select_one("table#songlist") or soup.find("table")
++    if table is None:
++        return artist, tracks
++    for tr in table.find_all("tr"):
++        cells = [td.get_text(" ", strip=True) for td in tr.find_all("td")]
++        if not cells:
++            continue
++        links = [a for a in tr.find_all("a", href=True) if "/game-soundtracks/album/" in str(a.get("href"))]
++        title = ""
++        for a in links:
++            candidate = a.get_text(" ", strip=True)
++            if candidate and not re.fullmatch(r"(?:MP3|FLAC|Download)", candidate, re.I):
++                title = candidate
++                break
++        if not title:
++            for cell in cells:
++                candidate = re.sub(r"^\s*\d+[.\-)]?\s*", "", cell).strip()
++                if candidate and not re.fullmatch(r"\d+(?::\d+)+|MP3|FLAC", candidate, re.I):
++                    title = candidate
++                    break
++        title = title.strip()
++        if title and title.casefold() not in {"song name", "track", "title"} and title not in tracks:
++            tracks.append(title)
++    return artist, tracks
++
++
++def _slug(value: str) -> str:
++    value = _ascii_key(value).replace(" ", "-")
++    return value[:100] or "game"
++
++
++def _existing_game_file(game_rank: int, game: str) -> Path:
++    return DATA / "video_games" / "per_game" / f"{game_rank:04d}_{_slug(game)}.csv"
++
++
++def _build_game_rows(game: str, game_rank: int, entries: dict[str, str], client: httpx.Client) -> list[SongRow]:
++    rows: list[SongRow] = []
++    seen_titles: set[str] = set()
++    for _, display, path, album_kind, match_score in _match_albums(game, entries):
++        cache_name = re.sub(r"[^a-zA-Z0-9._-]+", "_", path.strip("/"))[-180:] + ".html"
++        cache_path = CACHE / "kh_albums" / cache_name
++        cache_path.parent.mkdir(parents=True, exist_ok=True)
++        if cache_path.exists():
++            html_text = cache_path.read_text(encoding="utf-8", errors="replace")
++        else:
++            response = client.get(KH_ROOT + path)
++            response.raise_for_status()
++            html_text = response.text
++            cache_path.write_text(html_text, encoding="utf-8")
++            time.sleep(0.15)
++        artist, tracks = _album_tracks(html_text)
++        for position, title in enumerate(tracks, 1):
++            key = norm(title)
++            if not key or key in seen_titles:
++                continue
++            seen_titles.add(key)
++            relevance = min(100.0, match_score * 0.85 + _album_class(display)[1] * 0.15)
++            game_popularity = max(0.0, 100.0 - math.log10(max(1, game_rank)) * 25.0)
++            prominence = max(0.0, 100.0 - min(position - 1, 99) * 0.7)
++            popularity = game_popularity * 0.7 + prominence * 0.3
++            combined = relevance * 0.6 + popularity * 0.4
++            rows.append(SongRow(
++                title=title,
++                main_artist=artist,
++                album=display,
++                screen_work=game,
++                genres=["video game soundtrack"],
++                languages=["und"],
++                metric_name="khinsider_track_prominence_proxy",
++                metric_value=popularity,
++                metric_unit="score_0_100",
++                overall_popularity_score=combined,
++                source_url=KH_ROOT + path,
++                retrieved_at=TODAY,
++                source_notes=(
++                    "Track title is taken from KHInsider's soundtrack/gamerip album index. "
++                    "Popularity is an explicitly labelled proxy based on BeatHit game rank and track prominence."
++                ),
++                extra={
++                    "culture_category": "video_game_music",
++                    "video_game": game,
++                    "game_rank": game_rank,
++                    "game_association_kind": "khinsider_game_soundtrack",
++                    "khinsider_album_url": KH_ROOT + path,
++                    "khinsider_album_title": display,
++                    "khinsider_album_kind": album_kind,
++                    "khinsider_album_match_score": match_score,
++                    "relevance_score_100": relevance,
++                    "popularity_score_100": popularity,
++                    "score_100": combined,
++                    "popularity_basis": "BeatHit master-list game rank plus track position proxy",
++                },
++            ))
++    rows.sort(key=lambda row: float(row.overall_popularity_score or 0.0), reverse=True)
++    for rank, row in enumerate(rows, 1):
++        row.rank = rank
++    return rows
++
++
++def _refresh_general_vgm() -> int:
++    path = DATA / "video_games" / "video_game_music_10000.csv"
++    candidates: list[SongRow] = []
++    if path.exists():
++        try:
++            candidates.extend(read_rows(path))
++        except Exception:
++            pass
++    for file in sorted((DATA / "video_games" / "per_game").glob("*.csv")):
++        for row in read_rows(file):
++            extra = row.extra or {}
++            if extra.get("game_association_kind") != "khinsider_game_soundtrack":
++                continue
++            if extra.get("khinsider_album_kind") in {"fan_or_cover", "arrangement"}:
++                continue
++            if float(extra.get("khinsider_album_match_score") or 0) < 88:
++                continue
++            candidates.append(row)
++    candidates.sort(
++        key=lambda row: (float(row.overall_popularity_score or 0.0), float(row.metric_value or 0.0)),
++        reverse=True,
++    )
++    out: list[SongRow] = []
++    seen_text: set[tuple[str, str]] = set()
++    seen_mbid: set[str] = set()
++    seen_isrc: set[str] = set()
++    seen_spotify: set[str] = set()
++    for row in candidates:
++        key = (norm(row.title), norm(row.main_artist))
++        mbid = str(row.musicbrainz_recording_mbid or "").casefold()
++        isrc = str(row.isrc or "").casefold()
++        spotify = str(row.spotify_track_id or "")
++        if not all(key) or key in seen_text or (mbid and mbid in seen_mbid) or (isrc and isrc in seen_isrc) or (spotify and spotify in seen_spotify):
++            continue
++        seen_text.add(key)
++        if mbid:
++            seen_mbid.add(mbid)
++        if isrc:
++            seen_isrc.add(isrc)
++        if spotify:
++            seen_spotify.add(spotify)
++        out.append(row)
++        if len(out) >= 10_000:
++            break
++    for rank, row in enumerate(out, 1):
++        row.rank = rank
++    if len(out) > (len(read_rows(path)) if path.exists() else 0):
++        write_rows(out, path)
++    return len(out)
++
++
++def build_per_game_vgm(deadline: float, max_games: int) -> dict[str, Any]:
++    master = DATA / "seeds" / "beathit_video_games_master_list.txt"
++    games = [line.strip() for line in master.read_text(encoding="utf-8").splitlines() if line.strip()]
++    entries = _load_kh_index()
++    state_path = CACHE / "video_game_per_game.json"
++    try:
++        state = json.loads(state_path.read_text(encoding="utf-8")) if state_path.exists() else {}
++    except Exception:
++        state = {}
++    next_index = int(state.get("next_index") or 0)
++    processed_this_run = 0
++    total_tracks = 0
++    for path in (DATA / "video_games" / "per_game").glob("*.csv"):
++        try:
++            total_tracks += len(read_rows(path))
++        except Exception:
++            pass
++    headers = {"User-Agent": "BeatHit-Dataset/1.0 (+https://github.com/Dummy1-sudo/BeatHit-Dataset)"}
++    with httpx.Client(timeout=60, follow_redirects=True, headers=headers) as client:
++        while next_index < len(games) and processed_this_run < max_games and time.monotonic() < deadline:
++            rank = next_index + 1
++            game = games[next_index]
++            output = _existing_game_file(rank, game)
++            if not output.exists():
++                try:
++                    rows = _build_game_rows(game, rank, entries, client)
++                    output.parent.mkdir(parents=True, exist_ok=True)
++                    if rows:
++                        write_rows(rows, output)
++                        total_tracks += len(rows)
++                    else:
++                        # A zero-byte marker would be invalid CSV; track unmatched games in state instead.
++                        state.setdefault("unmatched", []).append({"rank": rank, "game": game})
++                except Exception as exc:
++                    state.setdefault("errors", []).append({"rank": rank, "game": game, "error": str(exc)[:500]})
++                    _atomic_json(state_path, state)
++                    break
++            next_index += 1
++            processed_this_run += 1
++            state["next_index"] = next_index
++            state["master_games"] = len(games)
++            _atomic_json(state_path, state)
++    general_rows = _refresh_general_vgm()
++    state["next_index"] = next_index
++    state["master_games"] = len(games)
++    state["complete"] = next_index >= len(games)
++    _atomic_json(state_path, state)
++    # Recount because this run may have added files.
++    total_tracks = 0
++    materialized_games = 0
++    for path in (DATA / "video_games" / "per_game").glob("*.csv"):
++        try:
++            total_tracks += len(read_rows(path))
++            materialized_games += 1
++        except Exception:
++            pass
++    return {
++        "target": f"all {len(games)} BeatHit master-list games scanned; one separate track list per game when soundtrack evidence exists",
++        "rows": total_tracks,
++        "complete": next_index >= len(games),
++        "games_scanned": next_index,
++        "master_games": len(games),
++        "materialized_game_lists": materialized_games,
++        "unmatched_games": len(state.get("unmatched") or []),
++        "general_vgm_rows_after_merge": general_rows,
++        "processed_this_run": processed_this_run,
++    }
++
++
++def _update_status(results: dict[str, dict[str, Any]]) -> None:
++    path = ROOT / "STATUS.json"
++    try:
++        payload = json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
++    except Exception:
++        payload = {}
++    datasets = payload.setdefault("datasets", {})
++    for name, result in results.items():
++        datasets[name] = {
++            "target": result.get("target"),
++            "materialized_rows": int(result.get("rows") or 0),
++            "complete": bool(result.get("complete")),
++            "builder_revision": "expansion-v1",
++            "metric_coverage": {},
++            "notes": [json.dumps({k: v for k, v in result.items() if k not in {"target", "rows", "complete"}}, ensure_ascii=False)],
++        }
++    summary = payload.setdefault("completion_summary", {})
++    core_complete = bool(summary.get("core_lists_complete", summary.get("all_requested_lists_complete", False)))
++    expansion_names = [f"cover_{slug}" for slug in LANGUAGE_COVERS] + ["vocaloid_covers", "video_game_per_game"]
++    expansion_complete = all(bool((datasets.get(name) or {}).get("complete")) for name in expansion_names)
++    summary["core_lists_complete"] = core_complete
++    summary["expansion_lists_complete"] = expansion_complete
++    summary["all_requested_lists_complete"] = core_complete and expansion_complete
++    _atomic_json(path, payload)
++
++
++def main() -> int:
++    ap = argparse.ArgumentParser(description="Build BeatHit expansion lists without replacing the original lists")
++    ap.add_argument("--max-seconds", type=int, default=int(os.getenv("BEATHIT_EXPANSION_MAX_SECONDS", "19000")))
++    ap.add_argument("--musicbrainz-requests-per-language", type=int, default=int(os.getenv("BEATHIT_COVER_MB_REQUESTS_PER_LANGUAGE", "1200")))
++    ap.add_argument("--vocadb-requests", type=int, default=int(os.getenv("BEATHIT_VOCALOID_COVER_REQUESTS", "4000")))
++    ap.add_argument("--max-games", type=int, default=int(os.getenv("BEATHIT_PER_GAME_MAX_GAMES", "3162")))
++    args = ap.parse_args()
++    CACHE.mkdir(parents=True, exist_ok=True)
++    overall_deadline = time.monotonic() + max(60, args.max_seconds)
++    results: dict[str, dict[str, Any]] = {}
++
++    # Reserve approximately half of the run for language covers, then build VocaDB covers,
++    # then spend the remaining time on the game-by-game catalog. All three are resumable.
++    mb = MusicBrainzClient()
++    try:
++        cover_deadline = min(overall_deadline, time.monotonic() + args.max_seconds * 0.50)
++        for slug in LANGUAGE_COVERS:
++            if time.monotonic() >= cover_deadline:
++                break
++            per_language_deadline = min(
++                cover_deadline,
++                time.monotonic() + max(120, (cover_deadline - time.monotonic()) / max(1, len(LANGUAGE_COVERS))),
++            )
++            results[f"cover_{slug}"] = build_language_cover(
++                slug,
++                per_language_deadline,
++                mb,
++                args.musicbrainz_requests_per_language,
++            )
++    finally:
++        mb.close()
++
++    # Preserve status for languages not touched because a prior run consumed its budget.
++    for slug in LANGUAGE_COVERS:
++        name = f"cover_{slug}"
++        if name not in results:
++            rows, _ = _load_existing_parts(DATA / "language_covers" / slug, f"{slug}_covers")
++            state_path = CACHE / f"language_cover_{slug}.json"
++            try:
++                state = json.loads(state_path.read_text(encoding="utf-8")) if state_path.exists() else {}
++            except Exception:
++                state = {}
++            results[name] = {
++                "target": LANGUAGE_TARGET,
++                "rows": len(rows),
++                "complete": len(rows) >= LANGUAGE_TARGET,
++                "source_exhausted": bool(state.get("source_exhausted")),
++                "requests_this_run": 0,
++            }
++
++    if time.monotonic() < overall_deadline:
++        vocaloid_deadline = min(overall_deadline, time.monotonic() + args.max_seconds * 0.12)
++        results["vocaloid_covers"] = build_vocaloid_covers(vocaloid_deadline, args.vocadb_requests)
++    else:
++        rows, _ = _load_existing_parts(DATA / "vocaloid_covers", "vocaloid_covers")
++        results["vocaloid_covers"] = {"target": "every VocaDB song explicitly classified Cover", "rows": len(rows), "complete": False}
++
++    if time.monotonic() < overall_deadline:
++        results["video_game_per_game"] = build_per_game_vgm(overall_deadline, args.max_games)
++    else:
++        state_path = CACHE / "video_game_per_game.json"
++        try:
++            state = json.loads(state_path.read_text(encoding="utf-8")) if state_path.exists() else {}
++        except Exception:
++            state = {}
++        results["video_game_per_game"] = {
++            "target": "all 3162 BeatHit master-list games scanned",
++            "rows": 0,
++            "complete": bool(state.get("complete")),
++            "games_scanned": int(state.get("next_index") or 0),
++            "master_games": 3162,
++        }
++
++    _update_status(results)
++    print(json.dumps(results, ensure_ascii=False, indent=2))
++    return 0
++
++
++if __name__ == "__main__":
++    raise SystemExit(main())
+diff --git a/.github/workflows/expansion-build.yml b/.github/workflows/expansion-build.yml
+new file mode 100644
+--- /dev/null
++++ b/.github/workflows/expansion-build.yml
+@@ -0,0 +1,103 @@
++name: expansion-high-coverage-build
++
++on:
++  workflow_dispatch:
++    inputs:
++      max_seconds:
++        description: "Maximum runtime for expansion builders"
++        required: false
++        default: "19000"
++        type: string
++  schedule:
++    - cron: '17 5 * * *'
++  push:
++    branches: [main]
++    paths:
++      - 'scripts/build_expansion_lists.py'
++      - 'data/seeds/beathit_video_games_master_list.txt'
++      - '.github/workflows/expansion-build.yml'
++      - 'src/music_megalist/quality.py'
++      - 'src/music_megalist/io.py'
++      - 'src/music_megalist/models.py'
++
++permissions:
++  contents: write
++  actions: read
++
++concurrency:
++  group: beathit-expansion-build
++  cancel-in-progress: false
++
++jobs:
++  expansion:
++    if: "!contains(github.event.head_commit.message || '', '[skip expansion]')"
++    runs-on: ubuntu-latest
++    timeout-minutes: 355
++    steps:
++      - uses: actions/checkout@v4
++        with:
++          fetch-depth: 1
++
++      - uses: actions/setup-python@v5
++        with:
++          python-version: '3.12'
++          cache: pip
++
++      - name: Install builder
++        run: |
++          python -m pip install --upgrade pip
++          pip install -e . -r requirements-full.txt
++
++      - name: Restore expansion checkpoints
++        id: expansion-cache
++        uses: actions/cache/restore@v4
++        with:
++          path: .cache/beathit-expansion
++          key: beathit-expansion-v1-${{ runner.os }}-${{ github.run_id }}-${{ github.run_attempt }}
++          restore-keys: |
++            beathit-expansion-v1-${{ runner.os }}-
++
++      - name: Build language covers, Vocaloid covers, and per-game VGM
++        env:
++          PYTHONUNBUFFERED: '1'
++          BEATHIT_EXPANSION_MAX_SECONDS: ${{ github.event_name == 'workflow_dispatch' && inputs.max_seconds || '19000' }}
++          BEATHIT_COVER_MB_REQUESTS_PER_LANGUAGE: ${{ vars.BEATHIT_COVER_MB_REQUESTS_PER_LANGUAGE || '1200' }}
++          BEATHIT_VOCALOID_COVER_REQUESTS: ${{ vars.BEATHIT_VOCALOID_COVER_REQUESTS || '4000' }}
++          BEATHIT_PER_GAME_MAX_GAMES: ${{ vars.BEATHIT_PER_GAME_MAX_GAMES || '3162' }}
++        run: python scripts/build_expansion_lists.py
++
++      - name: Save expansion checkpoints
++        if: always()
++        uses: actions/cache/save@v4
++        with:
++          path: .cache/beathit-expansion
++          key: beathit-expansion-v1-${{ runner.os }}-${{ github.run_id }}-${{ github.run_attempt }}
++
++      - name: Validate canonical CSV structure
++        run: python -m music_megalist validate
++
++      - name: Update manifest
++        run: python scripts/update_manifest.py
++
++      - name: Upload expansion outputs
++        if: always()
++        uses: actions/upload-artifact@v4
++        with:
++          name: beathit-expansion-output
++          path: |
++            STATUS.json
++            data/MANIFEST.json
++            data/language_covers/**/*.csv
++            data/vocaloid_covers/*.csv
++            data/video_games/per_game/*.csv
++            data/video_games/video_game_music_10000.csv
++
++      - name: Commit expansion outputs
++        run: |
++          git config user.name "BeatHit Dataset Builder"
++          git config user.email "actions@users.noreply.github.com"
++          python scripts/stage_generated.py
++          if ! git diff --cached --quiet; then
++            git commit -m "Build resumable BeatHit expansion lists [skip full-build] [skip expansion]"
++            git push origin HEAD:main
++          fi
+diff --git a/data/seeds/beathit_video_games_master_list.txt b/data/seeds/beathit_video_games_master_list.txt
+new file mode 100644
+--- /dev/null
++++ b/data/seeds/beathit_video_games_master_list.txt
+@@ -0,0 +1,3162 @@
++Minecraft
++Grand Theft Auto V
++Wii Sports
++PUBG: Battlegrounds
++Mario Kart 8 Deluxe
++Red Dead Redemption 2
++Terraria
++The Elder Scrolls V: Skyrim
++The Witcher 3: Wild Hunt
++Animal Crossing: New Horizons
++Super Mario Bros.
++Overwatch
++Human: Fall Flat
++Stardew Valley
++Pokémon Red and Blue
++Wii Fit
++Mario Kart Wii
++Cyberpunk 2077
++New Super Mario Bros.
++The Legend of Zelda: Breath of the Wild
++New Super Mario Bros. Wii
++Tetris
++Wii Sports Resort
++Call of Duty: Modern Warfare
++Diablo III
++Pokémon Gold and Silver
++Super Mario World
++Borderlands 2
++Super Mario Odyssey
++Pokémon Sword and Shield
++Grand Theft Auto: San Andreas
++Pokémon Scarlet and Violet
++Call of Duty: Black Ops
++Call of Duty: Black Ops II
++Call of Duty: Modern Warfare 2
++Call of Duty: Modern Warfare 3
++Pokémon Sun and Moon
++Grand Theft Auto IV
++Pokémon Diamond and Pearl
++The Legend of Zelda: Tears of the Kingdom
++Super Smash Bros. Ultimate
++Hogwarts Legacy
++Elden Ring
++Monster Hunter: World
++The Last of Us
++God of War
++Halo 3
++Super Mario 64
++The Sims 4
++The Sims 3
++The Sims 2
++The Sims
++Pokémon X and Y
++Pokémon Ruby and Sapphire
++Pokémon Black and White
++Pokémon Let's Go, Pikachu! and Let's Go, Eevee!
++Pokémon Brilliant Diamond and Shining Pearl
++Pokémon Legends: Arceus
++Mario Kart DS
++Mario Kart 7
++Wii Play
++Wii Fit Plus
++Wii Party
++Nintendo Switch Sports
++Ring Fit Adventure
++Super Mario Party
++Mario Party Superstars
++New Super Mario Bros. U Deluxe
++Super Mario Bros. Wonder
++Luigi's Mansion 3
++Splatoon 2
++Splatoon 3
++Super Mario 3D World + Bowser's Fury
++Super Mario Maker 2
++The Legend of Zelda: Link's Awakening
++Pokémon Yellow
++Pokémon Crystal
++Pokémon Emerald
++Pokémon Platinum
++Pokémon HeartGold and SoulSilver
++Pokémon Black 2 and White 2
++Pokémon Omega Ruby and Alpha Sapphire
++Pokémon FireRed and LeafGreen
++Pokémon Ultra Sun and Ultra Moon
++Call of Duty: Black Ops III
++Call of Duty: Black Ops Cold War
++Call of Duty: Ghosts
++Call of Duty: Advanced Warfare
++Call of Duty: WWII
++Call of Duty: Modern Warfare II
++Call of Duty: Modern Warfare III
++Call of Duty: Vanguard
++Battlefield 1
++Battlefield 3
++Battlefield 4
++Battlefield V
++Star Wars Battlefront
++Star Wars Battlefront II
++Destiny
++Destiny 2
++Tom Clancy's Rainbow Six Siege
++Tom Clancy's The Division
++Tom Clancy's The Division 2
++Assassin's Creed
++Assassin's Creed II
++Assassin's Creed III
++Assassin's Creed IV: Black Flag
++Assassin's Creed Origins
++Assassin's Creed Odyssey
++Assassin's Creed Valhalla
++Far Cry 3
++Far Cry 4
++Far Cry 5
++Far Cry 6
++Resident Evil 2
++Resident Evil 4
++Resident Evil 5
++Resident Evil 6
++Resident Evil 7: Biohazard
++Resident Evil Village
++Resident Evil 2 (2019)
++Resident Evil 4 (2023)
++Dying Light
++Dying Light 2 Stay Human
++Borderlands 3
++Fallout 4
++Fallout: New Vegas
++Fallout 3
++The Elder Scrolls Online
++ARK: Survival Evolved
++Rust
++DayZ
++7 Days to Die
++Phasmophobia
++Palworld
++Black Myth: Wukong
++Helldivers 2
++Baldur's Gate 3
++It Takes Two
++A Way Out
++Among Us
++Fall Guys
++Rocket League
++Counter-Strike
++Counter-Strike: Source
++Counter-Strike: Global Offensive
++Counter-Strike 2
++Half-Life
++Half-Life 2
++Portal
++Portal 2
++Left 4 Dead
++Left 4 Dead 2
++Garry's Mod
++Team Fortress 2
++World of Warcraft
++World of Warcraft: The Burning Crusade
++World of Warcraft: Wrath of the Lich King
++World of Warcraft: Cataclysm
++World of Warcraft: Mists of Pandaria
++World of Warcraft: Warlords of Draenor
++World of Warcraft: Legion
++World of Warcraft: Battle for Azeroth
++World of Warcraft: Shadowlands
++World of Warcraft: Dragonflight
++World of Warcraft: The War Within
++Diablo II
++Diablo IV
++StarCraft
++StarCraft II: Wings of Liberty
++Warcraft III: Reign of Chaos
++Warcraft III: The Frozen Throne
++The Binding of Isaac: Rebirth
++Hades
++Hollow Knight
++Dead Cells
++Celeste
++Cuphead
++Undertale
++Deltarune
++Slay the Spire
++Vampire Survivors
++Dead by Daylight
++Sea of Thieves
++No Man's Sky
++Valheim
++Subnautica
++Subnautica: Below Zero
++Don't Starve
++Don't Starve Together
++The Forest
++Sons of the Forest
++Raft
++Lethal Company
++Balatro
++Grand Theft Auto III
++Grand Theft Auto: Vice City
++Grand Theft Auto: Liberty City Stories
++Grand Theft Auto: Vice City Stories
++Grand Theft Auto: Chinatown Wars
++Red Dead Redemption
++Red Dead Revolver
++L.A. Noire
++Max Payne
++Max Payne 2: The Fall of Max Payne
++Max Payne 3
++Bully
++FIFA 06
++FIFA 07
++FIFA 08
++FIFA 09
++FIFA 10
++FIFA 11
++FIFA 12
++FIFA 13
++FIFA 14
++FIFA 15
++FIFA 16
++FIFA 17
++FIFA 18
++FIFA 19
++FIFA 20
++FIFA 21
++FIFA 22
++FIFA 23
++EA Sports FC 24
++EA Sports FC 25
++EA Sports FC 26
++Madden NFL 06
++Madden NFL 07
++Madden NFL 08
++Madden NFL 09
++Madden NFL 10
++Madden NFL 11
++Madden NFL 12
++Madden NFL 13
++Madden NFL 25
++Madden NFL 15
++Madden NFL 16
++Madden NFL 17
++Madden NFL 18
++Madden NFL 19
++Madden NFL 20
++Madden NFL 21
++Madden NFL 22
++Madden NFL 23
++Madden NFL 24
++Madden NFL 25 (2024)
++Madden NFL 26
++NBA 2K10
++NBA 2K11
++NBA 2K12
++NBA 2K13
++NBA 2K14
++NBA 2K15
++NBA 2K16
++NBA 2K17
++NBA 2K18
++NBA 2K19
++NBA 2K20
++NBA 2K21
++NBA 2K22
++NBA 2K23
++NBA 2K24
++NBA 2K25
++NBA 2K26
++Need for Speed: Underground
++Need for Speed: Underground 2
++Need for Speed: Most Wanted
++Need for Speed: Carbon
++Need for Speed: ProStreet
++Need for Speed: Undercover
++Need for Speed: Shift
++Need for Speed: Hot Pursuit
++Need for Speed: The Run
++Need for Speed: Most Wanted (2012)
++Need for Speed Rivals
++Need for Speed (2015)
++Need for Speed Payback
++Need for Speed Heat
++Need for Speed Unbound
++Burnout 3: Takedown
++Burnout Paradise
++The Crew
++The Crew 2
++The Crew Motorfest
++Mario & Sonic at the Olympic Games
++Just Dance
++Just Dance 2
++Just Dance 3
++Just Dance 4
++Just Dance 2014
++Just Dance 2015
++Just Dance 2016
++Just Dance 2017
++Just Dance 2018
++Just Dance 2019
++Just Dance 2020
++Just Dance 2021
++Just Dance 2022
++Super Mario Bros. 2
++Super Mario Bros. 3
++Super Mario Land
++Super Mario Land 2: 6 Golden Coins
++Super Mario World 2: Yoshi's Island
++Super Mario Sunshine
++Super Mario Galaxy
++Super Mario Galaxy 2
++Super Mario 3D Land
++Super Mario 3D World
++Super Mario Maker
++New Super Mario Bros. 2
++New Super Mario Bros. U
++Super Mario RPG
++Paper Mario
++Paper Mario: The Thousand-Year Door
++Super Paper Mario
++Paper Mario: Sticker Star
++Paper Mario: Color Splash
++Paper Mario: The Origami King
++Mario & Luigi: Superstar Saga
++Mario & Luigi: Partners in Time
++Mario & Luigi: Bowser's Inside Story
++Mario & Luigi: Dream Team
++Mario & Luigi: Paper Jam
++Mario & Luigi: Brothership
++Mario + Rabbids Kingdom Battle
++Mario + Rabbids Sparks of Hope
++Mario Tennis
++Mario Tennis 64
++Mario Power Tennis
++Mario Tennis Aces
++Mario Golf
++Mario Golf: Toadstool Tour
++Mario Golf: World Tour
++Mario Golf: Super Rush
++Mario Strikers Charged
++Mario Strikers: Battle League
++Super Mario Strikers
++Mario Baseball
++Mario Super Sluggers
++Mario Hoops 3-on-3
++Mario Sports Mix
++Mario Sports Superstars
++Mario vs. Donkey Kong
++Mario vs. Donkey Kong 2: March of the Minis
++Mario vs. Donkey Kong: Tipping Stars
++Mario vs. Donkey Kong (2024)
++Dr. Mario
++Dr. Mario 64
++Dr. Mario World
++Yoshi's Story
++Yoshi's Island DS
++Yoshi's New Island
++Yoshi's Woolly World
++Yoshi's Crafted World
++Captain Toad: Treasure Tracker
++Luigi's Mansion
++Luigi's Mansion: Dark Moon
++Luigi's Mansion 2 HD
++Mario Kart 64
++Mario Kart: Super Circuit
++Mario Kart: Double Dash!!
++Mario Kart Arcade GP
++Mario Kart Arcade GP 2
++Mario Kart Arcade GP DX
++Mario Kart Live: Home Circuit
++Mario Kart World
++Mario Party
++Mario Party 2
++Mario Party 3
++Mario Party 4
++Mario Party 5
++Mario Party 6
++Mario Party 7
++Mario Party 8
++Mario Party 9
++Mario Party 10
++Mario Party DS
++Mario Party: Island Tour
++Mario Party: Star Rush
++Mario Party: The Top 100
++Super Mario Party Jamboree
++Super Smash Bros.
++Super Smash Bros. Melee
++Super Smash Bros. Brawl
++Super Smash Bros. for Nintendo 3DS
++Super Smash Bros. for Wii U
++Donkey Kong
++Donkey Kong Jr.
++Donkey Kong Country
++Donkey Kong Country 2: Diddy's Kong Quest
++Donkey Kong Country 3: Dixie Kong's Double Trouble!
++Donkey Kong 64
++Donkey Kong Jungle Beat
++Donkey Kong Country Returns
++Donkey Kong Country: Tropical Freeze
++Donkey Kong Bananza
++Diddy Kong Racing
++The Legend of Zelda
++Zelda II: The Adventure of Link
++The Legend of Zelda: A Link to the Past
++The Legend of Zelda: Ocarina of Time
++The Legend of Zelda: Majora's Mask
++The Legend of Zelda: Oracle of Ages
++The Legend of Zelda: Oracle of Seasons
++The Legend of Zelda: The Wind Waker
++The Legend of Zelda: Four Swords Adventures
++The Legend of Zelda: The Minish Cap
++The Legend of Zelda: Twilight Princess
++The Legend of Zelda: Phantom Hourglass
++The Legend of Zelda: Spirit Tracks
++The Legend of Zelda: Skyward Sword
++The Legend of Zelda: A Link Between Worlds
++The Legend of Zelda: Tri Force Heroes
++Hyrule Warriors
++Hyrule Warriors: Age of Calamity
++The Legend of Zelda: Echoes of Wisdom
++Metroid
++Metroid II: Return of Samus
++Super Metroid
++Metroid Fusion
++Metroid: Zero Mission
++Metroid Prime
++Metroid Prime 2: Echoes
++Metroid Prime 3: Corruption
++Metroid Prime Hunters
++Metroid: Other M
++Metroid: Samus Returns
++Metroid Dread
++Metroid Prime Remastered
++Kirby's Dream Land
++Kirby's Adventure
++Kirby's Dream Land 2
++Kirby Super Star
++Kirby's Dream Land 3
++Kirby 64: The Crystal Shards
++Kirby: Nightmare in Dream Land
++Kirby & the Amazing Mirror
++Kirby: Squeak Squad
++Kirby Super Star Ultra
++Kirby's Epic Yarn
++Kirby's Return to Dream Land
++Kirby: Triple Deluxe
++Kirby: Planet Robobot
++Kirby Star Allies
++Kirby and the Forgotten Land
++Kirby's Return to Dream Land Deluxe
++Kirby Air Ride
++Kirby Air Riders
++Animal Crossing
++Animal Crossing: Wild World
++Animal Crossing: City Folk
++Animal Crossing: New Leaf
++Animal Crossing: Happy Home Designer
++Animal Crossing: Amiibo Festival
++Pikmin
++Pikmin 2
++Pikmin 3
++Pikmin 4
++Hey! Pikmin
++Splatoon
++Fire Emblem: The Blazing Blade
++Fire Emblem: The Sacred Stones
++Fire Emblem: Path of Radiance
++Fire Emblem: Radiant Dawn
++Fire Emblem: Shadow Dragon
++Fire Emblem Awakening
++Fire Emblem Fates
++Fire Emblem Echoes: Shadows of Valentia
++Fire Emblem: Three Houses
++Fire Emblem Engage
++Xenoblade Chronicles
++Xenoblade Chronicles X
++Xenoblade Chronicles 2
++Xenoblade Chronicles 3
++Xenoblade Chronicles: Definitive Edition
++F-Zero
++F-Zero X
++F-Zero GX
++Star Fox
++Star Fox 64
++Star Fox Adventures
++Star Fox Assault
++Star Fox Zero
++Kid Icarus
++Kid Icarus: Uprising
++EarthBound
++Mother 3
++Golden Sun
++Golden Sun: The Lost Age
++Advance Wars
++Advance Wars 2: Black Hole Rising
++Advance Wars: Dual Strike
++Advance Wars: Days of Ruin
++1-2-Switch
++Everybody 1-2-Switch!
++ARMS
++Nintendo Land
++Game Builder Garage
++Miitopia
++Tomodachi Life
++Nintendogs
++Nintendogs + Cats
++Brain Age: Train Your Brain in Minutes a Day!
++Brain Age 2: More Training in Minutes a Day!
++Big Brain Academy
++Big Brain Academy: Brain vs. Brain
++WarioWare, Inc.: Mega Microgames!
++WarioWare: Twisted!
++WarioWare: Touched!
++WarioWare: Smooth Moves
++WarioWare: Get It Together!
++WarioWare: Move It!
++Wario Land: Super Mario Land 3
++Wario Land II
++Wario Land 3
++Wario Land 4
++Wario World
++Wario Land: Shake It!
++Punch-Out!!
++Punch-Out!! (Wii)
++Duck Hunt
++Excitebike
++Pilotwings
++Pilotwings 64
++Pilotwings Resort
++Wave Race 64
++1080° Snowboarding
++1080° Avalanche
++Pokémon Stadium
++Pokémon Stadium 2
++Pokémon Snap
++New Pokémon Snap
++Pokémon Colosseum
++Pokémon XD: Gale of Darkness
++Pokémon Mystery Dungeon: Red Rescue Team
++Pokémon Mystery Dungeon: Blue Rescue Team
++Pokémon Mystery Dungeon: Explorers of Time
++Pokémon Mystery Dungeon: Explorers of Darkness
++Pokémon Mystery Dungeon: Explorers of Sky
++Pokémon Super Mystery Dungeon
++Pokémon Mystery Dungeon: Rescue Team DX
++Pokémon Ranger
++Pokémon Ranger: Shadows of Almia
++Pokémon Ranger: Guardian Signs
++Pokémon Conquest
++Pokémon Pokkén Tournament
++Pokkén Tournament DX
++Pokémon Trading Card Game
++Detective Pikachu
++Detective Pikachu Returns
++Pokémon Legends: Z-A
++God of War II
++God of War III
++God of War: Ascension
++God of War Ragnarök
++God of War: Chains of Olympus
++God of War: Ghost of Sparta
++Uncharted: Drake's Fortune
++Uncharted 2: Among Thieves
++Uncharted 3: Drake's Deception
++Uncharted 4: A Thief's End
++Uncharted: The Lost Legacy
++The Last of Us Part II
++The Last of Us Part I
++Horizon Zero Dawn
++Horizon Forbidden West
++Ghost of Tsushima
++Ghost of Yōtei
++Marvel's Spider-Man
++Marvel's Spider-Man: Miles Morales
++Marvel's Spider-Man 2
++Bloodborne
++Demon's Souls
++Demon's Souls (2020)
++Ratchet & Clank
++Ratchet & Clank: Going Commando
++Ratchet & Clank: Up Your Arsenal
++Ratchet: Deadlocked
++Ratchet & Clank Future: Tools of Destruction
++Ratchet & Clank Future: A Crack in Time
++Ratchet & Clank: Into the Nexus
++Ratchet & Clank (2016)
++Ratchet & Clank: Rift Apart
++Jak and Daxter: The Precursor Legacy
++Jak II
++Jak 3
++Jak X: Combat Racing
++Sly Cooper and the Thievius Raccoonus
++Sly 2: Band of Thieves
++Sly 3: Honor Among Thieves
++Sly Cooper: Thieves in Time
++LittleBigPlanet
++LittleBigPlanet 2
++LittleBigPlanet 3
++Sackboy: A Big Adventure
++Gran Turismo
++Gran Turismo 2
++Gran Turismo 3: A-Spec
++Gran Turismo 4
++Gran Turismo 5
++Gran Turismo 6
++Gran Turismo Sport
++Gran Turismo 7
++Killzone
++Killzone 2
++Killzone 3
++Killzone: Shadow Fall
++Resistance: Fall of Man
++Resistance 2
++Resistance 3
++inFAMOUS
++inFAMOUS 2
++inFAMOUS: Second Son
++Days Gone
++Death Stranding
++Death Stranding 2: On the Beach
++Returnal
++Astro Bot
++Astro's Playroom
++Shadow of the Colossus
++Ico
++The Last Guardian
++Detroit: Become Human
++Heavy Rain
++Beyond: Two Souls
++Until Dawn
++The Order: 1886
++Dreams
++Driveclub
++MotorStorm
++MotorStorm: Pacific Rift
++MotorStorm: Apocalypse
++Everybody's Golf
++SOCOM: U.S. Navy SEALs
++SOCOM II: U.S. Navy SEALs
++SOCOM 3: U.S. Navy SEALs
++Warhawk
++MAG
++Helldivers
++Gravity Rush
++Gravity Rush 2
++Patapon
++Patapon 2
++LocoRoco
++LocoRoco 2
++Knack
++Knack II
++Infamous: First Light
++The Getaway
++The Getaway: Black Monday
++Twisted Metal
++Twisted Metal 2
++Twisted Metal: Black
++Syphon Filter
++Syphon Filter 2
++Syphon Filter 3
++Ape Escape
++Ape Escape 2
++Ape Escape 3
++MediEvil
++MediEvil 2
++Parappa the Rapper
++PaRappa the Rapper 2
++Hot Shots Golf
++Hot Shots Golf 2
++Hot Shots Golf 3
++Hot Shots Golf Fore!
++The Legend of Dragoon
++Dark Cloud
++Dark Cloud 2
++Rogue Galaxy
++White Knight Chronicles
++Folklore
++Heavenly Sword
++War of the Monsters
++PlayStation All-Stars Battle Royale
++Blood & Truth
++Firewall Zero Hour
++Horizon Call of the Mountain
++Halo: Combat Evolved
++Halo 2
++Halo 3: ODST
++Halo: Reach
++Halo 4
++Halo 5: Guardians
++Halo Infinite
++Halo Wars
++Halo Wars 2
++Gears of War
++Gears of War 2
++Gears of War 3
++Gears of War: Judgment
++Gears of War 4
++Gears 5
++Forza Motorsport
++Forza Motorsport 2
++Forza Motorsport 3
++Forza Motorsport 4
++Forza Motorsport 5
++Forza Motorsport 6
++Forza Motorsport 7
++Forza Motorsport (2023)
++Forza Horizon
++Forza Horizon 2
++Forza Horizon 3
++Forza Horizon 4
++Forza Horizon 5
++Fable
++Fable II
++Fable III
++Crackdown
++Crackdown 2
++Crackdown 3
++State of Decay
++State of Decay 2
++Killer Instinct
++Killer Instinct (2013)
++Ori and the Blind Forest
++Ori and the Will of the Wisps
++Grounded
++Pentiment
++Hi-Fi Rush
++Quantum Break
++Sunset Overdrive
++Ryse: Son of Rome
++Microsoft Flight Simulator
++Microsoft Flight Simulator 2024
++Age of Empires
++Age of Empires II
++Age of Empires III
++Age of Empires IV
++Age of Mythology
++Age of Mythology: Retold
++Rise of Nations
++Zoo Tycoon
++Zoo Tycoon 2
++Black & White
++Black & White 2
++Civilization II
++Civilization III
++Civilization IV
++Civilization V
++Civilization VI
++Civilization VII
++Sid Meier's Alpha Centauri
++XCOM: Enemy Unknown
++XCOM 2
++Command & Conquer
++Command & Conquer: Red Alert
++Command & Conquer: Tiberian Sun
++Command & Conquer: Red Alert 2
++Command & Conquer: Generals
++Command & Conquer 3: Tiberium Wars
++Command & Conquer: Red Alert 3
++Heroes of Might and Magic III
++Heroes of Might and Magic V
++Warhammer 40,000: Dawn of War
++Warhammer 40,000: Dawn of War II
++Total War: Rome
++Rome: Total War
++Medieval II: Total War
++Empire: Total War
++Total War: Shogun 2
++Total War: Rome II
++Total War: Warhammer
++Total War: Warhammer II
++Total War: Warhammer III
++Crusader Kings II
++Crusader Kings III
++Europa Universalis IV
++Hearts of Iron IV
++Stellaris
++Cities: Skylines
++Cities: Skylines II
++SimCity 2000
++SimCity 3000
++SimCity 4
++SimCity (2013)
++RollerCoaster Tycoon
++RollerCoaster Tycoon 2
++RollerCoaster Tycoon 3
++Planet Coaster
++Planet Zoo
++Theme Hospital
++Two Point Hospital
++Two Point Campus
++Factorio
++Satisfactory
++RimWorld
++Oxygen Not Included
++Kerbal Space Program
++Kerbal Space Program 2
++Prison Architect
++Euro Truck Simulator 2
++American Truck Simulator
++Farming Simulator 17
++Farming Simulator 19
++Farming Simulator 22
++Farming Simulator 25
++The Stanley Parable
++The Stanley Parable: Ultra Deluxe
++Papers, Please
++FTL: Faster Than Light
++Into the Breach
++Disco Elysium
++Outer Wilds
++The Talos Principle
++The Talos Principle 2
++The Witness
++Firewatch
++What Remains of Edith Finch
++Gone Home
++Life Is Strange
++Life Is Strange: Before the Storm
++Life Is Strange 2
++Life Is Strange: True Colors
++Telltale's The Walking Dead
++The Walking Dead: Season Two
++The Walking Dead: A New Frontier
++The Walking Dead: The Final Season
++The Wolf Among Us
++Tales from the Borderlands
++Minecraft: Story Mode
++Batman: The Telltale Series
++The Walking Dead: Michonne
++Mass Effect
++Mass Effect 2
++Mass Effect 3
++Mass Effect: Andromeda
++Dragon Age: Origins
++Dragon Age II
++Dragon Age: Inquisition
++Dragon Age: The Veilguard
++Star Wars: Knights of the Old Republic
++Star Wars: Knights of the Old Republic II – The Sith Lords
++Star Wars Jedi: Fallen Order
++Star Wars Jedi: Survivor
++Star Wars: The Force Unleashed
++Star Wars: The Force Unleashed II
++Star Wars: Republic Commando
++Star Wars: Battlefront II (2005)
++Star Wars: Squadrons
++Star Wars Outlaws
++Dead Space
++Dead Space 2
++Dead Space 3
++Dead Space (2023)
++Mirror's Edge
++Mirror's Edge Catalyst
++Crysis
++Crysis 2
++Crysis 3
++BioShock
++BioShock 2
++BioShock Infinite
++Dishonored
++Dishonored 2
++Prey
++DOOM
++Doom II
++Doom 3
++Doom (2016)
++Doom Eternal
++Doom: The Dark Ages
++Quake
++Quake II
++Quake III Arena
++Quake 4
++Wolfenstein 3D
++Return to Castle Wolfenstein
++Wolfenstein: The New Order
++Wolfenstein II: The New Colossus
++Wolfenstein: The Old Blood
++Wolfenstein: Youngblood
++The Outer Worlds
++Avowed
++Pillars of Eternity
++Pillars of Eternity II: Deadfire
++Path of Exile 2
++Torchlight
++Torchlight II
++Grim Dawn
++Titan Quest
++Guild Wars
++Guild Wars 2
++The Lord of the Rings Online
++Final Fantasy XIV
++EVE Online
++Escape from Tarkov
++Hunt: Showdown 1896
++Ready or Not
++Payday: The Heist
++Payday 2
++Payday 3
++Deep Rock Galactic
++Risk of Rain
++Risk of Rain 2
++Killing Floor
++Killing Floor 2
++Insurgency
++Insurgency: Sandstorm
++Arma 2
++Arma 3
++Squad
++Hell Let Loose
++Final Fantasy
++Final Fantasy II
++Final Fantasy III
++Final Fantasy IV
++Final Fantasy V
++Final Fantasy VI
++Final Fantasy VII
++Final Fantasy VIII
++Final Fantasy IX
++Final Fantasy X
++Final Fantasy X-2
++Final Fantasy XI
++Final Fantasy XII
++Final Fantasy XIII
++Final Fantasy XIII-2
++Lightning Returns: Final Fantasy XIII
++Final Fantasy XV
++Final Fantasy XVI
++Final Fantasy VII Remake
++Final Fantasy VII Rebirth
++Final Fantasy Tactics
++Crisis Core: Final Fantasy VII
++Crisis Core: Final Fantasy VII Reunion
++Dragon Quest
++Dragon Quest II
++Dragon Quest III
++Dragon Quest IV
++Dragon Quest V
++Dragon Quest VI
++Dragon Quest VII
++Dragon Quest VIII
++Dragon Quest IX
++Dragon Quest X
++Dragon Quest XI
++Dragon Quest III HD-2D Remake
++Chrono Trigger
++Chrono Cross
++Kingdom Hearts
++Kingdom Hearts II
++Kingdom Hearts III
++Kingdom Hearts: Chain of Memories
++Kingdom Hearts 358/2 Days
++Kingdom Hearts Birth by Sleep
++Kingdom Hearts 3D: Dream Drop Distance
++NieR
++NieR: Automata
++NieR Replicant ver.1.22474487139...
++Octopath Traveler
++Octopath Traveler II
++Bravely Default
++Bravely Second: End Layer
++Bravely Default II
++Triangle Strategy
++Live A Live
++Secret of Mana
++Trials of Mana
++Visions of Mana
++SaGa Frontier
++SaGa Frontier 2
++Romancing SaGa 2
++Romancing SaGa 3
++The World Ends with You
++NEO: The World Ends with You
++Tomb Raider
++Tomb Raider II
++Tomb Raider III
++Tomb Raider: The Last Revelation
++Tomb Raider: Legend
++Tomb Raider: Anniversary
++Tomb Raider: Underworld
++Tomb Raider (2013)
++Rise of the Tomb Raider
++Shadow of the Tomb Raider
++Deus Ex
++Deus Ex: Invisible War
++Deus Ex: Human Revolution
++Deus Ex: Mankind Divided
++Just Cause
++Just Cause 2
++Just Cause 3
++Just Cause 4
++Sleeping Dogs
++Hitman: Codename 47
++Hitman 2: Silent Assassin
++Hitman: Blood Money
++Hitman: Absolution
++Hitman
++Hitman 2
++Hitman 3
++Street Fighter II
++Street Fighter Alpha 3
++Street Fighter III: 3rd Strike
++Street Fighter IV
++People Playground
++Schedule I
++HoloCure - Save the Fans!
++The Henry Stickmin Collection
++Half-Life: Alyx
++Pizza Tower
++A Short Hike
++Slime Rancher
++MiSide
++OneShot
++Totally Accurate Battle Simulator
++Mount & Blade: Warband
++ULTRAKILL
++Katana ZERO
++Helltaker
++The WereCleaner
++BeamNG.drive
++Papa's Freezeria Deluxe
++WEBFISHING
++Plants vs. Zombies GOTY Edition
++Bloons TD 6
++ATRI -My Dear Moments-
++Dyson Sphere Program
++A Hat in Time
++Rhythm Doctor
++Our Life: Beginnings & Always
++TOEM: A Photo Adventure
++Stray
++The Room 4: Old Sins
++Split Fiction
++Chants of Sennaar
++Firework
++South Park: The Stick of Truth
++Volcano Princess
++Grimm's Hollow
++Touhou Mystia's Izakaya
++Crab Champions
++Hotline Miami
++The Walking Dead
++STAR WARS Empire at War - Gold Pack
++OMORI
++Neon White
++VTOL VR
++Phoenix Wright: Ace Attorney Trilogy
++The Room
++DAVE THE DIVER
++Crime Scene Cleaner
++BattleBlock Theater
++Inscryption
++Fields of Mistria
++POSTAL 2
++There Is No Game: Wrong Dimension
++Baba Is You
++Persona 4 Golden
++VA-11 Hall-A: Cyberpunk Bartender Action
++CLANNAD
++Before Your Eyes
++SANABI
++One Finger Death Punch
++Wobbledogs
++Finding Paradise
++Ravenfield
++A Date with Death
++R.E.P.O.
++Doki Doki Literature Club!
++INSIDE
++Bomb Rush Cyberfunk
++TCG Card Shop Simulator
++Just Shapes & Beats
++The Room Two
++Stronghold Crusader HD (2012)
++shapez 2 - Factory
++Broforce
++Juice Galaxy
++Iron Snout
++Brotato
++Tactical Breach Wizards
++Persona 5 Royal
++Half-Life 2: Episode Two
++Tiny Glade
++Outlast
++Ib
++Cookie Clicker
++PowerWash Simulator
++Gorogoa
++The Case of the Golden Idol
++Tales of the Black Forest
++Epic Battle Fantasy 5
++Kind Words (lo fi chill beats to write to)
++STEINS;GATE
++Tomb Raider Game of the Year
++DUSK
++The Last Campfire
++Life is Strange - Episode 1
++Webbed
++Goat Simulator 3
++Blade and Sorcery
++Trombone Champ
++Sally Face - Episode One
++Nodebuster
++WolfQuest: Anniversary Edition
++Touhou Luna Nights
++Lost in Play
++Hylics
++CULTIC
++Bopl Battle
++Keep Talking and Nobody Explodes
++Fran Bow
++Wobbly Life
++Mon Bazou
++Slay the Princess — The Pristine Cut
++GRIS
++Cube Escape Collection
++Murders on the Yangtze River
++Underground Blossom
++Clone Drone in the Danger Zone
++Gunpoint
++Castle Crashers
++I Wani Hug that Gator!
++Eternal Senia
++Aliya: Timelink
++Hot Dogs, Horseshoes & Hand Grenades
++Batman: Arkham Asylum Game of the Year Edition
++Outcore: Desktop Adventure
++Doki Doki Literature Club Plus!
++West of Loathing
++The Expendabros
++Crow Country
++To the Moon
++Devil May Cry 5
++Return of the Obra Dinn
++Duck Game
++Kingdom Rush - Tower Defense
++Sid Meier's Civilization V
++MADNESS: Project Nexus
++Gravitas
++Zup! S
++Monument Valley
++Super Hexagon
++Divinity: Original Sin 2 - Definitive Edition
++SuchArt: Creative Space
++SIGNALIS
++The Hungry Lamb: Traveling in the Late Ming Dynasty
++Milk outside a bag of milk outside a bag of milk
++ATLYSS
++Milk inside a bag of milk inside a bag of milk
++Buckshot Roulette
++Nubby's Number Factory
++Peggle Deluxe
++Digseum
++Until Then
++METAL GEAR RISING: REVENGEANCE
++Marvel’s Spider-Man Remastered
++The Test
++Alba: A Wildlife Adventure
++Cruelty Squad
++MULLET MADJACK
++The Walking Dead: The Telltale Definitive Series
++Pseudoregalia
++Batman: Arkham City - Game of the Year Edition
++Fallen Aces
++LEGO Star Wars - The Complete Saga
++Bloody Hell
++Mark of the Ninja
++Baldi's Basics Plus
++LIZARDS MUST DIE
++Minishoot' Adventures
++Dorfromantik
++The Coffin of Andy and Leyley
++Titanfall 2
++Abiotic Factor
++Age of Empires II (Retired)
++BAD END THEATER
++Cube Escape: Paradox
++Your Only Move Is HUSTLE
++The Planet Crafter
++Post Void
++Samsara Room
++Sekiro: Shadows Die Twice - GOTY Edition
++Clair Obscur: Expedition 33
++DOOM + DOOM II
++Kindergarten 2
++Thronefall
++Universe Sandbox
++Teardown
++Cult of the Lamb
++Rusty's Retirement
++Far Away
++Rabbit and Steel
++Mouthwashing
++Unheard - Voices of Crime
++Minami Lane
++Supreme Commander: Forged Alliance
++SOMA
++Shadow Tactics: Blades of the Shogun
++Bugsnax
++Ultimate Chicken Horse
++Tiny Bunny
++Danganronpa 2: Goodbye Despair
++Yakuza 0
++Saints Row: The Third
++Kenshi
++Beat Saber
++Desperados III
++Zup! F
++Just a To the Moon Series Beach Episode
++Echo Point Nova
++A Space for the Unbound
++Star Fetchers
++Danganronpa: Trigger Happy Havoc
++Opus Magnum
++DREDGE
++Find Love or Die Trying
++Vampires' Melody
++Enter the Gungeon
++Rivals of Aether
++Hook
++Dungeon Munchies
++Mini Motorways
++Black Mesa
++Car Mechanic Simulator 2021
++Tiny Rogues
++Fox Hime Zero
++Resident Evil 7 Biohazard
++Class of '09: The Re-Up
++Streets of Rogue
++CarX Drift Racing Online
++Paint the Town Red
++Enigma of Fear
++Kingdom Rush Frontiers - Tower Defense
++Half-Life 2: Episode One
++Tinykin
++Mad Father
++Noita
++Monster Train
++Halls of Torment
++Sayonara Wild Hearts
++Total War: MEDIEVAL II – Definitive Edition
++Besiege
++No Case Should Remain Unsolved
++Nuclear Throne
++Grimhook
++ANIMAL WELL
++Hidden Folks
++There Is No Game: Jam Edition 2015
++FlatOut 2
++Like a Dragon Gaiden: The Man Who Erased His Name
++Little Kitty, Big City
++Ori and the Blind Forest: Definitive Edition
++Chicory: A Colorful Tale
++Walkabout Mini Golf VR
++Glass Masquerade
++Age of Empires II: Definitive Edition
++The Elder Scrolls IV: Oblivion Game of the Year Edition Deluxe (2009)
++The Elder Scrolls IV: Oblivion Game of the Year Edition (2009)
++FlyKnight
++Mini Metro
++Crypt of the NecroDancer
++shapez
++OpenTTD
++My Friend Pedro
++Kindergarten
++Untitled Goose Game
++Superflight
++Angel at Dusk
++missed messages.
++Human Fall Flat
++Fireworks Mania - An Explosive Simulator
++Mindustry
++HROT
++Zup! X
++Timberborn
++Lethal League Blaze
++S.T.A.L.K.E.R.: Call of Pripyat
++Metal: Hellsinger
++Downwell
++Content Warning
++Rusty Lake: Roots
++ASTLIBRA Revision
++SILENT HILL 2
++Hexcells
++Bastion
++Warhammer 40,000: Dawn of War - Dark Crusade
++SuchArt: Genius Artist Simulator
++It Steals
++Little Nightmares
++Princess Remedy in a World of Hurt
++Game Dev Tycoon
++Valiant Hearts: The Great War / Soldats Inconnus : Mémoires de la Grande Guerre
++DARK SOULS III
++Sizeable
++Spiritfarer: Farewell Edition
++异化之恶〇Abnormal Treatment
++OPUS: Echo of Starsong - Full Bloom Edition
++STAR WARS Jedi Knight - Jedi Academy
++Ultimate Custom Night
++Refunct
++Psychonauts 2
++The Jackbox Party Pack 3
++Lay a Beauty to Rest: The Darkness Peach Blossom Spring
++VVVVVV
++Neighbours from Hell Compilation
++Sword and Fairy
++Rooftops & Alleys: The Parkour Game
++Insaniquarium Deluxe
++FIVE NIGHTS AT FREDDY'S: HELP WANTED
++Hexcells Infinite
++Shovel Knight: Treasure Trove
++Rusted Warfare - RTS
++Supermarket Together
++Townscaper
++Spin Rhythm XD
++Blood and Bacon
++(the) Gnorp Apologue
++The Forgotten City
++Zup! Z
++The Elder Scrolls III: Morrowind Game of the Year Edition
++Everlasting Summer
++ROUNDS
++Hades II
++Project Zomboid
++The Binding of Isaac
++Monster Prom 2: Monster Camp
++Thank Goodness You're Here!
++Trine Enchanted Edition
++Hypnospace Outlaw
++SpaceEngine
++STAR WARS Republic Commando
++WorldBox - God Simulator
++LEGO Marvel Super Heroes
++The Pedestrian
++Day of the Tentacle Remastered
++Roboquest
++Nova Drift
++Half-Life: Opposing Force
++Call of Juarez: Gunslinger
++My Summer Car
++Trine 2: Complete Story
++Coloring Pixels
++The Room Three
++Impostor Factory
++NGU IDLE
++Homicipher
++Snufkin: Melody of Moominvalley
++The Rewinder
++Derail Valley
++Nine Sols
++Bit Blaster XL
++LISA: The Painful
++BlazBlue Entropy Effect
++Rabi-Ribi
++ENDER MAGNOLIA: Bloom in the Mist
++GUILTY GEAR XX ACCENT CORE PLUS R
++Rusty Lake Hotel
++Against the Storm
++Spaceflight Simulator
++Railroader
++Door Kickers 2: Task Force North
++Five Nights at Freddy's: Into the Pit
++Retrowave
++AudioSurf
++Dust: An Elysian Tail
++Arctic Eggs
++Incredibox
++Tabletop Simulator
++S.T.A.L.K.E.R.: Shadow of Chernobyl
++Dwarf Fortress
++Coloring Game 2
++Creeper World 3: Arc Eternal
++Pikuniku
++STAR WARS Battlefront II (Classic, 2005)
++Recettear: An Item Shop's Tale
++Orcs Must Die!
++Wandering Sword
++TIS-100
++Rakuen
++I Was a Teenage Exocolonist
++Boneraiser Minions
++FAR: Lone Sails
++Brick Rigs
++Leap Year
++Yakuza Kiwami 2
++We Become What We Behold [Fan-Made Port]
++Voidigo
++Warhammer 40,000: Dawn of War - Soulstorm
++Epic Battle Fantasy 4
++Meteor 60 Seconds!
++Northern Journey
++Plague Inc: Evolved
++Songs for a Hero - Definitive Edition
++Higurashi When They Cry Hou - Ch.1 Onikakushi
++Unreal Tournament: Game of the Year Edition
++Bang-On Balls: Chronicles
++House Flipper
++Bejeweled 3
++Songs of Syx
++Mark of the Ninja: Remastered
++STAR WARS Battlefront (Classic, 2004)
++SUPER CHICKEN JUMPER
++Anomaly Agent
++Darkwood
++POSTAL: Brain Damaged
++Alien Swarm: Reactive Drop
++Stronghold HD (2012)
++PlateUp!
++Kingdom Come: Deliverance II
++Unreal Tournament 2004: Editor's Choice Edition
++Psychonauts
++Pony Island
++Kingdom Rush Origins - Tower Defense
++私のリアルは充実しすぎている フルボイス版
++Orbt XL
++Super Meat Boy
++The Curse of Monkey Island
++Everhood
++Mafia II (Classic)
++Defense Grid: The Awakening
++Antichamber
++Primordia
++Amnesia: The Dark Descent
++Brothers - A Tale of Two Sons
++One Finger Death Punch 2
++Contraband Police
++LYNE
++Machinarium
++Supraland
++Alien Swarm
++Persona 3 Reload
++Hotline Miami 2: Wrong Number
++Superliminal
++Yoku's Island Express
++Airships: Conquer the Skies
++Pilgrims
++Blood Fresh Supply
++Cinderella Phenomenon - Otome/Visual Novel
++Total Annihilation
++Yakuza: Like a Dragon
++A Dance of Fire and Ice
++Turing Complete
++CARRION
++Wildermyth
++Supraland Six Inches Under
++Ages of Conflict: World War Simulator
++Montaro
++SteamWorld Dig 2
++PAC-MAN Championship Edition DX+
++Cat Quest II
++Animal Revolt Battle Simulator
++Vecter
++Caves of Qud
++Zup! 8
++Severed Steel
++Geometry Dash
++Journey
++Slime Rancher 2
++Devil Daggers
++Mitoza
++Barotrauma
++Neon Beats
++Tokyo Xtreme Racer
++Epic Battle Fantasy 3
++FAITH: The Unholy Trinity
++DEADBOLT
++Deus Ex: Game of the Year Edition
++Manifold Garden
++Cosmoteer: Starship Architect & Commander
++Rain World
++Peggle Nights
++Little Nightmares II
++Marvel's Guardians of the Galaxy
++PARANORMASIGHT: The Seven Mysteries of Honjo
++The Past Within
++1000xRESIST
++Zup! 2
++Shogun Showdown
++MX Bikes
++Supermarket Simulator
++Class of '09
++Ghost of Tsushima DIRECTOR'S CUT
++COMPOUND
++Leaf Blower Revolution - Idle Game
++Birth
++Stick Fight: The Game
++The Coin Game
++Narcissu 1st & 2nd
++Minds Beneath Us
++Vampire: The Masquerade - Bloodlines
++Little Inferno
++EARTH DEFENSE FORCE 4.1 The Shadow of New Despair
++Coffee Talk
++Poly Bridge 2
++Rise of Nations: Extended Edition
++Strange Horticulture
++Library Of Ruina
++Rome: Total War - Collection
++ISLANDERS
++Warhammer 40,000: Dawn of War - Anniversary Edition (Classic)
++Mount Your Friends
++Sultan's Game
++ENDER LILIES: Quietus of the Knights
++Turnip Boy Commits Tax Evasion
++Nightmare of Decay
++Drova - Forsaken Kin
++LiEat
++Lucy -The Eternity She Wished For-
++Liftoff: FPV Drone Racing
++Transistor
++Sleeping Dogs: Definitive Edition
++Shadows Over Loathing
++SpeedRunners
++Rusty Lake Paradise
++Slice & Dice
++My Singing Monsters
++DISTRAINT 2
++Gloomwood
++Empires of the Undergrowth
++Gunfire Reborn
++Door Kickers: Action Squad
++Company of Heroes
++Lobotomy Corporation | Monster Management Simulation
++Dystopika
++Descenders
++RED HOT VENGEANCE
++Symphony of War: The Nephilim Saga
++Cat Quest
++Reventure
++The Secret of Monkey Island: Special Edition
++Spark the Electric Jester 3
++Some Some Convenience Store
++Fallout: A Post Nuclear Role Playing Game
++Farm Together
++Duck Simulator 2
++Progressbar95
++60 Seconds! Reatomized
++Resident Evil 4 (2005)
++DR LIVESEY ROM AND DEATH EDITION
++Bloons TD 5
++Yuppie Psycho: Executive Edition
++Freddy Fazbear's Pizzeria Simulator
++PC Building Simulator
++Snezhinka:Sentinel Girls2
++Tangle Tower
++10 Minutes Till Dawn
++Serious Sam Classic: The First Encounter
++Another Crab's Treasure
++Dungeons 3
++Trick & Treat
++Agent A: A puzzle in disguise
++In Sound Mind
++Zuma Deluxe
++Melatonin
++Tetris Effect: Connected
++Bloodstained: Ritual of the Night
++Night in the Woods
++A Plague Tale: Innocence
++Yog-Sothoth’s Yard
++Teenage Mutant Ninja Turtles: Shredder's Revenge
++The Outlast Trials
++Super Animal Royale
++Ostriv
++Fallout 2: A Post Nuclear Role Playing Game
++Windowkill
++Learn to Fly 3
++Otaku's Adventure
++Five Nights at Freddy's
++Botanicula
++F1 2020
++Long Live The Queen
++The Farmer Was Replaced
++Hatsune Miku: Project DIVA Mega Mix+
++Disco Elysium - The Final Cut
++BirdGut
++Monster Train 2
++Mortal Sin
++Turbo Overkill
++FATE
++COCOON
++Heavenly Bodies
++LEGO Star Wars III - The Clone Wars
++Spec Ops: The Line
++Spyro Reignited Trilogy
++EARTH DEFENSE FORCE 5
++Escape Simulator
++The Lab
++The Life and Suffering of Sir Brante — Chapter 1&2
++Sonic Mania
++SpongeBob SquarePants: Battle for Bikini Bottom - Rehydrated
++Transmissions: Element 120
++MANDAGON
++Crawl
++Sven Co-op
++Bramble: The Mountain King
++Skul: The Hero Slayer
++Hyperdimension Neptunia Re;Birth1
++Five Nights at Freddy's: Help Wanted 2
++Mass Effect 2 (2010 Edition)
++Alien: Isolation
++Kingdom Rush Vengeance - Tower Defense
++GUILTY GEAR Xrd REV 2
++Crazy Machines 3
++PAYDAY The Heist
++Chronicon
++DRAGON BALL Z: KAKAROT
++Astral Ascent
++Beat Hazard
++Five Nights at Freddy's 2
++Cat Goes Fishing
++Call of Duty: Modern Warfare 2 (2009)
++Epistory - Typing Chronicles
++SYNTHETIK: Legion Rising
++Creeper World 4
++Life Goes On: Done to Death
++Project Wingman
++GemCraft - Chasing Shadows
++Island Saver
++Hacknet
++Alien Shooter
++This War of Mine
++Judgment
++Dead Estate
++Door Kickers
++STAR WARS Knights of the Old Republic II - The Sith Lords
++Toree 2
++Sonic Generations Collection
++Call of Duty (2003)
++I Wanna Maker
++Marvel’s Spider-Man: Miles Morales
++Rolling Line
++Worms Armageddon
++Heat Signature
++Sid Meier's Pirates!
++Assetto Corsa
++RollerCoaster Tycoon: Deluxe
++Unavowed
++Wandersong
++Parkitect
++Notch - The Innocent LunA: Eclipsed SinnerS
++Not For Broadcast
++Call of Duty 4: Modern Warfare (2007)
++The Legend of Heroes: Trails of Cold Steel
++Master of Orion 2
++NoLimits 2 Roller Coaster Simulation
++Zup!
++Kingdoms and Castles
++Lost Judgment
++SHENZHEN I/O
++Creaks
++Obscure
++ShellShock Live
++Defender's Quest: Valley of the Forgotten (DX edition)
++Football Manager 2021
++Risk of Rain (2013)
++Halo: The Master Chief Collection
++The Red Strings Club
++Billionaire Lovers
++F.E.A.R.
++Griftlands
++Viewfinder
++Amazing Frog?
++The Great Ace Attorney Chronicles
++Necesse
++觅长生
++Mass Effect (2007)
++Age of Mythology: Extended Edition
++DYNASTY WARRIORS: ORIGINS
++Zeus + Poseidon
++BlazBlue Centralfiction
++Shredders
++Shipwrecked 64
++Unpacking
++Sticky Business
++What Never Was
++Two Point Museum
++Contradiction: Spot The Liar
++Scribblenauts Unlimited
++Planescape: Torment: Enhanced Edition
++Frostpunk
++DmC: Devil May Cry
++OLDTV
++暖雪 Warm Snow
++THE KING OF FIGHTERS 2002 UNLIMITED MATCH
++Gothic II: Gold Edition
++Sonic & All-Stars Racing Transformed Collection
++小白兔电商~Bunny e-Shop
++Yakuza Kiwami
++Core Keeper
++I wanna be the Creator
++Behind the Frame: The Finest Scenery
++Bean Battles
++Yume Nikki
++Space Rangers HD: A War Apart
++LEGO Batman 2: DC Super Heroes
++Octodad: Dadliest Catch
++Clustertruck
++Megaquarium
++RetroMaze
++Cook, Serve, Delicious!
++Death's Door
++Vertigo 2
++ScooterFlow
++TROUBLESHOOTER: Abandoned Children
++Moss
++The Crown of Leaves
++Wuppo: Definitive Edition
++GORN
++World of Goo
++Monkey Island 2 Special Edition: LeChuck’s Revenge
++Starbound
++Captain of Industry
++Soda Dungeon
++Detective Grimoire
++The Elder Scrolls V: Skyrim Special Edition
++Loop Hero
++Unrailed!
++DEATH STRANDING DIRECTOR'S CUT
++Do Not Feed the Monkeys
++X-COM: UFO Defense
++Middle-earth: Shadow of Mordor
++Sprocket
++Motor Town: Behind The Wheel
++Sudoku Universe / 数独宇宙
++Hatoful Boyfriend
++The Jackbox Party Pack 4
++Soda Dungeon 2
++The Jackbox Party Pack 6
++APE OUT
++LIMBO
++Dungeon Warfare
++TowerFall Ascension
++The Swapper
++The Darkside Detective
++SteamWorld Dig
++KovaaK's
++AI LIMIT
++Lethal League
++Gato Roboto
++Automation - The Car Company Tycoon Game
++LoveChoice
++Scrap Mechanic
++The Legend of Heroes: Trails in the Sky
++Florence
++Trepang2
++The Jackbox Party Pack 2
++FrostRunner
++Who's Lila?
++Propagation VR
++Terminus: Zombie Survivors
++SPORE
++Tattletail
++DARK SOULS: REMASTERED
++Zuma's Revenge!
++Thomas Was Alone
++ASTRONEER
++Call of Duty 2
++Into the Radius VR
++Bloodstained: Curse of the Moon
++Spelunky 2
++We Love Katamari REROLL+ Royal Reverie
++Dune: Imperium
++ABZU
++Dungeon Defenders
++Hyper Light Drifter
++Brutal Legend
++Song of Nunu: A League of Legends Story
++Mad Max
++Sins of a Solar Empire: Rebellion
++Command & Conquer 3: Kane’s Wrath
++KinitoPET
++Cyber Manhunt
++Monster Prom
++Battle for Wesnoth
++SEUM: Speedrunners from Hell
++Mad Games Tycoon 2
++Momodora: Reverie Under The Moonlight
++CrossCode
++Ember Knights
++Assetto Corsa Competizione
++Amanda the Adventurer
++Luck be a Landlord
++OMFG: One Million Fatal Guns
++AMID EVIL
++Word Game
++PRICE
++Braid
++SharpShooter3D
++Call of Duty: World at War
++Orcs Must Die! 2
++The Legend of Tianding
++Amnesia: The Bunker
++Frog Fractions: Game of the Decade Edition
++The Messenger
++Shakes and Fidget
++Suzerain
++Timberman
++Fast Food Simulator
++DISTRAINT: Deluxe Edition
++Bad North: Jotunn Edition
++Rayman Origins
++Elin
++Turmoil
++Devil May Cry HD Collection
++Bayonetta
++Marie's Room
++Trackmania United Forever
++Red Orchestra 2: Heroes of Stalingrad with Rising Storm
++The Exit 8
++Ninja Kiwi Archive
++Infinifactory
++Friday the 13th: Killer Puzzle
++SUMMERHOUSE
++The White Door
++System Shock 2 (1999)
++X-Plane 11
++Dungeons of Dredmor
++SimplePlanes
++Brigador: Up-Armored Edition
++DRAGON QUEST XI S: Echoes of an Elusive Age - Definitive Edition
++DOOM 64
++Eleven Table Tennis
++Weed Shop 3
++Viscera Cleanup Detail
++Dungreed
++Trailmakers
++American Arcadia
++Kao the Kangaroo: Round 2 (2003 re-release)
++Serious Sam HD: The First Encounter
++Legend of Grimrock
++Potion Craft: Alchemist Simulator
++Darkest Dungeon
++Hyperdimension Neptunia Re;Birth3 V Generation
++Bendy and the Dark Revival
++The Battle of Polytopia
++Streets of Rage 4
++UNDER NIGHT IN-BIRTH Exe:Late[cl-r]
++风信楼
++The Cat Lady
++Lies of P
++Race The Sun
++Pistol Whip
++One Way Heroics
++Jazzpunk: Director's Cut
++Spooky's Jump Scare Mansion
++Dr. Langeskov, The Tiger, and The Terribly Cursed Emerald: A Whirlwind Heist
++Reassembly
++Double Action: Boogaloo
++Rogue Legacy
++BONEWORKS
++Company of Heroes - Legacy Edition
++METAL GEAR SOLID V: THE PHANTOM PAIN
++Overlord
++Football Manager 2022
++Unturned
++Original War
++Uncrashed : FPV Drone Simulator
++Cryptmaster
++The Cosmic Wheel Sisterhood
++Five Nights at Freddy's 4
++Crab Game
++SCP: Secret Laboratory
++Scarlet Hollow
++I Expect You To Die
++Crash Bandicoot N. Sane Trilogy
++One Step From Eden
++Killer Frequency
++Until You Fall
++DARQ: Complete Edition
++Depersonalization
++Civilization IV: Beyond the Sword
++FEZ
++Human Resource Machine
++SteamWorld Heist
++Sifu
++Space Pirate Trainer
++The Great Rebellion
++The Awesome Adventures of Captain Spirit
++Splitgate: Arena Warfare
++A Raven Monologue
++Arma 2: Operation Arrowhead
++Love Love School Days
++Shattered Pixel Dungeon
++Megadimension Neptunia VII
++Half-Life: Blue Shift
++The Evil Within 2
++HYPER DEMON
++Zero Escape: The Nonary Games
++TheoTown
++Turbo Dismount
++Big Ambitions
++The Silent Age
++Shin Megami Tensei V: Vengeance
++Aircar
++Metro 2033 Redux
++Hero of the Kingdom
++TYRONE vs COPS
++Littlewood
++Roblox
++Fortnite
++League of Legends
++Apex Legends
++Valorant
++Genshin Impact
++Call of Duty: Warzone
++Dota 2
++Overwatch 2
++Free Fire
++Mobile Legends: Bang Bang
++Honor of Kings
++Candy Crush Saga
++Pokémon GO
++Clash of Clans
++Clash Royale
++Warframe
++War Thunder
++Path of Exile
++Old School RuneScape
++Hearthstone
++Honkai: Star Rail
++Zenless Zone Zero
++Lost Ark
++Teamfight Tactics
++osu!
++Brawl Stars
++Call of Duty: Black Ops 3
++Hitman: World of Assassination
++God of War (2018)
++Horizon: Zero Dawn
++Final Fantasy X/X-2
++Baldur's Gate III
++Monster Hunter Rise
++Resident Evil 7
++Call of Duty 4: Modern Warfare
++Guitar Hero III: Legends of Rock
++LEGO Star Wars: The Complete Saga
++Call of Duty: Black Ops IIII
++Call of Duty: Infinite Warfare
++LEGO Batman: The Videogame
++FIFA Soccer 12
++Star Wars Battlefront (2015)
++FIFA Soccer 11
++LEGO Indiana Jones: The Original Adventures
++Need for Speed Underground 2
++FIFA Soccer 10
++Need for Speed Underground
++Batman: Arkham City
++Guitar Hero: World Tour
++Watch Dogs
++FIFA Soccer 08
++Assassin's Creed: Revelations
++Medal of Honor: Frontline
++FIFA Soccer 09
++Medal of Honor
++Pro Evolution Soccer 2008
++LEGO Harry Potter: Years 1-4
++Tony Hawk's Pro Skater
++Spider-Man: The Movie
++Assassin's Creed: Unity
++Tony Hawk's Pro Skater 3
++Mario & Sonic at the Olympic Winter Games
++The Elder Scrolls IV: Oblivion
++Batman: Arkham Asylum
++Harry Potter and the Chamber of Secrets
++Spider-Man 2
++Monopoly
++Namco Museum
++Madden NFL 2005
++Call of Duty 3
++WWE SmackDown vs Raw 2008
++Tom Clancy's Rainbow Six: Siege
++Guitar Hero II
++LEGO Star Wars III: The Clone Wars
++LEGO Star Wars II: The Original Trilogy
++Rock Band
++LEGO Star Wars: The Video Game
++Crash Bandicoot: The Wrath of Cortex
++Battlefield: Bad Company 2
++Madden NFL 2004
++The Simpsons: Hit & Run
++The Simpsons Game
++Assassin's Creed: Brotherhood
++PES 2009: Pro Evolution Soccer
++Cars
++Medal of Honor: Rising Sun
++Teenage Mutant Ninja Turtles
++The Lord of the Rings: The Two Towers
++Tony Hawk's Pro Skater 2
++Winning Eleven: Pro Evolution Soccer 2007
++Star Wars Battlefront II (2017)
++Tony Hawk's Underground
++Carnival Games
++Finding Nemo
++Kung Fu Panda
++Madden NFL 2002
++FIFA 07 Soccer
++Need for Speed Carbon
++WWE SmackDown! vs. Raw 2006
++Skylanders SWAP Force
++Driver
++Michael Jackson: The Experience
++The Simpsons: Road Rage
++Gran Turismo (PSP)
++Tom Clancy's Splinter Cell
++Midnight Club 3: DUB Edition
++Pro Evolution Soccer 2010
++Toy Story 3: The Video Game
++Madden NFL 2003
++Borderlands
++Tony Hawk's Pro Skater 4
++Tekken 2
++Mortal Kombat (2011)
++Batman: Arkham Knight
++LEGO Jurassic World
++The Lord of the Rings: The Return of the King
++Cooking Mama
++Star Wars Episode III: Revenge of the Sith
++Fight Night Round 3
++Skylanders Giants
++LEGO Pirates of the Caribbean: The Video Game
++Sega Superstars Tennis
++Asteroids
++Mortal Kombat
++Skylanders: Spyro's Adventure
++The LEGO Movie Videogame
++MySims
++Rock Band 2
++Assassin's Creed Syndicate
++Mortal Kombat X
++Disney Infinity
++The Incredibles
++True Crime: Streets of LA
++NBA Jam
++LEGO Indiana Jones 2: The Adventure Continues
++WWE SmackDown vs. Raw 2010
++James Bond 007: Agent Under Fire
++FIFA Soccer 06
++Titanfall
++James Bond 007: Nightfire
++LEGO Harry Potter: Years 5-7
++Warzone 2100
++The Sims: Bustin' Out
++Wall-E
++Midnight Club: Los Angeles
++Guitar Hero 5
++FIFA Soccer 2005
++WWE SmackDown vs. Raw 2009
++Enter the Matrix
++Crazy Taxi
++Crash Team Racing
++Saints Row 2
++Grand Theft Auto: Episodes from Liberty City
++Tom Clancy's Ghost Recon Wildlands
++Skate 3
++Driver 2
++Watch Dogs 2
++The SpongeBob SquarePants Movie
++WWF War Zone
++Dead Island
++Batman: Arkham Origins
++Skylanders: Trap Team
++Spider-Man
++Namco Museum: 50th Anniversary
++World Soccer Winning Eleven 9
++Call of Duty: Finest Hour
++Pro Evolution Soccer 2011
++Ben 10: Protector of Earth
++Rayman Legends
++Marvel: Ultimate Alliance
++Lego Batman 3: Beyond Gotham
++SpongeBob SquarePants: Battle for Bikini Bottom
++Ratatouille
++FIFA Soccer 2004
++Mortal Kombat II
++Guitar Hero: Aerosmith
++Battlefield: Hardline
++Destiny: The Taken King
++ESPN NFL 2K5
++LEGO Dimensions
++Disney Infinity 2.0: Marvel Super Heroes
++Rockstar Games Double Pack: Grand Theft Auto III & Grand Theft Auto Vice City
++Frogger
++Tomb Raider III: Adventures of Lara Croft
++FIFA Soccer 2003
++Sonic Generations
++The Beatles: Rock Band
++Call of Duty 2: Big Red One
++Tony Hawk's Underground 2
++LEGO The Lord of the Rings
++Namco Museum Vol.3
++Tekken Tag Tournament
++Ratchet & Clank: Size Matters
++Mortal Kombat vs DC Universe
++Rugrats in Paris: The Movie
++Tetris Worlds
++Mafia III
++Far Cry: Primal
++Tom Clancy's Ghost Recon
++Tom Clancy's Rainbow Six: Vegas
++The Sims 2: Pets
++World Soccer Winning Eleven 8 International
++NBA Live 2005
++The Evil Within
++Harry Potter and the Sorcerer's Stone
++Sports Champions
++Mortal Kombat: Deadly Alliance
++Diablo III: Ultimate Evil Edition
++007: Quantum of Solace
++Rocksmith 2014
++Namco Museum Vol.1
++Sonic's Ultimate Genesis Collection
++UFC 2009 Undisputed
++Madden NFL 2001
++Tom Clancy's Rainbow Six: Vegas 2
++The Sims: Unleashed
++Mortal Kombat Trilogy
++WWE SmackDown vs. RAW 2007
++Need for Speed: Hot Pursuit 2
++Pro Evolution Soccer 2012
++Wheel of Fortune
++Prince of Persia: The Sands of Time
++High School Musical: Sing It!
++WWF SmackDown!
++Cooking Mama 2: Dinner With Friends
++James Bond 007: Everything or Nothing
++Iron Man
++Cars 2
++WWE SmackDown vs. Raw 2011
++Guitar Hero: On Tour
++Sonic & SEGA All-Stars Racing
++Far Cry 2
++Madagascar
++Tekken 4
++James Cameron's Avatar: The Game
++The Elder Scrolls Online: Tamriel Unlimited
++Shrek 2
++Grand Theft Auto 2
++A Bug's Life
++Mortal Kombat 3
++Spider-Man 3
++Crash Bash
++Peter Jackson's King Kong: The Official Game of the Movie
++Band Hero
++Pure
++X-Men Legends
++NCAA Football 07
++Transformers: The Game
++Ghostbusters: The Video Game
++NBA Live 06
++SSX
++Rage
++Middle-Earth: Shadow of War
++Metal Gear Solid HD Collection
++Harry Potter and the Half-Blood Prince
++007: Tomorrow Never Dies
++NBA Street
++Saints Row IV
++WWE 2K15
++WWF SmackDown! 2: Know Your Role
++The Lion King
++Plants vs Zombies: Garden Warfare
++NBA Street Vol. 2
++Lego Star Wars: The Force Awakens
++Club Penguin: Elite Penguin Force
++Need for Speed III: Hot Pursuit
++Tiger Woods PGA Tour 08
++The Urbz: Sims in the City
++LEGO Marvel's Avengers
++Midnight Club: Street Racing
++DJ Hero
++The Sims 2: Castaway
++MySims Kingdom
++The Sims: Vacation
++Mafia II
++The Orange Box
++Rayman
++Guitar Hero Live
++Deal or No Deal
++Tiger Woods PGA Tour 10
++The Sims: Livin Large
++World Soccer Winning Eleven 6 International
++SingStar
++Crash Nitro Kart
++Tony Hawk's American Wasteland
++Dead Rising 2
++2010 FIFA World Cup South Africa
++Imagine: Fashion Designer
++Zumba Fitness
++Bakugan: Battle Brawlers
++UFC Undisputed 2010
++Disney Infinity 3.0
++Pac-Man Collection
++WWE 2K16
++Need for Speed: Payback
++Medal of Honor: Warfighter
++Devil May Cry 4
++Fight Night Round 4
++Ben 10: Alien Force
++Injustice: Gods Among Us
++Cooking Mama: Cook Off
++SSX Tricky
++Imagine: Babyz
++Colin McRae Rally
++Tom Clancy's Splinter Cell: Pandora Tomorrow
++The Elder Scrolls III: Morrowind
++The Golden Compass
++WWE SmackDown! vs. Raw
++Zumba Fitness 2
++Marvel: Ultimate Alliance 2
++NBA Live 2004
++NCAA Football 06
++MVP Baseball 2005
++Army of Two
++Battlefield: Bad Company
++WWF SmackDown! Just Bring It
++WWE '12
++NBA Live 2002
++WWE '13
++Mortal Kombat: Deception
++Sonic Unleashed
++Star Wars The Clone Wars: Republic Heroes
++Sim Theme Park
++Transformers: Revenge of the Fallen
++Guitar Hero: Metallica
++Pirates of the Caribbean: At World's End
++Wipeout: The Game
++Spyro: Enter the Dragonfly
++SpongeBob's Atlantis SquarePantis
++Cars: Race-O-Rama
++Medal of Honor Heroes
++WWE SmackDown! Shut Your Mouth
++Medal of Honor: European Assault
++For Honor
++Hannah Montana
++DiRT 2
++Rayman Raving Rabbids 2
++Toy Story 2: Buzz Lightyear to the Rescue!
++Prince of Persia: Warrior Within
++Up
++Guitar Hero: Warriors of Rock
++Tiger Woods PGA Tour 07
++Need for Speed Carbon: Own the City
++MX vs. ATV Untamed
++Injustice 2
++Tom Clancy's Ghost Recon: Future Soldier
++Streets of Rage
++EA Sports Active 2
++Homefront
++Tiger Woods PGA Tour 2004
++SSX 3
++NFL Blitz
++Grand Theft Auto
++Dragon's Dogma
++[Prototype]
++Tony Hawk's Project 8
++Scooby-Doo! Night of 100 Frights
++ESPN NBA 2K5
++NCAA Football 10
++NCAA Football 2005
++Harry Potter and the Order of the Phoenix
++Def Jam: Fight for NY
++Conflict: Desert Storm
++Disney Sing It
++Tom Clancy's Ghost Recon 2
++Rayman Raving Rabbids: TV Party
++Star Wars: Dark Forces
++NASCAR 99
++SoulCalibur II
++Game Party
++Pac-Man World 2
++007: The World is Not Enough
++SpongeBob SquarePants: Revenge of the Flying Dutchman
++WWF Attitude
++Fallout 76
++WWE 2K17
++LEGO The Hobbit
++Pro Evolution Soccer 2013
++uDraw Studio
++Tiger Woods PGA Tour 2005
++NFL Street
++Marvel vs. Capcom 3: Fate of Two Worlds
++Tom Clancy's Rainbow Six 3
++Assassin's Creed: Rogue
++Sonic Adventure
++Skylanders: SuperChargers
++Halo: Combat Evolved Anniversary
++Kinect: Disneyland Adventures
++ATV Offroad Fury
++F1 2011
++LEGO Worlds
++Tetris Plus
++Frogger's Adventures: Temple of the Frog
++WCW/nWo Revenge
++Rocksmith
++Cabela's Big Game Hunter 2010
++NBA Jam Tournament Edition
++Turok: Evolution
++MX Unleashed
++Madden NFL 2000
++Medal of Honor: Airborne
++Sonic & Sega All-Stars Racing Transformed
++Scooby Doo and the Cyber Chase
++NBA Live 2001
++LEGO Marvel Super Heroes 2
++Shaun White Snowboarding
++NBA Live 07
++NBA Live 08
++Harry Potter and the Goblet of Fire
++Kinect Sports: Season Two
++SpongeBob SquarePants: SuperSponge
++Knockout Kings 2000
++Resident Evil: Revelations
++WWE 2K14
++My Fitness Coach
++NBA Live 2003
++Tom Clancy's Splinter Cell: Blacklist
++Cool Boarders 3
++Need for Speed: High Stakes
++Tiger Woods PGA Tour 2003
++Mercenaries 2: World in Flames
++NBA 2K9
++50 Cent: Bulletproof
++Crash of the Titans
++NFL Street 2
++SingStar Abba
++Red Dead Redemption: Undead Nightmare
++Midnight Club II
++Tom Clancy's Rainbow Six
++F1 2010
++Crash: Mind Over Mutant
++Just Dance Kids
++Cool Boarders 2
++NCAA Football 2004
++Disney Universe
++Sonic Advance
++Dead to Rights
++Dance Dance Revolution X2
++Teenage Mutant Ninja Turtles II: The Arcade Game
++Spyro: Season of Ice
++Tom Clancy's Splinter Cell: Chaos Theory
++Petz Dogz 2
++DJ Hero 2
++Hasbro Family Game Night
++WWE 2K18
++Disney Epic Mickey 2: The Power of Two
++Spy Hunter
++The Walking Dead: A Telltale Games Series
++R.B.I. Baseball
++High School Musical: Makin' the Cut!
++Metal Gear Solid V: Ground Zeroes
++Dante's Inferno
++The Amazing Spider-Man (2012)
++MVP Baseball 2004
++Def Jam Vendetta
++Mortal Kombat 4
++South Park: The Fractured But Whole
++ATV Offroad Fury 2
++FIFA Street (2012)
++The Legend of Spyro: Dawn of the Dragon
++Rock Band 3
++NBA Ballers
++Tomb Raider: Definitive Edition
++NCAA Football 2003
++Your Shape featuring Jenny McCarthy
++The Sims: House Party
++PlayStation VR Worlds
++Tom Clancy's Splinter Cell: Conviction
++Fight Night 2004
++NCAA Football 11
++Army of Two: The 40th Day
++Tony Hawk: RIDE
++Madagascar: Escape 2 Africa
++Gun
++Harry Potter and the Prisoner of Azkaban
++Call of Duty: Roads to Victory
++Tony Hawk's Proving Ground
++Dance Dance Revolution Extreme
++Demon Attack
++LEGO Rock Band
++NASCAR 2000
++MySims Agents
++Scooby-Doo! First Frights
++Tak and the Power of Juju
++Aliens vs Predator
++Prince of Persia: The Forgotten Sands
++Need for Speed: Most Wanted 5-1-0
++WCW Nitro
++Metal Gear Solid: Peace Walker
++Disney Sing It: Pop Hits
++Prince of Persia
++Sled Storm
++Spec Ops: Airborne Commando
++Dance Dance Revolution: Hottest Party
++R4: Ridge Racer Type 4
++Midway Arcade Treasures
++NFL 2K3
++GRID
++Sid Meier's Civilization Revolution
++Shrek the Third
++Jeopardy!
++Famista '89 - Kaimaku Han!!
++Dark Souls
++Dig Dug
++Dave Mirra Freestyle BMX 2
++NCAA Football 14
++UFC Undisputed 3
++SOCOM: U.S. Navy SEALs: Combined Assault
++Dragon Quest XI: Echoes of an Elusive Age
++PGR4 - Project Gotham Racing 4
++Dance Central 2
++Major League Baseball 2K5
++Dark Souls II
++NCAA Football 13
++Blazing Angels: Squadrons of WWII
++Tiger Woods PGA Tour 09
++Driv3r
++NBA Live 09
++Centipede
++Rockstar Games presents Table Tennis
++WCW Mayhem
++Driver: San Francisco
++Mx vs. ATV Reflex
++The Incredible Hulk
++TouchMaster
++Lego Marvel Super Heroes: Universe in Peril
++Tiger Woods PGA Tour 06
++NBA 2K8
++NCAA Football 09
++Tenchu: Stealth Assassins
++Monsters, Inc.
++Resident Evil: Operation Raccoon City
++G-Force
++Sniper: Ghost Warrior
++Thief
++E.T.: The Extra Terrestrial
++NASCAR 2005: Chase for the Cup
++Cars: Mater-National Championship
++Hot Shots Golf: Open Tee
++NBA Live 2000
++Borderlands: The Handsome Collection
++NCAA Football 08
++My Word Coach
++Brink
++Skylanders Imaginators
++Jet Moto 2
++DiRT
++Ultimate Spider-Man
++Skate 2
++Burnout Revenge
++Shark Tale
++Virtua Fighter 2
++State of Emergency
++The Sims: Makin' Magic
++Red Faction
++EA Sports UFC 2
++DiRT 3
++Go Vacation
++Operation Flashpoint: Dragon Rising
++NASCAR Thunder 2002
++Fight Night Champion
++The Lord of the Rings: War in the North
++Evolve
++Star Wars Rogue Leader: Rogue Squadron II
++Tiger Woods PGA Tour 11
++Juiced 2: Hot Import Nights
++Harry Potter and the Deathly Hallows - Part 1
++Toy Story Mania!
++Bolt
++Game Party 2
++Persona 5
++The Witcher 2: Assassins of Kings
++Harry Potter: Quidditch World Cup
++FIFA 2000
++Castlevania
++Sonic Classic Collection
++Scarface: The World is Yours
++Tiger Woods PGA Tour 12: The Masters
++NHL 15
++Phineas and Ferb
++Corvette
++Top Spin 3
++South Park
++Rabbids Go Home
++Gran Turismo Concept 2001 Tokyo
++High School Musical 3: Senior Year DANCE!
++Sniper Elite V2
++2 Games in 1: Sonic Advance & ChuChu Rocket!
++Jet Moto
++Petz: Catz 2
++NCAA Football 12
++Brothers In Arms: Hell's Highway
++Marvel Nemesis: Rise of the Imperfects
++Sonic & Knuckles
++The Sims: Hot Date
++Sniper Elite III
++Project CARS
++DDRMAX2: Dance Dance Revolution
++Tom Clancy's EndWar
++NFL GameDay 2000
++Sonic Advance 2
++NASCAR Thunder 2003
++Pro Evolution Soccer 2014
++Darksiders II
++Ben 10 Alien Force: Vilgax Attacks
++Rayman Raving Rabbids
++NBA 2K7
++TimeSplitters 2
++Castlevania: Lords of Shadow
++The Godfather
++Angry Birds: Star Wars
++Disney's Chicken Little
++Star Wars: Starfighter
++2 Games in 1 Double Pack: The Incredibles / Finding Nemo: The Continuing Adventures
++Sonic the Hedgehog 3
++Test Drive
++Final Fantasy X / X-2 HD Remaster
++The Chronicles of Narnia: The Lion, The Witch and The Wardrobe
++Pro Evolution Soccer
++2 Games in 1: Disney Princess & The Lion King
++Dance Dance Revolution X
++World Championship Poker: Featuring Howard Lederer - All In
++SpongeBob's Truth or Square
++Star Wars Episode I: The Phantom Menace
++Lost Planet 2
++Brunswick Pro Bowling
++Crash Bandicoot: The Huge Adventure
++Twisted Metal III
++The Lord of the Rings: The Fellowship of the Ring
++Call of Duty: World at War Final Fronts
++Game Party 3
++Bulletstorm
++Kingdoms of Amalur: Reckoning
++Borderlands: The Pre-Sequel
++Iron Man 2
++Imagine: Teacher
++Call of Duty Black Ops: Declassified
++Bratz: Forever Diamondz
++Triple Play 2000
++Pro Evolution Soccer 2015
++Super Puyo Puyo
++Mad Max (2013)
++LEGO City Undercover
++The Sims 3: Late Night Expansion Pack
++Cooking Mama 3: Shop & Chop
++Tomodachi Collection: New Life
++Jampack Winter '99
++WCW vs. nWo: World Tour
++Dragon Ball Z: The Legacy of Goku
++NBA Live 99
++Mission: Impossible
++Prototype 2
++Star Wars Battlefront: Renegade Squadron
++Time Crisis
++The Sims: Superstar
++SpongeBob SquarePants Featuring Nicktoons: Globs of Doom
++NBA Street V3
++PGR: Project Gotham Racing 2
++Hannah Montana: Spotlight World Tour
++Black
++ModNation Racers
++NFL Blitz 2000
++Ready 2 Rumble Boxing
++Defender
++Disney Tangled
++Shaun White Snowboarding: Road Trip
++Major League Baseball 2K7
++Red Faction II
++Star Wars The Clone Wars: Lightsaber Duels
++Ms. Pac-Man
++SpongeBob SquarePants: Lights, Camera, Pants!
++Fight Night Round 2
++Red Faction: Guerrilla
++World Championship Poker
++Uncharted: Golden Abyss
++Kinectimals
++EA Playground
++Bully: Scholarship Edition
++X-Men Legends II: Rise of Apocalypse
++Ty the Tasmanian Tiger
++Buzz! The Music Quiz
++Baldur's Gate: Dark Alliance
++River Raid
++Power Rangers: Dino Thunder
++FIFA World Cup Germany 2006
++GoldenEye: Rogue Agent
++Deadpool
++Mario Bros.
++Soul Blade
++Stuntman
++Plants vs. Zombies
++EA Sports UFC
++Sonic Forces
++Sega Genesis Collection
++NHL 2002
++NHL 2001
++Duke Nukem Forever
++Dance Dance Revolution: Hottest Party 2
++Spyro 2: Season of Flame
++Jampack Summer 2K
++Disney Princess: Enchanted Journey
++Hulk
++Blitz: The League
++High School Musical 3: Senior Year
++Moshi Monsters: Moshling Zoo
++NCAA Football 2002
++Guitar Hero: On Tour Decades
++Smuggler's Run
++Tom Clancy's Ghost Recon Advanced Warfighter 2
++ATV Quad Power Racing 2
++Ready 2 Rumble Boxing: Round 2
++Guitar Hero: Smash Hits
++Medal of Honor Heroes 2
++Pro Evolution Soccer 2016
++Carnival Games: Mini Golf
++Hannah Montana: Music Jam
++Spider-Man 2: Enter: Electro
++Guinness World Records: The Videogame
++Street Fighter X Tekken
++Die Hard Trilogy
++Vigilante 8
++NBA 2K2
++Plants vs. Zombies: Garden Warfare 2
++Tak 2: The Staff of Dreams
++Disney Sing It! High School Musical 3: Senior Year
++Over the Hedge
++Tiger Woods 99 PGA Tour Golf
++NFL GameDay 99
++NBA 2K3
++MLB 07: The Show
++The Godfather II
++Super Monkey Ball 2
++Knockout Kings
++Sonic Rivals 2
++NASCAR 98
++Disney Fairies: Tinker Bell
++Xevious
++The Simpsons Skateboarding
++Cabela's Dangerous Hunts
++Call of Duty: Modern Warfare: Reflex Edition
++NBA Live 98
++Simpsons Wrestling
++Cabela's Big Game Hunter
++Call of Juarez: Bound in Blood
++NASCAR 2001
++Kane & Lynch: Dead Men
++Indiana Jones and the Staff of Kings
++Ninja Hattori Kun: Ninja wa Shuugyou Degogiru no Maki
++Pac-Man World
++Tokyo Xtreme Racer Zero
++Football Manager 2012
++WWF No Mercy
++F1 2012
++The Lord of the Rings: Conquest
++Split/Second
++Test Drive Unlimited 2
++Gauntlet: Dark Legacy
++Buzz! The BIG Quiz
++Darksiders
++Prey (2017)
++Steep
++Trivial Pursuit
++Ben 10 Ultimate Alien: Cosmic Destruction
++Hannah Montana: The Movie
++LEGO The Incredibles
++Assassin's Creed III: Liberation
++LEGO Battles: Ninjago
++Drawn To Life: SpongeBob SquarePants Edition
++Monster High: Ghoul Spirit
++Disney Princess
++Super Scribblenauts
++Imagine: Master Chef
++Manhunt
++NBA 2K6
++Dragon Ball: Raging Blast 2
++Monsters vs. Aliens
++Farming Simulator 2015
++WWE All Stars
++WCW vs the World
++Triple Play 99
++Super Monkey Ball
++New World: Aeternum
++Brawlhalla
++VRChat
++Monster Hunter Wilds
++World of Warships
++Last Epoch
++Warface: Clutch
++Half-Life 2: Lost Coast
++War Robots: Frontiers
++Sid Meier’s Civilization VI
++Paladins
++NARAKA: BLADEPOINT
++Battlefield 2042
++Mount & Blade II: Bannerlord
++Z1 Battle Royale
++World of Tanks Blitz
++Heroes & Generals
++SMITE
++Ring of Elysium
++Trove
++eFootball
++Black Squad
++Warhammer 40,000: Rogue Trader
++Counter-Strike: Condition Zero
++Half-Life 2: Deathmatch
++Street Warriors Online
++CyberCorp
++Dying Light 2 Stay Human: Reloaded Edition
++theHunter: Call of the Wild
++Warhammer 40,000: Space Marine 2
++EA SPORTS FIFA 23
++BattleBit Remastered
++Stumble Guys
++V Rising
++MultiVersus
++Robocraft
++SCUM
++Company of Heroes 2
++Total War: THREE KINGDOMS
++Poppy Playtime
++Tom Clancy’s The Division
++Deceit
++Dota Underlords
++Black Desert
++Business Tour - Board Game with Online Multiplayer
++Cry of Fear
++No More Room in Hell
++PlanetSide 2
++Russian Fishing 4
++Assassin’s Creed IV Black Flag
++STAR WARS: The Old Republic
++Fishing Planet
++Chivalry: Medieval Warfare
++Crossout
++Clicker Heroes
++AdVenture Capitalist
++Dirty Bomb
++Realm Royale
++Evolve Stage 2
++The Cycle: Frontier
++theHunter Classic
++Counter-Strike Nexon: Studio
++Loadout
++Neverwinter
++APB Reloaded
++DCS World Steam Edition
++KurtzPel
++Infestation: The New Z
++Football Manager 2020
++A Story About My Uncle
++War Robots
++Day of Defeat
++Guacamelee! Super Turbo Championship Edition
++Half-Life Deathmatch: Source
++Kathy Rain
++Deathmatch Classic
++Braveland
++Z1 Battle Royale: Test Server
++鬼谷八荒 Tale of Immortal
++Starfield
++Kingdom Come: Deliverance
++NieR:Automata
++Warhammer: Vermintide 2
++Space Engineers
++Metro Exodus
++Muse Dash
++DARK SOULS II: Scholar of the First Sin
++S.T.A.L.K.E.R. 2: Heart of Chornobyl
++Warhammer 40,000: Darktide
++The Long Dark
++MORDHAU
++Dragon's Dogma 2
++Mortal Kombat 11
++Escape the Backrooms
++Elite Dangerous
++TEKKEN 7
++Resident Evil 3
++NARUTO SHIPPUDEN: Ultimate Ninja STORM 4
++Total War: ROME II - Emperor Edition
++The Witcher 2: Assassins of Kings Enhanced Edition
++Totally Accurate Battlegrounds
++Albion Online
++The Witcher: Enhanced Edition Director's Cut
++DEVOUR
++Watch_Dogs 2
++Age of Empires IV: Anniversary Edition
++Green Hell
++Shadow of the Tomb Raider: Definitive Edition
++Enshrouded
++Friday the 13th: The Game
++ARMORED CORE VI FIRES OF RUBICON
++Getting Over It with Bennett Foddy
++ARK: Survival Ascended
++Fallout Shelter
++Assassin's Creed Unity
++Hellblade: Senua's Sacrifice
++DRAGON BALL FighterZ
++Overcooked! 2
++Manor Lords
++Rec Room
++Metro: Last Light Redux
++Goat Simulator
++Golf With Your Friends
++Red Dead Online
++ELDEN RING NIGHTREIGN
++Microsoft Flight Simulator (2020) 40th Anniversary Edition
++DRAGON BALL: Sparking! ZERO
++Northgard
++Party Animals
++Ghostrunner
++State of Decay 2: Juggernaut Edition
++GTFO
++The Scroll Of Taiwu
++OUTRIDERS
++Gang Beasts
++Battlerite
++Gray Zone Warfare
++Sniper Elite 4
++BioShock Remastered
++Rising Storm 2: Vietnam
++CODE VEIN
++Vampire: The Masquerade - Bloodhunt
++Street Fighter 6
++NARUTO TO BORUTO: SHINOBI STRIKER
++Assassin's Creed 2
++World War 3
++Jurassic World Evolution
++Pummel Party
++FINAL FANTASY XV WINDOWS EDITION
++Chained Together
++Remnant: From the Ashes
++The Elder Scrolls IV: Oblivion Remastered
++Car Mechanic Simulator 2018
++UNO
++Fallout 3: Game of the Year Edition
++No Rest for the Wicked
++Alan Wake
++They Are Billions
++Liar's Bar
++ACE COMBAT 7: SKIES UNKNOWN
++Granblue Fantasy: Relink
++Chivalry 2
++Dragon's Dogma: Dark Arisen
++HITMAN World of Assassination
++Street Fighter V
++Yu-Gi-Oh! Duel Links
++Banished
++Pacify
++For The King
++Skullgirls 2nd Encore
++DiRT Rally
++RISK: Global Domination
++One-armed robber
++KARDS - The WWII Card Game
++CRSED: F.O.A.D.
++Pathfinder: Wrath of the Righteous - Enhanced Edition
++Quake Champions
++Call of Duty: Modern Warfare 3 (2011)
++Fistful of Frags
++Titan Quest Anniversary Edition
++Total War: ATTILA
++Nioh: Complete Edition
++Tales of ARISE
++Pathfinder: Kingmaker — Enhanced Plus Edition
++Borderlands Game of the Year
++Age of Empires III (2007)
++The Escapists 2
++STAR WARS Knights of the Old Republic
++HELLDIVERS Dive Harder Edition
++Magicka
++Bless Unleashed
++Warhammer 40,000: Space Marine - Anniversary Edition
++Who's Your Daddy?!
++Mafia II: Definitive Edition
++Conqueror's Blade
++Deus Ex: Human Revolution - Director's Cut
++Serious Sam 3: BFE
++Transformice
++Dead Space (2008)
++Sniper Elite 3
++Dead Frontier 2
++Krunker
++Awesomenauts
++BioShock 2 Remastered
++Layers of Fear (2016)
++Surviving Mars
++Shadow Warrior
++Microsoft Flight Simulator X: Steam Edition
++BLOCKADE 3D
++Survarium
++RuneScape
++Phantasy Star Online 2
++Magic Duels
++Spiral Knights
++RaceRoom Racing Experience
++TrackMania Nations Forever
++The Day Before
++Neon Abyss
++Day of Defeat: Source
++Tribes of Midgard
++Ironsight
++Sniper Elite 5
++Kingdom: Classic
++Marvel's Midnight Suns
++Dungeon Defenders II
++Tree of Savior (English Ver.)
++Star Trek Online
++Moonlighter
++The Darkness II
++Football Manager 2023
++World of Guns: Gun Disassembly
++ENDLESS Legend
++Creative Destruction
++Operation: Harsh Doorstop
++Darksiders II Deathinitive Edition
++Century: Age of Ashes
++Last Man Standing
++Toribash
++Codename CURE
++Dome Keeper
++Half-Life: Source
++Monster Hunter Stories 2: Wings of Ruin
++Quake Live
++Governor of Poker 3
++Block N Load
++Star Conflict
++Just Cause 2: Multiplayer Mod
++Shadowverse CCG
++Guns of Icarus Online
++Metin2
++Sanctum 2
++Spellbreak
++SoulWorker - Anime Action MMO
++Magicka 2
++Shadowrun Returns
++Warhammer 40,000: Chaos Gate - Daemonhunters
++Warhammer 40,000: Dawn of War II - Anniversary Edition (Classic)
++Defiance
++MechWarrior Online Solaris 7
++Mitos.is: The Game
++The Bureau: XCOM Declassified
++ARK: Survival Of The Fittest
++S.K.I.L.L. - Special Force 2 (Shooter)
++RIFT
++Football Manager 2017
++POSTAL
++America's Army: Proving Grounds
++Argo
++Knight Online
++Crucible Beta
++GunZ 2: The Second Duel
++Far Cry
++Line of Sight
++Aura Kingdom
++Dead Bits
++Monaco: What's Yours Is Mine
++Jotun: Valhalla Edition
++F1 2015
++Vindictus
++The Descendant
++Kingdom Two Crowns
++Kholat
++Stories: The Path of Destinies
++The Tiny Bang Story
++Back to Bed
++Divide By Sheep
++The Red Solstice
++Minimalism
++The I of the Dragon
++Party Jousting
++Heaven Forest - VR MMO
++Heaven Forest NIGHTS
++Secret in Story
++Horizon Zero Dawn Complete Edition
++Mafia: Definitive Edition
++World of Tanks
++DARK SOULS: Prepare To Die Edition
++Just Survive
++Gorilla Tag
++Back 4 Blood
++Wolcen: Lords of Mayhem
++Five Nights at Freddy's: Security Breach
++TEKKEN 8
++REMNANT II
++GUILTY GEAR -STRIVE-
++Mafia III: Definitive Edition
++Mass Effect Legendary Edition
++EA SPORTS FIFA 21
++Outlast 2
++Stormworks: Build and Rescue
++DRAGON BALL XENOVERSE 2
++Victoria 3
++Blasphemous
++CONTROL Ultimate Edition
++Age of Empires III: Definitive Edition
++Gujian3(古剑奇谭三)
++The Long Drive
++Age of History II
++Dread Hunger
++Stranded Deep
++Watch_Dogs
++Nioh 2 – The Complete Edition
++Medieval Dynasty
++LEGO Star Wars: The Skywalker Saga
++Inside the Backrooms
++DiRT Rally 2.0
++Men of War: Assault Squad 2
++Foxhole
++SnowRunner
++Graveyard Keeper
++Hero Siege
++My Time at Portia
++ATLAS
++Sid Meier's Civilization VII
++Lords of the Fallen
++Forager
++Generation Zero
++Pavlov
++The Callisto Protocol
++SUPERHOT
++Wreckfest
++eFootball PES 2021 SEASON UPDATE
++MudRunner
++DDraceNetwork
++Verdun
++FINAL FANTASY VII REMAKE INTERGRADE
++FPS Chess
++Jurassic World Evolution 2
++Deep Rock Galactic: Survivor
++Hand Simulator
++Town of Salem
++Ranch Simulator: Build, Hunt, Farm
++Thief Simulator
++Total War: EMPIRE – Definitive Edition
++F1 2021
++POLYGON: Multiplayer Shooter
++Metaphor: ReFantazio
++Plants vs. Zombies Garden Warfare 2: Deluxe Edition
++Marvel's Avengers - The Definitive Edition
++Draw & Guess
++Empyrion - Galactic Survival
++Company of Heroes 3
++Command & Conquer Remastered Collection
++Far Cry Primal
++Bright Memory
++Depth
++Far Cry New Dawn
++Emily is Away
++BATTLETECH
++Starship Troopers: Extermination
++Creativerse
++Just Cause 4 Reloaded
++Stoneshard
++We Were Here
++GWENT: The Witcher Card Game
++Wartales
++DEATHLOOP
++DJMAX RESPECT V
++Bloons TD Battles
++Divinity: Original Sin - Enhanced Edition
++Golf It!
++Resident Evil Revelations 2
++PICO PARK
++ORION: Prelude
++Outward Definitive Edition
++Dragon Age: Origins - Ultimate Edition
++100% Orange Juice
++Train Simulator Classic
++Enlisted: Reinforced
++Tricolour Lovestory
++Risk of Rain Returns
++Beholder
++20 Minutes Till Dawn
++Wo Long: Fallen Dynasty
++Transport Fever 2
++HUMANKIND
++Shadow Warrior 2
++Tropico 6
++ICEY
++Resident Evil
++Imperator: Rome
++eFootball PES 2020
++World War Z
++Chinese Parents
++Dead Island Definitive Edition
++Sonic Adventure 2
++Infestation: Survivor Stories 2020
++Total War: NAPOLEON – Definitive Edition
++Hydroneer
++Anno 1800
++Artifact
++Aliens: Fireteam Elite
++Squad 44
++Dinkum
++Borderlands Game of the Year Enhanced
++Battle Brothers
++Alice: Madness Returns
++Last Oasis
++Drug Dealer Simulator
++X4: Foundations
++Call to Arms - Gates of Hell: Ostfront
++Cell to Singularity - Evolution Never Ends
++Need for Speed
++Lost Castle / 失落城堡
++Call to Arms
++Move or Die
++Assassin’s Creed Brotherhood
++Football Manager 2024
++The Ascent
++Heroes of Might & Magic III - HD Edition
++Need for Speed Most Wanted
++Horizon Forbidden West Complete Edition
++XCOM: Chimera Squad
++JUMP FORCE
++Sands of Salzaar
++Sid Meier's Civilization: Beyond Earth
++Warhammer 40,000: Dawn of War III
++Tom Clancy’s The Division 2
++We Were Here Expeditions: The FriendShip
++Forts
++S.T.A.L.K.E.R.: Clear Sky
++ENDLESS Space 2
++Hatred
++Vampyr
++Day of Infamy
++Tiny Tina's Wonderlands
++Assassin's Creed: Director's Cut Edition
++Call of Duty: Advanced Warfare - Gold Edition
++War Selection
++Demonologist
++Legends of IdleOn - Idle MMO
++Portal Knights
++GROUND BRANCH
++Darkest Dungeon II
++Dark Deception
++Warhammer 40,000: Inquisitor - Martyr
++Warhammer: End Times - Vermintide
++DC Universe Online
++Children of Morta
++DRAGON BALL XENOVERSE
++BIGFOOT
++Marauders
++Salt and Sanctuary
++Hardspace: Shipbreaker
++Solasta: Crown of the Magister
++Craftopia
++FINAL FANTASY X/X-2 HD Remaster
++ONE PIECE: PIRATE WARRIORS 4
++Aliens vs. Predator
++Tom Clancy’s Splinter Cell Blacklist
++Danganronpa V3: Killing Harmony
++Dragon Age Inquisition
++Farthest Frontier
++Victoria II
++Skater XL - The Ultimate Skateboarding Game
++BIOMUTANT
++Police Simulator: Patrol Officers
++Witch It
++Injustice: Gods Among Us Ultimate Edition
++Wargame: Red Dragon
++Sword Art Online: Fatal Bullet
++Dead Rising 3 Apocalypse Edition
++ELEX
++Demon Slayer -Kimetsu no Yaiba- The Hinokami Chronicles
++Project Winter
