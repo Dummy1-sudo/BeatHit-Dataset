@@ -1,0 +1,4275 @@
+diff --git a/.github/workflows/full-build.yml b/.github/workflows/full-build.yml
+index 36e7979..8e7c31f 100644
+--- a/.github/workflows/full-build.yml
++++ b/.github/workflows/full-build.yml
+@@ -25,6 +25,7 @@ on:
+ 
+ permissions:
+   contents: write
++  actions: read
+ 
+ concurrency:
+   group: beathit-full-build
+@@ -39,7 +40,7 @@ jobs:
+     steps:
+       - uses: actions/checkout@v4
+         with:
+-          fetch-depth: 0
++          fetch-depth: 1
+ 
+       - uses: actions/setup-python@v5
+         with:
+@@ -51,8 +52,12 @@ jobs:
+           python -m pip install --upgrade pip
+           pip install -e . -r requirements-full.txt pytest
+ 
++      - name: Run builder regression tests
++        run: pytest -q
++
+       - name: Restore large-source cache
+-        uses: actions/cache@v4
++        id: source-cache
++        uses: actions/cache/restore@v4
+         with:
+           path: |
+             data/raw/full_build
+@@ -61,7 +66,7 @@ jobs:
+           restore-keys: |
+             beathit-sources-v5-${{ runner.os }}-
+ 
+-      - name: Restore resumable builder checkpoints
++      - name: Restore legacy resumable builder checkpoints
+         id: restore-builder-checkpoints
+         uses: actions/cache/restore@v4
+         with:
+@@ -76,15 +81,28 @@ jobs:
+           restore-keys: |
+             beathit-builder-checkpoints-v2-${{ runner.os }}-
+ 
++      - name: Restore current builder checkpoints
++        id: current-checkpoints
++        uses: actions/cache/restore@v4
++        with:
++          path: .cache/full_build
++          key: beathit-builder-checkpoints-v3-${{ runner.os }}-${{ github.run_id }}-${{ github.run_attempt }}
++          restore-keys: |
++            beathit-builder-checkpoints-v3-${{ runner.os }}-
++
+       - name: Restore generated outputs from previous run
+         if: ${{ github.event_name == 'workflow_dispatch' && inputs.restore_run_id != '' }}
+         uses: actions/download-artifact@v4
+         with:
+           name: beathit-full-build-output
+-          path: data
++          path: .restore-output
+           github-token: ${{ github.token }}
+           run-id: ${{ inputs.restore_run_id }}
+ 
++      - name: Import restored outputs
++        if: ${{ github.event_name == 'workflow_dispatch' && inputs.restore_run_id != '' }}
++        run: python scripts/restore_outputs.py .restore-output
++
+       - name: Build all requested lists
+         id: generate
+         env:
+@@ -95,10 +113,12 @@ jobs:
+           BEATHIT_RYD_FALLBACK: '1'
+           BEATHIT_RYD_WORKERS: '20'
+           # AnimeThemes supplies the bulk mapping; Jikan is only a resilient post-pass.
+-          BEATHIT_JIKAN_MAX_QUERIES: '250'
+-          BEATHIT_JIKAN_MAX_SECONDS: '900'
++          BEATHIT_JIKAN_MAX_QUERIES: ${{ vars.BEATHIT_JIKAN_MAX_QUERIES || '1000' }}
++          BEATHIT_JIKAN_INDEX_PAGES: ${{ vars.BEATHIT_JIKAN_INDEX_PAGES || '240' }}
++          BEATHIT_JIKAN_MAX_SECONDS: ${{ vars.BEATHIT_JIKAN_MAX_SECONDS || '1800' }}
+           BEATHIT_JIKAN_FAILURE_BREAKER: '12'
+           BEATHIT_YTDLP_FALLBACK: '0'
++          BEATHIT_HOLOLIVE_ROUND_DOWN: ${{ vars.BEATHIT_HOLOLIVE_ROUND_DOWN || '100000' }}
+           BEATHIT_VOCADB_SCAN_LIMIT: ${{ vars.BEATHIT_VOCADB_SCAN_LIMIT || '350000' }}
+           BEATHIT_VOCALOID_VIEW_CACHE_DAYS: ${{ vars.BEATHIT_VOCALOID_VIEW_CACHE_DAYS || '30' }}
+           BEATHIT_KPOP_VIEW_CACHE_DAYS: ${{ vars.BEATHIT_KPOP_VIEW_CACHE_DAYS || '7' }}
+@@ -106,37 +126,23 @@ jobs:
+           BEATHIT_KPOP_GENERIC_SEARCHES: ${{ vars.BEATHIT_KPOP_GENERIC_SEARCHES || '0' }}
+           BEATHIT_COUNTRY_WORKERS: ${{ vars.BEATHIT_COUNTRY_WORKERS || '4' }}
+         run: |
+-          python scripts/build_full_dataset.py --reuse-complete --force anime video_game_music internet_native jazz_depth children_childhood unserious screen_soundtracks
++          python scripts/build_full_dataset.py --reuse-complete
+ 
+       - name: Save resumable builder checkpoints
+-        if: ${{ always() && steps.restore-builder-checkpoints.outputs.cache-hit != 'true' }}
++        if: ${{ always() && steps.generate.outcome != 'skipped' }}
+         uses: actions/cache/save@v4
+         with:
+-          path: |
+-            .cache/full_build/vocadb_original_youtube_scan.jsonl
+-            .cache/full_build/vocadb_original_youtube_scan.meta.json
+-            .cache/full_build/vocadb_youtube_view_counts.json
+-            .cache/full_build/kpop_youtube_checkpoint.json
+-            .cache/full_build/listenbrainz_video_game_music.json
+-            .cache/full_build/wikidata_top_video_games.json
+-          key: beathit-builder-checkpoints-v2-${{ runner.os }}-${{ github.run_id }}
+-
+-      - name: Update checksums
+-        run: python scripts/update_manifest.py
++          path: .cache/full_build
++          key: beathit-builder-checkpoints-v3-${{ runner.os }}-${{ github.run_id }}-${{ github.run_attempt }}
+ 
+-      - name: Commit generated datasets
+-        run: |
+-          git config user.name "BeatHit Dataset Builder"
+-          git config user.email "actions@users.noreply.github.com"
+-          # Stage only known generated outputs. Never stage the whole repository or raw/source inputs.
+-          git add -- STATUS.json data/BUILD_REPORT.json data/coverage_report.csv data/MANIFEST.json
+-          git add -- data/anime data/vocaloid data/vtuber_original data/vtuber_non_original data/video_games data/kpop data/internet_native data/electronic_subcultures data/alternative_extreme data/jazz_depth data/children_childhood data/unserious data/special_required data/megalist
+-          if git diff --cached --quiet; then
+-            echo "No generated-data changes"
+-          else
+-            git commit -m "Build source-backed BeatHit datasets [skip full-build]"
+-            git push
+-          fi
++      - name: Save large-source cache
++        if: ${{ always() && steps.generate.outcome == 'success' && steps.source-cache.outputs.cache-hit != 'true' }}
++        uses: actions/cache/save@v4
++        with:
++          path: |
++            data/raw/full_build
++            .cache/full_build
++          key: beathit-sources-v5-${{ runner.os }}
+ 
+       - name: Validate generated datasets
+         id: validation
+@@ -150,29 +156,23 @@ jobs:
+           if python -m music_megalist validate --complete > data/complete_validation.txt 2>&1; then
+             echo "Strict fixed-target validation passed" >> data/complete_validation.txt
+           else
++            status=1
+             echo "Strict fixed-target validation did not pass; see source-backed shortfalls above." >> data/complete_validation.txt
+           fi
+-          pytest -q || status=$?
+           exit "$status"
+ 
+-      - name: Commit validation reports
+-        if: always()
+-        run: |
+-          git config user.name "BeatHit Dataset Builder"
+-          git config user.email "actions@users.noreply.github.com"
+-          git add -- data/target_report.json data/complete_validation.txt
+-          if git diff --cached --quiet; then
+-            echo "No validation-report changes"
+-          else
+-            git commit -m "Update BeatHit validation reports [skip full-build]"
+-            git push
+-          fi
++      - name: Update checksums after validation reports
++        if: ${{ always() && steps.generate.outcome == 'success' }}
++        run: python scripts/update_manifest.py
+ 
+       - uses: actions/upload-artifact@v4
+         if: always()
+         with:
+           name: beathit-full-build-output
+           path: |
++            STATUS.json
++            data/MANIFEST.json
++            data/hololive_coverage.json
+             data/BUILD_REPORT.json
+             data/coverage_report.csv
+             data/target_report.json
+@@ -204,13 +204,18 @@ jobs:
+         with:
+           name: beathit-builder-checkpoints
+           include-hidden-files: true
+-          path: |
+-            .cache/full_build/vocadb_original_youtube_scan.jsonl
+-            .cache/full_build/vocadb_original_youtube_scan.meta.json
+-            .cache/full_build/vocadb_youtube_view_counts.json
+-            .cache/full_build/kpop_youtube_checkpoint.json
+-            .cache/full_build/listenbrainz_video_game_music.json
+-            .cache/full_build/wikidata_top_video_games.json
++          path: .cache/full_build
++
++      - name: Commit generated datasets and reports together
++        if: ${{ always() && steps.generate.outcome == 'success' }}
++        run: |
++          git config user.name "BeatHit Dataset Builder"
++          git config user.email "actions@users.noreply.github.com"
++          python scripts/stage_generated.py
++          if ! git diff --cached --quiet; then
++            git commit -m "Build and validate source-backed BeatHit datasets [skip full-build]"
++            git push origin HEAD:main
++          fi
+ 
+       - name: Propagate validation failure
+         if: ${{ steps.validation.outcome == 'failure' }}
+diff --git a/.github/workflows/validate.yml b/.github/workflows/validate.yml
+index 914531b..b61021a 100644
+--- a/.github/workflows/validate.yml
++++ b/.github/workflows/validate.yml
+@@ -1,6 +1,7 @@
+ name: validate-datasets
+ on:
+   push:
++    paths: ['data/**', 'STATUS.json']
+   pull_request:
+ jobs:
+   validate:
+@@ -11,5 +12,5 @@ jobs:
+         with:
+           python-version: '3.12'
+       - run: pip install -e . pytest
+-      - run: python -m music_megalist validate
+       - run: pytest -q
++      - run: python -m music_megalist validate
+diff --git a/README.md b/README.md
+index c49388b..d540391 100644
+--- a/README.md
++++ b/README.md
+@@ -7,7 +7,7 @@ A reproducible, source-backed collection of large ranked music lists. The reposi
+ | Dataset | Requested coverage |
+ |---|---:|
+ | Popular anime + most recognizable theme song | 10,000 anime |
+-| Vocaloid / voice-synth songs | every verified song with >=10,000,000 Spotify streams, capped at 10,000 |
++| Vocaloid / voice-synth songs | all qualifying VocaDB originals with a resolved official Original YouTube PV; no row cap |
+ | Worldwide songs by era | 51,000 total |
+ | Classical | 10,000 |
+ | VTuber original songs | up to 10,000 verified entries |
+@@ -33,7 +33,7 @@ No public source exposes a perfectly current, complete worldwide listen counter
+ 
+ - `spotify_streams` → cumulative Spotify stream count from the cited snapshot/page
+ - `spotify_streams_snapshot` → cumulative Spotify stream count from a dated snapshot
+-- `spotify_chart_streams_snapshot` → chart-history aggregate from a dated chart dataset, **not** a lifetime counter and never used for the Vocaloid >=10M qualification
++- `spotify_chart_streams_snapshot` → chart-history aggregate from a dated chart dataset, **not** a lifetime counter and never used for Vocaloid qualification
+ - `spotify_country_chart_streams` → exact country-specific sum of Spotify daily Top 200 streams observed while the song was charting; streams outside the chart are excluded
+ - `spotify_regional_chart_streams_sum` → megalist-only sum of the distinct country-chart totals for the same song; still a chart-attributed aggregate, not a lifetime Spotify counter
+ - `youtube_views` → actual YouTube view count
+@@ -53,7 +53,7 @@ The repository contains a full builder that combines:
+ - a live Kworb cumulative Spotify-stream overlay for globally prominent tracks, with exact normalized title+artist matching;
+ - Kworb aggregates of Spotify regional daily charts to discover every available country/territory chart and build one all-time top-1,000 list per market;
+ - AniList current popularity (stable live window) + AnimeThemes theme metadata, with a bundled MyAnimeList popularity/theme snapshot and paced/cached Jikan theme fallback when live AniList or theme joins are unavailable;
+-- VocaDB for voice-synth classification, using a rate-paced high-popularity candidate scan plus explicit voice-synth credit/genre markers so the API is not abused by a hundreds-of-thousands-row crawl;
++- VocaDB for voice-synth classification, using a paced, resumable original-song scan and explicit voice-synth credits; official Original YouTube PVs establish eligible uploads;
+ - Holodex for VTuber `Original_Song` and `Music_Cover` classification, with HoloStats as a Hololive-only fallback/augmentation;
+ - YouTube Data API when available; otherwise a clearly attributed Return YouTube Dislike cached `viewCount` fallback, then optional capped `yt-dlp` as a last resort;
+ - ListenBrainz as a classical/popularity fallback;
+@@ -68,7 +68,7 @@ python -m music_megalist validate
+ python scripts/verify_targets.py
+ ```
+ 
+-The full source download can exceed 1 GB. Set `BEATHIT_SKIP_ZENODO=1` only when you accept lower coverage and lower stream-count accuracy. `BEATHIT_VOCADB_SCAN_LIMIT` defaults to 25,000 high-rated VocaDB candidates to respect the public API usage guidance; increasing it can improve recall but does not magically make Spotify/VocaDB coverage exhaustive.
++The full source download can exceed 1 GB. Set `BEATHIT_SKIP_ZENODO=1` only when you accept lower coverage and lower stream-count accuracy. `BEATHIT_VOCADB_SCAN_LIMIT` defaults to 350,000 candidates. The paced scan resumes from checkpoints; reaching a configured scan budget is not evidence that the corpus is exhaustive.
+ 
+ ## Automatic completion after manual GitHub push
+ 
+@@ -115,12 +115,12 @@ The current bucket emphasizes fresher popularity signals. Historical buckets pri
+ 
+ A large output file existing is **not** enough to claim completion. `STATUS.json` is authoritative:
+ 
+-- fixed-size categories are complete only when the exact requested row count is materialized;
+-- Vocaloid is complete only when the qualifying source corpus is genuinely exhaustive enough to support the claim; it is never padded below 10M streams;
++- fixed-size categories require their exact target; the two VTuber lists additionally allow mandatory Hololive inclusions above their nominal target;
++- Vocaloid is complete only when the qualifying VocaDB scan and official YouTube availability checks are resolved; confirmed unavailable videos are distinguished from failed requests;
+ - VTuber lists are never padded with non-VTuber/unverified tracks merely to reach 10,000;
+ - every Spotify country/territory advertised by the source index must reach the requested 1,000 unique rows; source-exhausted short markets or unavailable historical totals stay explicitly incomplete rather than being padded;
+ - `megalist.complete` is true only when all upstream requested lists, including the country lists, are complete;
+-- `python scripts/verify_targets.py` checks era allocation, >=50 genre diversity, Vocaloid threshold validity, VTuber original/cover flags, per-country source-backed completeness, and megalist deduplication in addition to row counts.
++- `python scripts/verify_targets.py` checks era allocation, >=50 genre diversity, Vocaloid official-original-PV validity, VTuber original/cover flags, per-country source-backed completeness, and megalist deduplication in addition to row counts.
+ 
+ The repository intentionally prefers an honest shortfall over a fabricated “100% complete” status.
+ 
+@@ -157,3 +157,12 @@ scripts/
+ ## Licensing
+ 
+ Repository code is MIT. Third-party datasets and APIs retain their own licenses/terms. Large raw third-party downloads used during the full build are git-ignored and are not silently relicensed or redistributed. Generated rows retain a `source_url` and source notes so provenance remains inspectable.
++
++## Corrective builder revision v3
++
++See [the audit and operational limits](docs/repair-v3.md) for the source fixes,
++checkpoint migration, publication corrections, and Hololive inclusion policy.
++The two VTuber targets are nominal 10,000-row lists: mandatory Hololive inclusions
++may exceed that size. Five songs per member are counted across originals and
++covers combined; unavailable evidence or insufficient songs remain explicit
++shortfalls. Rounding defaults to 100,000 and is configurable.
+diff --git a/data/seeds/hololive_members.json b/data/seeds/hololive_members.json
+new file mode 100644
+index 0000000..32aec8f
+--- /dev/null
++++ b/data/seeds/hololive_members.json
+@@ -0,0 +1,1340 @@
++{
++  "retrieved_at": "2026-09-12",
++  "scope": "Members listed by the official Hololive and Holostars talent directories, including listed alumni; staff excluded.",
++  "members": [
++    {
++      "member_id": "airani-iofifteen",
++      "name": "Airani Iofifteen",
++      "aliases": [
++        "Airani Iofifteen",
++        "アイラニ・イオフィフティーン"
++      ],
++      "channel_ids": [
++        "UCAoy6rzhSf4ydcYjJw3WoVg"
++      ],
++      "source_url": "https://hololive.hololivepro.com/en/talents/airani-iofifteen/",
++      "status": "listed"
++    },
++    {
++      "member_id": "akai-haato",
++      "name": "Akai Haato",
++      "aliases": [
++        "Akai Haato",
++        "赤井はあと"
++      ],
++      "channel_ids": [
++        "UC1CfXB_kRs3C-zaeTG3oGyg"
++      ],
++      "source_url": "https://hololive.hololivepro.com/en/talents/akai-haato/",
++      "status": "listed"
++    },
++    {
++      "member_id": "aki-rosenthal",
++      "name": "Aki Rosenthal",
++      "aliases": [
++        "Aki Rosenthal",
++        "アキ・ローゼンタール"
++      ],
++      "channel_ids": [
++        "UCFTLzh12_nrtzqBPsTCqenA"
++      ],
++      "source_url": "https://hololive.hololivepro.com/en/talents/aki-rosenthal/",
++      "status": "listed"
++    },
++    {
++      "member_id": "amane-kanata",
++      "name": "Amane Kanata",
++      "aliases": [
++        "Amane Kanata",
++        "天音かなた"
++      ],
++      "channel_ids": [
++        "UCZlDXzGoo7d44bwdNObFacg"
++      ],
++      "source_url": "https://hololive.hololivepro.com/en/talents/amane-kanata/",
++      "status": "alum"
++    },
++    {
++      "member_id": "anya-melfissa",
++      "name": "Anya Melfissa",
++      "aliases": [
++        "Anya Melfissa",
++        "アーニャ・メルフィッサ"
++      ],
++      "channel_ids": [
++        "UC727SQYUvx5pDDGQpTICNWg"
++      ],
++      "source_url": "https://hololive.hololivepro.com/en/talents/anya-melfissa/",
++      "status": "listed"
++    },
++    {
++      "member_id": "ayunda-risu",
++      "name": "Ayunda Risu",
++      "aliases": [
++        "Ayunda Risu",
++        "アユンダ・リス"
++      ],
++      "channel_ids": [
++        "UCOyYb1c43VlX9rc_lT6NKQw"
++      ],
++      "source_url": "https://hololive.hololivepro.com/en/talents/ayunda-risu/",
++      "status": "listed"
++    },
++    {
++      "member_id": "azki",
++      "name": "AZKi",
++      "aliases": [
++        "AZKi"
++      ],
++      "channel_ids": [
++        "UC0TXe_LYZ4scaW2XMyi5_kw"
++      ],
++      "source_url": "https://hololive.hololivepro.com/en/talents/azki/",
++      "status": "listed"
++    },
++    {
++      "member_id": "cecilia-immergreen",
++      "name": "Cecilia Immergreen",
++      "aliases": [
++        "Cecilia Immergreen",
++        "セシリア・イマーグリーン"
++      ],
++      "channel_ids": [
++        "UCvN5h1ShZtc7nly3pezRayg"
++      ],
++      "source_url": "https://hololive.hololivepro.com/en/talents/cecilia-immergreen/",
++      "status": "listed"
++    },
++    {
++      "member_id": "ceres-fauna",
++      "name": "Ceres Fauna",
++      "aliases": [
++        "Ceres Fauna",
++        "セレス・ファウナ"
++      ],
++      "channel_ids": [
++        "UCO_aKKYxn4tvrqPjcTzZ6EQ"
++      ],
++      "source_url": "https://hololive.hololivepro.com/en/talents/ceres-fauna/",
++      "status": "alum"
++    },
++    {
++      "member_id": "elizabeth-rose-bloodflame",
++      "name": "Elizabeth Rose Bloodflame",
++      "aliases": [
++        "Elizabeth Rose Bloodflame",
++        "エリザベス・ローズ・ブラッドフレイム"
++      ],
++      "channel_ids": [
++        "UCW5uhrG1eCBYditmhL0Ykjw"
++      ],
++      "source_url": "https://hololive.hololivepro.com/en/talents/elizabeth-rose-bloodflame/",
++      "status": "listed"
++    },
++    {
++      "member_id": "fuwawa-abyssgard",
++      "name": "Fuwawa Abyssgard",
++      "aliases": [
++        "Fuwawa Abyssgard",
++        "フワワ・アビスガード"
++      ],
++      "channel_ids": [
++        "UCt9H_RpQzhxzlyBxFqrdHqA"
++      ],
++      "source_url": "https://hololive.hololivepro.com/en/talents/fuwawa-abyssgard/",
++      "status": "listed"
++    },
++    {
++      "member_id": "gawr-gura",
++      "name": "Gawr Gura",
++      "aliases": [
++        "Gawr Gura",
++        "がうる・ぐら"
++      ],
++      "channel_ids": [
++        "UCoSrY_IQQVpmIRZ9Xf-y93g"
++      ],
++      "source_url": "https://hololive.hololivepro.com/en/talents/gawr-gura/",
++      "status": "alum"
++    },
++    {
++      "member_id": "gigi-murin",
++      "name": "Gigi Murin",
++      "aliases": [
++        "Gigi Murin",
++        "ジジ・ムリン"
++      ],
++      "channel_ids": [
++        "UCDHABijvPBnJm7F-KlNME3w"
++      ],
++      "source_url": "https://hololive.hololivepro.com/en/talents/gigi-murin/",
++      "status": "listed"
++    },
++    {
++      "member_id": "hakos-baelz",
++      "name": "Hakos Baelz",
++      "aliases": [
++        "Hakos Baelz",
++        "ハコス・ベールズ"
++      ],
++      "channel_ids": [
++        "UCgmPnx-EEeOrZSg5Tiw7ZRQ"
++      ],
++      "source_url": "https://hololive.hololivepro.com/en/talents/hakos-baelz/",
++      "status": "listed"
++    },
++    {
++      "member_id": "hakui-koyori",
++      "name": "Hakui Koyori",
++      "aliases": [
++        "Hakui Koyori",
++        "博衣こより"
++      ],
++      "channel_ids": [
++        "UC6eWCld0KwmyHFbAqK3V-Rw"
++      ],
++      "source_url": "https://hololive.hololivepro.com/en/talents/hakui-koyori/",
++      "status": "listed"
++    },
++    {
++      "member_id": "hanazono-sayaka",
++      "name": "Hanazono Sayaka",
++      "aliases": [
++        "Hanazono Sayaka",
++        "花園さやか"
++      ],
++      "channel_ids": [
++        "UCozx5csNhCx1wsVq3SZVkBQ"
++      ],
++      "source_url": "https://hololive.hololivepro.com/en/talents/hanazono-sayaka/",
++      "status": "listed",
++      "youtube_url": "https://www.youtube.com/@holoANroom?sub_confirmation=1"
++    },
++    {
++      "member_id": "himemori-luna",
++      "name": "Himemori Luna",
++      "aliases": [
++        "Himemori Luna",
++        "姫森ルーナ"
++      ],
++      "channel_ids": [
++        "UCa9Y57gfeY0Zro_noHRVrnw"
++      ],
++      "source_url": "https://hololive.hololivepro.com/en/talents/himemori-luna/",
++      "status": "listed"
++    },
++    {
++      "member_id": "hiodoshi-ao",
++      "name": "Hiodoshi Ao",
++      "aliases": [
++        "Hiodoshi Ao",
++        "火威青"
++      ],
++      "channel_ids": [
++        "UCMGfV7TVTmHhEErVJg1oHBQ"
++      ],
++      "source_url": "https://hololive.hololivepro.com/en/talents/hiodoshi-ao/",
++      "status": "alum"
++    },
++    {
++      "member_id": "hoshimachi-suisei",
++      "name": "Hoshimachi Suisei",
++      "aliases": [
++        "Hoshimachi Suisei",
++        "星街すいせい"
++      ],
++      "channel_ids": [
++        "UC5CwaMl1eIgY8h02uZw7u8A"
++      ],
++      "source_url": "https://hololive.hololivepro.com/en/talents/hoshimachi-suisei/",
++      "status": "listed"
++    },
++    {
++      "member_id": "houshou-marine",
++      "name": "Houshou Marine",
++      "aliases": [
++        "Houshou Marine",
++        "宝鐘マリン"
++      ],
++      "channel_ids": [
++        "UCCzUftO8KOVkV4wQG1vkUvg"
++      ],
++      "source_url": "https://hololive.hololivepro.com/en/talents/houshou-marine/",
++      "status": "listed"
++    },
++    {
++      "member_id": "ichijou-ririka",
++      "name": "Ichijou Ririka",
++      "aliases": [
++        "Ichijou Ririka",
++        "一条莉々華"
++      ],
++      "channel_ids": [
++        "UCtyWhCj3AqKh2dXctLkDtng"
++      ],
++      "source_url": "https://hololive.hololivepro.com/en/talents/ichijou-ririka/",
++      "status": "listed",
++      "youtube_url": "https://www.youtube.com/@IchijouRirika?sub_confirmation=1"
++    },
++    {
++      "member_id": "inugami-korone",
++      "name": "Inugami Korone",
++      "aliases": [
++        "Inugami Korone",
++        "戌神ころね"
++      ],
++      "channel_ids": [
++        "UChAnqc_AY5_I3Px5dig3X1Q"
++      ],
++      "source_url": "https://hololive.hololivepro.com/en/talents/inugami-korone/",
++      "status": "listed"
++    },
++    {
++      "member_id": "irys",
++      "name": "IRyS",
++      "aliases": [
++        "IRyS"
++      ],
++      "channel_ids": [
++        "UC8rcEBzJSleTkf_-agPM20g"
++      ],
++      "source_url": "https://hololive.hololivepro.com/en/talents/irys/",
++      "status": "listed"
++    },
++    {
++      "member_id": "isaki-riona",
++      "name": "Isaki Riona",
++      "aliases": [
++        "Isaki Riona",
++        "響咲リオナ"
++      ],
++      "channel_ids": [
++        "UC9LSiN9hXI55svYEBrrK-tw"
++      ],
++      "source_url": "https://hololive.hololivepro.com/en/talents/isaki-riona/",
++      "status": "listed"
++    },
++    {
++      "member_id": "izuki-michiru",
++      "name": "Izuki Michiru",
++      "aliases": [
++        "Izuki Michiru",
++        "井月みちる"
++      ],
++      "channel_ids": [
++        "UCozx5csNhCx1wsVq3SZVkBQ"
++      ],
++      "source_url": "https://hololive.hololivepro.com/en/talents/izuki-michiru/",
++      "status": "listed",
++      "youtube_url": "https://www.youtube.com/@holoANroom?sub_confirmation=1"
++    },
++    {
++      "member_id": "juufuutei-raden",
++      "name": "Juufuutei Raden",
++      "aliases": [
++        "Juufuutei Raden",
++        "儒烏風亭らでん"
++      ],
++      "channel_ids": [
++        "UCdXAk5MpyLD8594lm_OvtGQ"
++      ],
++      "source_url": "https://hololive.hololivepro.com/en/talents/juufuutei-raden/",
++      "status": "listed",
++      "youtube_url": "https://youtube.com/@JuufuuteiRaden?sub_confirmation=1"
++    },
++    {
++      "member_id": "kaela-kovalskia",
++      "name": "Kaela Kovalskia",
++      "aliases": [
++        "Kaela Kovalskia",
++        "カエラ・コヴァルスキア"
++      ],
++      "channel_ids": [
++        "UCZLZ8Jjx_RN2CXloOmgTHVg"
++      ],
++      "source_url": "https://hololive.hololivepro.com/en/talents/kaela-kovalskia/",
++      "status": "listed"
++    },
++    {
++      "member_id": "kazama-iroha",
++      "name": "Kazama Iroha",
++      "aliases": [
++        "Kazama Iroha",
++        "風真いろは"
++      ],
++      "channel_ids": [
++        "UC_vMYWcDjmfdpH6r4TTn1MQ"
++      ],
++      "source_url": "https://hololive.hololivepro.com/en/talents/kazama-iroha/",
++      "status": "listed"
++    },
++    {
++      "member_id": "kazeshiro-yuki",
++      "name": "Kazeshiro Yuki",
++      "aliases": [
++        "Kazeshiro Yuki",
++        "風白ゆき"
++      ],
++      "channel_ids": [
++        "UCozx5csNhCx1wsVq3SZVkBQ"
++      ],
++      "source_url": "https://hololive.hololivepro.com/en/talents/kazeshiro-yuki/",
++      "status": "listed",
++      "youtube_url": "https://www.youtube.com/@holoANroom?sub_confirmation=1"
++    },
++    {
++      "member_id": "kikirara-vivi",
++      "name": "Kikirara Vivi",
++      "aliases": [
++        "Kikirara Vivi",
++        "綺々羅々ヴィヴィ"
++      ],
++      "channel_ids": [
++        "UCGzTVXqMQHa4AgJVJIVvtDQ"
++      ],
++      "source_url": "https://hololive.hololivepro.com/en/talents/kikirara-vivi/",
++      "status": "listed"
++    },
++    {
++      "member_id": "kiryu-coco",
++      "name": "Kiryu Coco",
++      "aliases": [
++        "Kiryu Coco",
++        "桐生ココ"
++      ],
++      "channel_ids": [
++        "UCS9uQI-jC3DE0L4IpXyvr6w"
++      ],
++      "source_url": "https://hololive.hololivepro.com/en/talents/kiryu-coco/",
++      "status": "alum"
++    },
++    {
++      "member_id": "kobo-kanaeru",
++      "name": "Kobo Kanaeru",
++      "aliases": [
++        "Kobo Kanaeru",
++        "こぼ・かなえる"
++      ],
++      "channel_ids": [
++        "UCjLEmnpCNeisMxy134KPwWw"
++      ],
++      "source_url": "https://hololive.hololivepro.com/en/talents/kobo-kanaeru/",
++      "status": "listed"
++    },
++    {
++      "member_id": "koganei-niko",
++      "name": "Koganei Niko",
++      "aliases": [
++        "Koganei Niko",
++        "虎金妃笑虎"
++      ],
++      "channel_ids": [
++        "UCuI_opAVX6qbxZY-a-AxFuQ"
++      ],
++      "source_url": "https://hololive.hololivepro.com/en/talents/koganei-niko/",
++      "status": "listed"
++    },
++    {
++      "member_id": "koseki-bijou",
++      "name": "Koseki Bijou",
++      "aliases": [
++        "Koseki Bijou",
++        "古石ビジュー"
++      ],
++      "channel_ids": [
++        "UC9p_lqQ0FEDz327Vgf5JwqA"
++      ],
++      "source_url": "https://hololive.hololivepro.com/en/talents/koseki-bijou/",
++      "status": "listed"
++    },
++    {
++      "member_id": "kureiji-ollie",
++      "name": "Kureiji Ollie",
++      "aliases": [
++        "Kureiji Ollie",
++        "クレイジー・オリー"
++      ],
++      "channel_ids": [
++        "UCYz_5n-uDuChHtLo7My1HnQ"
++      ],
++      "source_url": "https://hololive.hololivepro.com/en/talents/kureiji-ollie/",
++      "status": "listed"
++    },
++    {
++      "member_id": "la-darknesss",
++      "name": "La+ Darknesss",
++      "aliases": [
++        "La+ Darknesss",
++        "ラプラス・ダークネス"
++      ],
++      "channel_ids": [
++        "UCENwRMx5Yh42zWpzURebzTw"
++      ],
++      "source_url": "https://hololive.hololivepro.com/en/talents/la-darknesss/",
++      "status": "listed"
++    },
++    {
++      "member_id": "minato-aqua",
++      "name": "Minato Aqua",
++      "aliases": [
++        "Minato Aqua",
++        "湊あくあ"
++      ],
++      "channel_ids": [
++        "UC1opHUrw8rvnsadT-iGp7Cg"
++      ],
++      "source_url": "https://hololive.hololivepro.com/en/talents/minato-aqua/",
++      "status": "alum"
++    },
++    {
++      "member_id": "mizumiya-su",
++      "name": "Mizumiya Su",
++      "aliases": [
++        "Mizumiya Su",
++        "水宮枢"
++      ],
++      "channel_ids": [
++        "UCjk2nKmHzgH5Xy-C5qYRd5A"
++      ],
++      "source_url": "https://hololive.hololivepro.com/en/talents/mizumiya-su/",
++      "status": "listed"
++    },
++    {
++      "member_id": "mococo-abyssgard",
++      "name": "Mococo Abyssgard",
++      "aliases": [
++        "Mococo Abyssgard",
++        "モココ・アビスガード"
++      ],
++      "channel_ids": [
++        "UCt9H_RpQzhxzlyBxFqrdHqA"
++      ],
++      "source_url": "https://hololive.hololivepro.com/en/talents/mococo-abyssgard/",
++      "status": "listed"
++    },
++    {
++      "member_id": "momosuzu-nene",
++      "name": "Momosuzu Nene",
++      "aliases": [
++        "Momosuzu Nene",
++        "桃鈴ねね"
++      ],
++      "channel_ids": [
++        "UCAWSyEs_Io8MtpY3m-zqILA"
++      ],
++      "source_url": "https://hololive.hololivepro.com/en/talents/momosuzu-nene/",
++      "status": "listed"
++    },
++    {
++      "member_id": "moona-hoshinova",
++      "name": "Moona Hoshinova",
++      "aliases": [
++        "Moona Hoshinova",
++        "ムーナ・ホシノヴァ"
++      ],
++      "channel_ids": [
++        "UCP0BspO_AMEe3aQqqpo89Dg"
++      ],
++      "source_url": "https://hololive.hololivepro.com/en/talents/moona-hoshinova/",
++      "status": "listed"
++    },
++    {
++      "member_id": "mori-calliope",
++      "name": "Mori Calliope",
++      "aliases": [
++        "Mori Calliope",
++        "森カリオペ"
++      ],
++      "channel_ids": [
++        "UCL_qhgtOy0dy1Agp8vkySQg"
++      ],
++      "source_url": "https://hololive.hololivepro.com/en/talents/mori-calliope/",
++      "status": "listed"
++    },
++    {
++      "member_id": "murasaki-shion",
++      "name": "Murasaki Shion",
++      "aliases": [
++        "Murasaki Shion",
++        "紫咲シオン"
++      ],
++      "channel_ids": [
++        "UCXTpFs_3PqI41qX2d9tL2Rw"
++      ],
++      "source_url": "https://hololive.hololivepro.com/en/talents/murasaki-shion/",
++      "status": "alum"
++    },
++    {
++      "member_id": "nakiri-ayame",
++      "name": "Nakiri Ayame",
++      "aliases": [
++        "Nakiri Ayame",
++        "百鬼あやめ"
++      ],
++      "channel_ids": [
++        "UC7fk0CB07ly8oSl0aqKkqFg"
++      ],
++      "source_url": "https://hololive.hololivepro.com/en/talents/nakiri-ayame/",
++      "status": "listed"
++    },
++    {
++      "member_id": "nanashi-mumei",
++      "name": "Nanashi Mumei",
++      "aliases": [
++        "Nanashi Mumei",
++        "七詩ムメイ"
++      ],
++      "channel_ids": [
++        "UC3n5uGu18FoCy23ggWWp8tA"
++      ],
++      "source_url": "https://hololive.hololivepro.com/en/talents/nanashi-mumei/",
++      "status": "alum"
++    },
++    {
++      "member_id": "natsuiro-matsuri",
++      "name": "Natsuiro Matsuri",
++      "aliases": [
++        "Natsuiro Matsuri",
++        "夏色まつり"
++      ],
++      "channel_ids": [
++        "UCQ0UDLQCjY0rmuxCDE38FGg"
++      ],
++      "source_url": "https://hololive.hololivepro.com/en/talents/natsuiro-matsuri/",
++      "status": "listed"
++    },
++    {
++      "member_id": "nekomata-okayu",
++      "name": "Nekomata Okayu",
++      "aliases": [
++        "Nekomata Okayu",
++        "猫又おかゆ"
++      ],
++      "channel_ids": [
++        "UCvaTdHTWBGv3MKj3KVqJVCw"
++      ],
++      "source_url": "https://hololive.hololivepro.com/en/talents/nekomata-okayu/",
++      "status": "listed"
++    },
++    {
++      "member_id": "nerissa-ravencroft",
++      "name": "Nerissa Ravencroft",
++      "aliases": [
++        "Nerissa Ravencroft",
++        "ネリッサ・レイヴンクロフト"
++      ],
++      "channel_ids": [
++        "UC_sFNM0z0MWm9A6WlKPuMMg"
++      ],
++      "source_url": "https://hololive.hololivepro.com/en/talents/nerissa-ravencroft/",
++      "status": "listed"
++    },
++    {
++      "member_id": "ninomae-inanis",
++      "name": "Ninomae Ina’nis",
++      "aliases": [
++        "Ninomae Ina’nis",
++        "一伊那尓栖"
++      ],
++      "channel_ids": [
++        "UCMwGHR0BTZuLsmjY_NT5Pwg"
++      ],
++      "source_url": "https://hololive.hololivepro.com/en/talents/ninomae-inanis/",
++      "status": "listed"
++    },
++    {
++      "member_id": "omaru-polka",
++      "name": "Omaru Polka",
++      "aliases": [
++        "Omaru Polka",
++        "尾丸ポルカ"
++      ],
++      "channel_ids": [
++        "UCK9V2B22uJYu3N7eR_BT9QA"
++      ],
++      "source_url": "https://hololive.hololivepro.com/en/talents/omaru-polka/",
++      "status": "listed"
++    },
++    {
++      "member_id": "ookami-mio",
++      "name": "Ookami Mio",
++      "aliases": [
++        "Ookami Mio",
++        "大神ミオ"
++      ],
++      "channel_ids": [
++        "UCp-5t9SrOQwXMU7iIjQfARg"
++      ],
++      "source_url": "https://hololive.hololivepro.com/en/talents/ookami-mio/",
++      "status": "listed"
++    },
++    {
++      "member_id": "oozora-subaru",
++      "name": "Oozora Subaru",
++      "aliases": [
++        "Oozora Subaru",
++        "大空スバル"
++      ],
++      "channel_ids": [
++        "UCvzGlP9oQwU--Y0r9id_jnA"
++      ],
++      "source_url": "https://hololive.hololivepro.com/en/talents/oozora-subaru/",
++      "status": "listed"
++    },
++    {
++      "member_id": "otonose-kanade",
++      "name": "Otonose Kanade",
++      "aliases": [
++        "Otonose Kanade",
++        "音乃瀬奏"
++      ],
++      "channel_ids": [
++        "UCWQtYtq9EOB4-I5P-3fh8lA"
++      ],
++      "source_url": "https://hololive.hololivepro.com/en/talents/otonose-kanade/",
++      "status": "listed",
++      "youtube_url": "https://youtube.com/@OtonoseKanade?sub_confirmation=1"
++    },
++    {
++      "member_id": "ouro-kronii",
++      "name": "Ouro Kronii",
++      "aliases": [
++        "Ouro Kronii",
++        "オーロ・クロニー"
++      ],
++      "channel_ids": [
++        "UCmbs8T6MWqUHP1tIQvSgKrg"
++      ],
++      "source_url": "https://hololive.hololivepro.com/en/talents/ouro-kronii/",
++      "status": "listed"
++    },
++    {
++      "member_id": "pavolia-reine",
++      "name": "Pavolia Reine",
++      "aliases": [
++        "Pavolia Reine",
++        "パヴォリア・レイネ"
++      ],
++      "channel_ids": [
++        "UChgTyjG-pdNvxxhdsXfHQ5Q"
++      ],
++      "source_url": "https://hololive.hololivepro.com/en/talents/pavolia-reine/",
++      "status": "listed"
++    },
++    {
++      "member_id": "raora-panthera",
++      "name": "Raora Panthera",
++      "aliases": [
++        "Raora Panthera",
++        "ラオーラ・パンテーラ"
++      ],
++      "channel_ids": [
++        "UCl69AEx4MdqMZH7Jtsm7Tig"
++      ],
++      "source_url": "https://hololive.hololivepro.com/en/talents/raora-panthera/",
++      "status": "listed"
++    },
++    {
++      "member_id": "rindo-chihaya",
++      "name": "Rindo Chihaya",
++      "aliases": [
++        "Rindo Chihaya",
++        "輪堂千速"
++      ],
++      "channel_ids": [
++        "UCKMWFR6lAstLa7Vbf5dH7ig"
++      ],
++      "source_url": "https://hololive.hololivepro.com/en/talents/rindo-chihaya/",
++      "status": "listed"
++    },
++    {
++      "member_id": "roboco-san",
++      "name": "Robocosan",
++      "aliases": [
++        "Robocosan",
++        "ロボ子さん"
++      ],
++      "channel_ids": [
++        "UCDqI2jOz0weumE8s7paEk6g"
++      ],
++      "source_url": "https://hololive.hololivepro.com/en/talents/roboco-san/",
++      "status": "listed"
++    },
++    {
++      "member_id": "sakamata-chloe",
++      "name": "Sakamata Chloe",
++      "aliases": [
++        "Sakamata Chloe",
++        "沙花叉クロヱ"
++      ],
++      "channel_ids": [
++        "UCIBY1ollUsauvVi4hW4cumw"
++      ],
++      "source_url": "https://hololive.hololivepro.com/en/talents/sakamata-chloe/",
++      "status": "affiliate"
++    },
++    {
++      "member_id": "sakuramiko",
++      "name": "Sakura Miko",
++      "aliases": [
++        "Sakura Miko",
++        "さくらみこ"
++      ],
++      "channel_ids": [
++        "UC-hM6YJuNYVAmUWxeIr9FeA"
++      ],
++      "source_url": "https://hololive.hololivepro.com/en/talents/sakuramiko/",
++      "status": "listed"
++    },
++    {
++      "member_id": "shiori-novella",
++      "name": "Shiori Novella",
++      "aliases": [
++        "Shiori Novella",
++        "シオリ・ノヴェラ"
++      ],
++      "channel_ids": [
++        "UCgnfPPb9JI3e9A4cXHnWbyg"
++      ],
++      "source_url": "https://hololive.hololivepro.com/en/talents/shiori-novella/",
++      "status": "listed"
++    },
++    {
++      "member_id": "shirakami-fubuki",
++      "name": "Shirakami Fubuki",
++      "aliases": [
++        "Shirakami Fubuki",
++        "白上フブキ"
++      ],
++      "channel_ids": [
++        "UCdn5BQ06XqgXoAxIhbqw5Rg"
++      ],
++      "source_url": "https://hololive.hololivepro.com/en/talents/shirakami-fubuki/",
++      "status": "listed"
++    },
++    {
++      "member_id": "shiranui-flare",
++      "name": "Shiranui Flare",
++      "aliases": [
++        "Shiranui Flare",
++        "不知火フレア"
++      ],
++      "channel_ids": [
++        "UCvInZx9h3jC2JzsIzoOebWg"
++      ],
++      "source_url": "https://hololive.hololivepro.com/en/talents/shiranui-flare/",
++      "status": "listed"
++    },
++    {
++      "member_id": "shirogane-noel",
++      "name": "Shirogane Noel",
++      "aliases": [
++        "Shirogane Noel",
++        "白銀ノエル"
++      ],
++      "channel_ids": [
++        "UCdyqAaZDKHXg4Ahi7VENThQ"
++      ],
++      "source_url": "https://hololive.hololivepro.com/en/talents/shirogane-noel/",
++      "status": "listed"
++    },
++    {
++      "member_id": "shishiro-botan",
++      "name": "Shishiro Botan",
++      "aliases": [
++        "Shishiro Botan",
++        "獅白ぼたん"
++      ],
++      "channel_ids": [
++        "UCUKD-uaobj9jiqB-VXt71mA"
++      ],
++      "source_url": "https://hololive.hololivepro.com/en/talents/shishiro-botan/",
++      "status": "listed"
++    },
++    {
++      "member_id": "takanashi-kiara",
++      "name": "Takanashi Kiara",
++      "aliases": [
++        "Takanashi Kiara",
++        "小鳥遊キアラ"
++      ],
++      "channel_ids": [
++        "UCHsx4Hqa-1ORjQTh9TYDhww"
++      ],
++      "source_url": "https://hololive.hololivepro.com/en/talents/takanashi-kiara/",
++      "status": "listed"
++    },
++    {
++      "member_id": "takane-lui",
++      "name": "Takane Lui",
++      "aliases": [
++        "Takane Lui",
++        "鷹嶺ルイ"
++      ],
++      "channel_ids": [
++        "UCs9_O1tRPMQTHQ-N_L6FU2g"
++      ],
++      "source_url": "https://hololive.hololivepro.com/en/talents/takane-lui/",
++      "status": "listed"
++    },
++    {
++      "member_id": "todoroki-hajime",
++      "name": "Todoroki Hajime",
++      "aliases": [
++        "Todoroki Hajime",
++        "轟はじめ"
++      ],
++      "channel_ids": [
++        "UC1iA6_NT4mtAcIII6ygrvCw"
++      ],
++      "source_url": "https://hololive.hololivepro.com/en/talents/todoroki-hajime/",
++      "status": "listed",
++      "youtube_url": "https://www.youtube.com/@TodorokiHajime?sub_confirmation=1"
++    },
++    {
++      "member_id": "tokino-sora",
++      "name": "Tokino Sora",
++      "aliases": [
++        "Tokino Sora",
++        "ときのそら"
++      ],
++      "channel_ids": [
++        "UCp6993wxpyDPHUpavwDFqgg"
++      ],
++      "source_url": "https://hololive.hololivepro.com/en/talents/tokino-sora/",
++      "status": "listed"
++    },
++    {
++      "member_id": "tokoyami-towa",
++      "name": "Tokoyami Towa",
++      "aliases": [
++        "Tokoyami Towa",
++        "常闇トワ"
++      ],
++      "channel_ids": [
++        "UC1uv2Oq6kNxgATlCiez59hw"
++      ],
++      "source_url": "https://hololive.hololivepro.com/en/talents/tokoyami-towa/",
++      "status": "listed"
++    },
++    {
++      "member_id": "tsukumo-sana",
++      "name": "Tsukumo Sana",
++      "aliases": [
++        "Tsukumo Sana",
++        "九十九佐命"
++      ],
++      "channel_ids": [
++        "UCsUj0dszADCGbF3gNrQEuSQ"
++      ],
++      "source_url": "https://hololive.hololivepro.com/en/talents/tsukumo-sana/",
++      "status": "alum"
++    },
++    {
++      "member_id": "tsunomaki-watame",
++      "name": "Tsunomaki Watame",
++      "aliases": [
++        "Tsunomaki Watame",
++        "角巻わため"
++      ],
++      "channel_ids": [
++        "UCqm3BQLlJfvkTsX_hvm0UmA"
++      ],
++      "source_url": "https://hololive.hololivepro.com/en/talents/tsunomaki-watame/",
++      "status": "listed"
++    },
++    {
++      "member_id": "usada-pekora",
++      "name": "Usada Pekora",
++      "aliases": [
++        "Usada Pekora",
++        "兎田ぺこら"
++      ],
++      "channel_ids": [
++        "UC1DCedRgGHBdm81E1llLhOQ"
++      ],
++      "source_url": "https://hololive.hololivepro.com/en/talents/usada-pekora/",
++      "status": "listed"
++    },
++    {
++      "member_id": "vestia-zeta",
++      "name": "Vestia Zeta",
++      "aliases": [
++        "Vestia Zeta",
++        "ベスティア・ゼータ"
++      ],
++      "channel_ids": [
++        "UCTvHWSfBZgtxE4sILOaurIQ"
++      ],
++      "source_url": "https://hololive.hololivepro.com/en/talents/vestia-zeta/",
++      "status": "listed"
++    },
++    {
++      "member_id": "watson-amelia",
++      "name": "Watson Amelia",
++      "aliases": [
++        "Watson Amelia",
++        "ワトソン・アメリア"
++      ],
++      "channel_ids": [
++        "UCyl1z3jo3XHR1riLFKG5UAg"
++      ],
++      "source_url": "https://hololive.hololivepro.com/en/talents/watson-amelia/",
++      "status": "affiliate"
++    },
++    {
++      "member_id": "yukihana-lamy",
++      "name": "Yukihana Lamy",
++      "aliases": [
++        "Yukihana Lamy",
++        "雪花ラミィ"
++      ],
++      "channel_ids": [
++        "UCFKOVgVbGmX65RxO3EtH3iw"
++      ],
++      "source_url": "https://hololive.hololivepro.com/en/talents/yukihana-lamy/",
++      "status": "listed"
++    },
++    {
++      "member_id": "yuzuki-choco",
++      "name": "Yuzuki Choco",
++      "aliases": [
++        "Yuzuki Choco",
++        "癒月ちょこ"
++      ],
++      "channel_ids": [
++        "UC1suqwovbL1kzsoaZgFZLKg"
++      ],
++      "source_url": "https://hololive.hololivepro.com/en/talents/yuzuki-choco/",
++      "status": "listed"
++    },
++    {
++      "member_id": "aragami-oga",
++      "name": "Aragami Oga",
++      "aliases": [
++        "Aragami Oga",
++        "荒咬オウガ"
++      ],
++      "channel_ids": [
++        "UCwL7dgTxKo8Y4RFIKWaf8gA"
++      ],
++      "source_url": "https://holostars.hololivepro.com/en/talent/aragami-oga/",
++      "status": "listed"
++    },
++    {
++      "member_id": "arurandeisu",
++      "name": "Arurandeisu",
++      "aliases": [
++        "Arurandeisu",
++        "アルランディス"
++      ],
++      "channel_ids": [
++        "UCKeAhJvy8zgXWbh9duVjIaQ"
++      ],
++      "source_url": "https://holostars.hololivepro.com/en/talent/arurandeisu/",
++      "status": "affiliate"
++    },
++    {
++      "member_id": "astel-leda",
++      "name": "Astel Leda",
++      "aliases": [
++        "Astel Leda",
++        "アステル・レダ"
++      ],
++      "channel_ids": [
++        "UCNVEsYbiZjH5QLmGeSgTSzg"
++      ],
++      "source_url": "https://holostars.hololivepro.com/en/talent/astel-leda/",
++      "status": "listed"
++    },
++    {
++      "member_id": "axel-syrios",
++      "name": "Axel Syrios",
++      "aliases": [
++        "Axel Syrios",
++        "アクセル・シリオス"
++      ],
++      "channel_ids": [
++        "UC2hx0xVkMoHGWijwr_lA01w"
++      ],
++      "source_url": "https://holostars.hololivepro.com/en/talent/axel-syrios/",
++      "status": "listed"
++    },
++    {
++      "member_id": "bettel",
++      "name": "Gavis Bettel",
++      "aliases": [
++        "Gavis Bettel",
++        "ガビス・ベッテル"
++      ],
++      "channel_ids": [
++        "UCHP4f7G2dWD4qib7BMatGAw"
++      ],
++      "source_url": "https://holostars.hololivepro.com/en/talent/bettel/",
++      "status": "listed"
++    },
++    {
++      "member_id": "crimzon-ruze",
++      "name": "Crimzon Ruze",
++      "aliases": [
++        "Crimzon Ruze",
++        "クリムゾン・ルーズ"
++      ],
++      "channel_ids": [
++        "UCajbFh6e_R8QZdHAMbbi4rQ"
++      ],
++      "source_url": "https://holostars.hololivepro.com/en/talent/crimzon-ruze/",
++      "status": "listed"
++    },
++    {
++      "member_id": "flayon",
++      "name": "Machina X Flayon",
++      "aliases": [
++        "Machina X Flayon",
++        "マキナ・X・フレオン"
++      ],
++      "channel_ids": [
++        "UC060r4zABV18vcahAWR1n7w"
++      ],
++      "source_url": "https://holostars.hololivepro.com/en/talent/flayon/",
++      "status": "listed"
++    },
++    {
++      "member_id": "goldbullet",
++      "name": "Goldbullet",
++      "aliases": [
++        "Goldbullet",
++        "ゴールドブレット"
++      ],
++      "channel_ids": [
++        "UCJv02SHZgav7Mv3V0kBOR8Q"
++      ],
++      "source_url": "https://holostars.hololivepro.com/en/talent/goldbullet/",
++      "status": "listed"
++    },
++    {
++      "member_id": "hakka",
++      "name": "Banzoin Hakka",
++      "aliases": [
++        "Banzoin Hakka",
++        "万象院ハッカ"
++      ],
++      "channel_ids": [
++        "UC7gxU6NXjKF1LrgOddPzgTw"
++      ],
++      "source_url": "https://holostars.hololivepro.com/en/talent/hakka/",
++      "status": "listed"
++    },
++    {
++      "member_id": "hanasaki-miyabi",
++      "name": "Hanasaki Miyabi",
++      "aliases": [
++        "Hanasaki Miyabi",
++        "花咲みやび"
++      ],
++      "channel_ids": [
++        "UC6t3-_N8A6ME1JShZHHqOMw"
++      ],
++      "source_url": "https://holostars.hololivepro.com/en/talent/hanasaki-miyabi/",
++      "status": "affiliate"
++    },
++    {
++      "member_id": "jurard-t-rexford",
++      "name": "Jurard T Rexford",
++      "aliases": [
++        "Jurard T Rexford",
++        "ジュラルド・ティー・レクスフォード"
++      ],
++      "channel_ids": [
++        "UCTVSOgYuSWmNAt-lnJPkEEw"
++      ],
++      "source_url": "https://holostars.hololivepro.com/en/talent/jurard-t-rexford/",
++      "status": "listed"
++    },
++    {
++      "member_id": "kagami-kira",
++      "name": "Kagami Kira",
++      "aliases": [
++        "Kagami Kira",
++        "鏡見キラ"
++      ],
++      "channel_ids": [
++        "UCEzsociuFqVwgZuMaZqaCsg"
++      ],
++      "source_url": "https://holostars.hololivepro.com/en/talent/kagami-kira/",
++      "status": "alum"
++    },
++    {
++      "member_id": "kageyama-shien",
++      "name": "Kageyama Shien",
++      "aliases": [
++        "Kageyama Shien",
++        "影山シエン"
++      ],
++      "channel_ids": [
++        "UChSvpZYRPh0FvG4SJGSga3g"
++      ],
++      "source_url": "https://holostars.hololivepro.com/en/talent/kageyama-shien/",
++      "status": "affiliate"
++    },
++    {
++      "member_id": "kanade-izuru",
++      "name": "Kanade Izuru",
++      "aliases": [
++        "Kanade Izuru",
++        "奏手イヅル"
++      ],
++      "channel_ids": [
++        "UCZgOv3YDEs-ZnZWDYVwJdmA"
++      ],
++      "source_url": "https://holostars.hololivepro.com/en/talent/kanade-izuru/",
++      "status": "listed"
++    },
++    {
++      "member_id": "kishido-temma",
++      "name": "Kishido Temma",
++      "aliases": [
++        "Kishido Temma",
++        "岸堂天真"
++      ],
++      "channel_ids": [
++        "UCGNI4MENvnsymYjKiZwv9eg"
++      ],
++      "source_url": "https://holostars.hololivepro.com/en/talent/kishido-temma/",
++      "status": "affiliate"
++    },
++    {
++      "member_id": "magni-dezmond",
++      "name": "Magni Dezmond",
++      "aliases": [
++        "Magni Dezmond",
++        "マグニ・デズモンド"
++      ],
++      "channel_ids": [
++        "UC7MMNHR-kf9EN1rXiesMTMw"
++      ],
++      "source_url": "https://holostars.hololivepro.com/en/talent/magni-dezmond/",
++      "status": "alum"
++    },
++    {
++      "member_id": "minase-rio",
++      "name": "Minase Rio",
++      "aliases": [
++        "Minase Rio",
++        "水無世燐央"
++      ],
++      "channel_ids": [
++        "UCdfMHxjcCc2HSd9qFvfJgjg"
++      ],
++      "source_url": "https://holostars.hololivepro.com/en/talent/minase-rio/",
++      "status": "affiliate"
++    },
++    {
++      "member_id": "noir-vesper",
++      "name": "Noir Vesper",
++      "aliases": [
++        "Noir Vesper",
++        "ノワール・ヴェスパー"
++      ],
++      "channel_ids": [
++        "UCDRWSO281bIHYVi-OV3iFYA"
++      ],
++      "source_url": "https://holostars.hololivepro.com/en/talent/noir-vesper/",
++      "status": "alum"
++    },
++    {
++      "member_id": "octavio",
++      "name": "Octavio",
++      "aliases": [
++        "Octavio",
++        "オクタビオ"
++      ],
++      "channel_ids": [
++        "UCLk1hcmxg8rJ3Nm1_GvxTRA"
++      ],
++      "source_url": "https://holostars.hololivepro.com/en/talent/octavio/",
++      "status": "listed"
++    },
++    {
++      "member_id": "regis-altare",
++      "name": "Regis Altare",
++      "aliases": [
++        "Regis Altare",
++        "リージス・アルテア"
++      ],
++      "channel_ids": [
++        "UCyxtGMdWlURZ30WSnEjDOQw"
++      ],
++      "source_url": "https://holostars.hololivepro.com/en/talent/regis-altare/",
++      "status": "listed"
++    },
++    {
++      "member_id": "rikka",
++      "name": "Rikka",
++      "aliases": [
++        "Rikka",
++        "律可"
++      ],
++      "channel_ids": [
++        "UC9mf_ZVpouoILRY9NUIaK-w"
++      ],
++      "source_url": "https://holostars.hololivepro.com/en/talent/rikka/",
++      "status": "affiliate"
++    },
++    {
++      "member_id": "shinri",
++      "name": "Josuiji Shinri",
++      "aliases": [
++        "Josuiji Shinri",
++        "定水寺シンリ"
++      ],
++      "channel_ids": [
++        "UCMqGG8BRAiI1lJfKOpETM_w"
++      ],
++      "source_url": "https://holostars.hololivepro.com/en/talent/shinri/",
++      "status": "listed"
++    },
++    {
++      "member_id": "utsugi-uyu",
++      "name": "Utsugi Uyu",
++      "aliases": [
++        "Utsugi Uyu",
++        "羽継烏有"
++      ],
++      "channel_ids": [
++        "UCgRqGV1gBf2Esxh0Tz1vxzw"
++      ],
++      "source_url": "https://holostars.hololivepro.com/en/talent/utsugi-uyu/",
++      "status": "listed"
++    },
++    {
++      "member_id": "yatogami-fuma",
++      "name": "Yatogami Fuma",
++      "aliases": [
++        "Yatogami Fuma",
++        "夜十神封魔"
++      ],
++      "channel_ids": [
++        "UCc88OV45ICgHbn3ZqLLb52w"
++      ],
++      "source_url": "https://holostars.hololivepro.com/en/talent/yatogami-fuma/",
++      "status": "listed"
++    },
++    {
++      "member_id": "yukoku-roberu",
++      "name": "Yukoku Roberu",
++      "aliases": [
++        "Yukoku Roberu",
++        "夕刻ロベル"
++      ],
++      "channel_ids": [
++        "UCANDOlYTJT7N5jlRC3zfzVA"
++      ],
++      "source_url": "https://holostars.hololivepro.com/en/talent/yukoku-roberu/",
++      "status": "listed"
++    }
++  ],
++  "excluded_navigation_channel_ids": [
++    "UCJFZiqLMntJufDCHc6bQixg"
++  ]
++}
+diff --git a/docs/repair-v3.md b/docs/repair-v3.md
+new file mode 100644
+index 0000000..cf04528
+--- /dev/null
++++ b/docs/repair-v3.md
+@@ -0,0 +1,61 @@
++# Corrective patch v3: audit and operational limits
++
++Base: `9ea9f2108bec712cc9d50569a7a781c9ab94fa80`.
++This replaces the unpushed `BeatHit-fill-remaining-builders-hololive-v2.patch`.
++Apply one replacement patch to this base, not both patches on top of one another.
++
++## Findings and corrections
++
++| Area | Finding | Correction |
++|---|---|---|
++| ListenBrainz | Tag radio returns recording IDs, not usable song metadata. Five broad bands still discarded those IDs. | Hydrate recording/artist/release metadata, scan five-point bands, retain successful checkpoints, deduplicate overlap. |
++| Source classification | A live jazz query returned Coldplay's Colour Spectrum: one jazz vote against stronger pop/rock tags. | Confirm the requested tag on the hydrated entity and reject votes weaker than half its strongest genre vote. Radio tag_count is not treated as votes for the queried tag. |
++| Novelty | The existing list included spoken stand-up routines tagged only comedy. | Require music-specific tags or explicit curated song evidence. Reject corrupted replacement-character identities. |
++| Internet-native | A doujin-only artist tag classified Punjabi pop as internet-native. | Require another catalog category signal, or recording/release tag corroboration through ListenBrainz. |
++| Screen music | Generic soundtrack/cinematic labels admitted game music and unrelated albums. | Use screen-specific evidence; hydrate fallback recordings. Do not manufacture a screen-work title from an unrelated release name. |
++| Anime | English-title collisions were reported as duplicate songs even when MAL IDs differed. | Scope validation to stable anime IDs and enforce one entry per anime. Reused themes across separate anime remain valid. |
++| Anime retrieval | Jikan errors were cached as empty successful results; canonical output was deleted before retrieval finished. | Retry transient failures in subsequent runs, cache successful pages/themes, preserve canonical files during construction, add a bounded current MAL popularity index fallback. |
++| Game music | Soundtrack packaging remained in game names; chiptune/gaming tags alone were accepted as game evidence. | Clean packaging before selection and require stronger game tags. Generic film/game title homonyms no longer establish game membership. |
++| Vocaloid | API-confirmed absent videos and failed lookups were conflated. Finalization printed/wrote every provisional song. | Separate available/unavailable/unresolved states, retry legacy missing entries, stop on authentication/quota errors, retain API checkpoints and emit progress every 5,000 candidates. |
++| VTubers | Topic classifications could conflict with explicit Cover labels. Completed outputs could be replaced by a much smaller fallback. | Reject original-topic cover conflicts, preserve prior candidate pools and outputs through outages, use exact catalog matches for Spotify eligibility. |
++| Hololive | Earlier patch guessed a YouTube threshold and counted five songs separately per list and only for observed members. | Joint original/cover selection against a source-backed roster, explicit shortfalls, verified OVER//RIDE video identity and fetched baseline. |
++| Publishing | Soundtracks, countries and several standard output directories were not staged. Checksums preceded final validation reports. | Stage every generated category through an allowlist; publish data/reports/checksums in one normal non-forced commit. Preserve artifacts before pushing. |
++| Validation | verify_targets.py printed incomplete results but exited successfully. Strict validation failure did not set the workflow exit status. | Both failures now propagate. Valid partial data is preserved without falsely declaring completion. |
++| Reuse | Forced categories rebuilt on every future workflow run. | Builder revisions invalidate only affected old outputs once. Corrected complete outputs are eligible for reuse. |
++
++## Hololive rule
++
++- Five **distinct songs per member across originals and covers combined**.
++- Prefer confidently matched, trusted cumulative Spotify streams **greater than 500,000**.
++- If that count is unavailable, use the song's individual YouTube video views above the rounded-down OVER//RIDE baseline.
++- The verified baseline video is `hgMl8y2ufIg`: [OVER//RIDE, Mori Calliope × Nerissa Ravencroft](https://www.youtube.com/watch?v=hgMl8y2ufIg).
++- Rounding was not specified previously. The documented default is down to the nearest **100,000**, configurable with `BEATHIT_HOLOLIVE_ROUND_DOWN`.
++- There is **no guessed fallback threshold**. If the baseline or candidate counters cannot be resolved, the report remains incomplete.
++- Mandatory inclusions take precedence over the nominal 10,000-row VTuber target. Only those two categories can exceed their nominal target for this rule.
++- The seed roster contains 102 members identified through the [official Hololive directory](https://hololive.hololivepro.com/en/talents/) and [official Holostars directory](https://holostars.hololivepro.com/en/talent/), including listed alumni, excluding staff. Each entry includes its exact source profile and verified channel IDs. Group navigation channels are excluded. Shared FUWAMOCO channels are handled explicitly.
++- This is a dated, auditable roster snapshot, not a claim to enumerate historical members removed from both official directories. Add newly announced members or additional historical members to the roster with verified identity evidence; zero-song members must remain visible in coverage reports.
++- `data/hololive_coverage.json` records each member's count, missing songs, mandatory identities, threshold evidence, unresolved counters and source-scan completeness. Validation recomputes member counts from the actual CSVs.
++
++## What this patch does not prove
++
++A passing regression suite does not prove that every external corpus yields 10,000 qualifying rows. No full network build is bundled or run on the user's computer.
++
++The preserved build had 6,327 anime, 2,347 game recordings, 1,083 internet-native, 5,172 jazz, 2,104 children's and 1,261 novelty rows. The committed soundtrack CSV had **5,660** rows despite a later report claiming 5,669; missing staging explains that discrepancy.
++
++Live probes during this audit established:
++
++- AnimeThemes returned HTTP 200 with nested song/artist/resource data.
++- ListenBrainz returned HTTP 200 and hydrated real recordings; 20 jazz samples passed the added tag corroboration, and the weak Coldplay match was rejected.
++- Jikan returned HTTP 504 from its upstream MAL connection. Cache/retry fixes cannot force that upstream service to be available.
++- Holodex returned HTTP 403 without an API key in the audit environment. The workflow uses the repository's `HOLODEX_API_KEY`; the authenticated full scan still needs execution there.
++- YouTube's oEmbed identified the exact OVER//RIDE video and author. The Return YouTube Dislike response reported 1,448,207 cached views, timestamped 2026-09-11T23:00:58Z. This observation is audit evidence only; it is not hard-coded as the build threshold.
++
++Country targets are unchanged. Cyprus and Malta's source-exhausted short lists and Andorra's unsupported historical chart remain honest incomplete results. Fabricating extra songs or redefining their chart totals would violate the requested dataset.
++
++## Workflow behavior
++
++The workflow runs tests before expensive retrieval. API caches and resumable candidate pools survive subsequent runs; legacy checkpoints are restored before current-format checkpoints. Successful per-file serialization replaces canonical CSV/gzip files atomically.
++
++A full build may still finish with a validation failure while preserving improved datasets. Inspect the actual shortfall and source-error reports instead of treating a green job as the sole measure of progress. Failed network requests never establish an exhausted corpus.
++
++Artifact restoration supports both old data-root and new repository-root layouts. Normal Git push semantics protect concurrent remote changes; if the remote moves, the push fails and the uploaded output remains available.
+diff --git a/scripts/restore_outputs.py b/scripts/restore_outputs.py
+new file mode 100644
+index 0000000..c8149d6
+--- /dev/null
++++ b/scripts/restore_outputs.py
+@@ -0,0 +1,28 @@
++#!/usr/bin/env python3
++"""Import both legacy (data-root) and current (repo-root) output artifacts."""
++from pathlib import Path
++import shutil
++import sys
++from stage_generated import GENERATED, ROOT
++
++
++def restore(source: Path, root: Path = ROOT):
++    repo_layout = (source / 'data').is_dir()
++    for rel in GENERATED:
++        if rel == 'STATUS.json' and not repo_layout:
++            continue  # Legacy artifact did not contain STATUS; retain the repository copy.
++        src = source / (rel if repo_layout else rel.removeprefix('data/'))
++        dest = root / rel
++        if src.is_dir():
++            for item in src.rglob('*'):
++                if item.is_file() and '.partial.' not in item.name:
++                    target = dest / item.relative_to(src)
++                    target.parent.mkdir(parents=True, exist_ok=True)
++                    shutil.copy2(item, target)
++        elif src.is_file():
++            dest.parent.mkdir(parents=True, exist_ok=True)
++            shutil.copy2(src, dest)
++
++
++if __name__ == '__main__':
++    restore(Path(sys.argv[1]))
+diff --git a/scripts/stage_generated.py b/scripts/stage_generated.py
+new file mode 100644
+index 0000000..8c5fcfb
+--- /dev/null
++++ b/scripts/stage_generated.py
+@@ -0,0 +1,27 @@
++#!/usr/bin/env python3
++"""Stage generated output paths, including deletions, without staging source inputs."""
++from pathlib import Path
++import subprocess
++
++ROOT = Path(__file__).resolve().parents[1]
++GENERATED = (
++    'STATUS.json', 'data/BUILD_REPORT.json', 'data/coverage_report.csv',
++    'data/MANIFEST.json', 'data/target_report.json', 'data/complete_validation.txt',
++    'data/hololive_coverage.json',
++    *('data/' + name for name in (
++        'anime', 'vocaloid', 'worldwide', 'classical', 'emerging', 'genres',
++        'screen_soundtracks', 'vtuber_original', 'vtuber_non_original', 'video_games',
++        'kpop', 'internet_native', 'electronic_subcultures', 'alternative_extreme',
++        'jazz_depth', 'children_childhood', 'unserious', 'special_required', 'countries', 'megalist')),
++)
++
++
++def main():
++    tracked = set(subprocess.check_output(['git', 'ls-files', '-z'], cwd=ROOT).decode().split('\0'))
++    paths = [p for p in GENERATED if (ROOT / p).exists() or any(f == p or f.startswith(p + '/') for f in tracked)]
++    if paths:
++        subprocess.run(['git', 'add', '-A', '--', *paths, ':(exclude)**/*.partial.*'], cwd=ROOT, check=True)
++
++
++if __name__ == '__main__':
++    main()
+diff --git a/scripts/update_manifest.py b/scripts/update_manifest.py
+index 3dbb765..a42b78f 100644
+--- a/scripts/update_manifest.py
++++ b/scripts/update_manifest.py
+@@ -7,7 +7,7 @@ DATA=ROOT/'data'
+ EXCLUDE={'MANIFEST.json'}
+ rows=[]
+ for p in sorted(DATA.rglob('*')):
+-    if not p.is_file() or p.name in EXCLUDE or p.name.startswith('.') or '/raw/full_build/' in p.as_posix():
++    if not p.is_file() or p.name in EXCLUDE or p.name.startswith('.') or '/raw/full_build/' in p.as_posix() or '.partial.' in p.name:
+         continue
+     h=hashlib.sha256()
+     with p.open('rb') as f:
+diff --git a/scripts/verify_targets.py b/scripts/verify_targets.py
+index 2db731f..2a66557 100644
+--- a/scripts/verify_targets.py
++++ b/scripts/verify_targets.py
+@@ -68,12 +68,12 @@ def song_key(row: dict[str, str]) -> tuple[str, str]:
+     return norm(row.get("title") or ""), norm(row.get("main_artist") or "")
+ 
+ 
+-def main() -> None:
++def main() -> int:
+     report: dict[str, object] = {"fixed_targets": {}, "semantic_checks": {}, "overall_complete": False}
+     all_fixed = True
+     for rel, target in FIXED.items():
+         rows = read_csv(rel)
+-        ok = len(rows) == target
++        ok = len(rows) >= target if rel.startswith(("vtuber_original/","vtuber_non_original/")) else len(rows) == target
+         all_fixed &= ok
+         report["fixed_targets"][rel] = {"target": target, "rows": len(rows), "complete": ok}
+ 
+@@ -234,50 +234,13 @@ def main() -> None:
+ 
+     video_games = read_csv("video_games/video_game_music_10000.csv")
+     invalid_video_games = []
+-    reject_game_text = re.compile(
+-        r"\b(?:motion picture|film soundtrack|movie soundtrack|television soundtrack|"
+-        r"original tv series|anime score|anime soundtrack|music from the video game|"
+-        r"piano collections?|for piano solo|soundtrack for piano|tribute|music box|"
+-        r"cover album|played by|remix album)\b",
+-        re.I,
+-    )
+-    reject_screen_work = re.compile(
+-        r"\b(?:soundtrack|original score|volume|vol\.?|music collection|for piano|played by)\b",
+-        re.I,
+-    )
+-    allowed_associations = {
+-        "official_soundtrack_album",
+-        "franchise_artist",
+-        "explicit_track_reference",
+-        "genre_album",
+-        "listenbrainz_release_group_tag",
+-    }
+     seen_game_songs = set()
+     for i, r in enumerate(video_games, 1):
+         e = extra(r)
+         screen_work = str(r.get("screen_work") or "").strip()
+-        evidence = f"{r.get('album') or ''} | {screen_work} | {r.get('genres') or ''}"
+-        association = str(e.get("game_association_kind") or "")
+         game_song_key = (norm(screen_work), norm(r.get("title") or ""), norm(r.get("main_artist") or ""))
+-        listenbrainz_evidence_valid = bool(
+-            association != "listenbrainz_release_group_tag"
+-            or (
+-                str(r.get("musicbrainz_recording_mbid") or "").strip()
+-                and str(e.get("listenbrainz_source_scope") or "") == "release-group"
+-                and bool(e.get("listenbrainz_source_tags"))
+-                and str(e.get("explicit_soundtrack_release") or "").strip()
+-            )
+-        )
+-        invalid = (
+-            not screen_work
+-            or str(e.get("culture_category") or "") != "video_game_music"
+-            or association not in allowed_associations
+-            or reject_game_text.search(evidence)
+-            or reject_screen_work.search(screen_work)
+-            or (association == "genre_album" and not str(e.get("game_wikidata_id") or "").strip())
+-            or not listenbrainz_evidence_valid
+-            or game_song_key in seen_game_songs
+-        )
++        from music_megalist.quality import video_game_row_error
++        invalid = bool(video_game_row_error(r,e) or game_song_key in seen_game_songs)
+         if invalid:
+             invalid_video_games.append(i)
+         seen_game_songs.add(game_song_key)
+@@ -355,10 +318,23 @@ def main() -> None:
+         and bool(country_check.get("complete"))
+         and dupes == 0
+     )
++    vtuber_checks=[value for key,value in report["semantic_checks"].items() if key.startswith("vtuber_")]
++    semantic_ok=semantic_ok and all(value["complete"] for value in vtuber_checks)
++    hololive_path=DATA/"hololive_coverage.json"
++    try:
++        hololive=json.loads(hololive_path.read_text(encoding="utf-8"))
++    except (OSError,ValueError):
++        hololive={"complete":False,"error":"missing or invalid coverage report"}
++    report["semantic_checks"]["hololive_coverage"]=hololive
++    from music_megalist.hololive import coverage_errors
++    hololive_errors=coverage_errors(DATA,require_complete=True)
++    hololive["verification_errors"]=hololive_errors
++    semantic_ok=semantic_ok and bool(hololive.get("complete")) and not hololive_errors
+     report["overall_complete"] = bool(all_fixed and semantic_ok and status_complete)
+     report["status_claims_all_requested_complete"] = status_complete
+     print(json.dumps(report, ensure_ascii=False, indent=2))
++    return 0 if report["overall_complete"] else 1
+ 
+ 
+ if __name__ == "__main__":
+-    main()
++    raise SystemExit(main())
+diff --git a/src/music_megalist/culturelists.py b/src/music_megalist/culturelists.py
+index 7a75478..484fb3e 100644
+--- a/src/music_megalist/culturelists.py
++++ b/src/music_megalist/culturelists.py
+@@ -212,21 +212,7 @@ def _safe_int(value: Any) -> int | None:
+ 
+ 
+ def _parse_genres(value: Any) -> list[str]:
+-    if value is None:
+-        return []
+-    if isinstance(value, list):
+-        return [str(x).strip().casefold() for x in value if str(x).strip()]
+-    text = str(value).strip()
+-    if not text or text.casefold() in {"nan", "none", "null", "[]"}:
+-        return []
+-    try:
+-        parsed = json.loads(text)
+-        if isinstance(parsed, list):
+-            return [str(x).strip().casefold() for x in parsed if str(x).strip()]
+-    except Exception:
+-        pass
+-    return [x.strip().casefold() for x in re.split(r"[|;,]", text) if x.strip()]
+-
++    return _parse_clean_genres(value)
+ 
+ 
+ def _parse_clean_genres(value: Any) -> list[str]:
+@@ -492,97 +478,48 @@ def _seed_rows(category: str) -> list[SongRow]:
+     return rows
+ 
+ 
+-def _listenbrainz_tag_rows(
+-    tags: list[str],
+-    needed: int,
+-    category: str,
+-    used: set[tuple[str, str]],
+-    used_mbids: set[str],
+-    status: Any,
+-) -> list[SongRow]:
++def _listenbrainz_tag_rows(tags, needed, category, used, used_mbids, status):
++    from .listenbrainz import TagRadio
+     if needed <= 0:
+         return []
+-    rows: list[SongRow] = []
+-    with httpx.Client(
+-        timeout=60,
+-        follow_redirects=True,
+-        headers={"User-Agent": "BeatHit-Dataset/1.0"},
+-    ) as client:
+-        # Tag radio caps every response at 1,000 recordings.  A single 0..100
+-        # request therefore samples only its head and cannot fill broad genres
+-        # such as jazz.  Query disjoint popularity bands before moving to next tag.
+-        popularity_bands = ((80, 100), (60, 80), (40, 60), (20, 40), (0, 20))
+-        for tag in tags:
+-            if len(rows) >= needed:
+-                break
+-            for pop_begin, pop_end in popularity_bands:
+-                if len(rows) >= needed:
+-                    break
+-                try:
+-                    response = client.get(
+-                        f"{LISTENBRAINZ_API}/lb-radio/tags",
+-                        params={"tag": tag, "operator": "OR", "count": 1000,
+-                                "pop_begin": pop_begin, "pop_end": pop_end},
+-                    )
+-                    response.raise_for_status()
+-                    data = response.json()
+-                except Exception as exc:
+-                    status.warnings.append(
+-                        f"ListenBrainz {category} tag {tag} band {pop_begin}-{pop_end}: {exc}"
+-                    )
+-                    continue
+-
+-                payload = data.get("payload", data) if isinstance(data, dict) else data
+-                tracks = (
+-                    payload.get("jspf", {}).get("playlist", {}).get("track", [])
+-                    if isinstance(payload, dict)
+-                    else []
+-                )
+-                if not tracks and isinstance(payload, list):
+-                    tracks = payload
+-
+-                for position, item in enumerate(tracks, 1):
+-                    title = item.get("title") or item.get("track_name") or item.get("recording_name")
+-                    artist = item.get("creator") or item.get("artist_name") or item.get("artist_credit_name")
+-                    if not title or not artist:
+-                        continue
+-                    key = (norm(str(title)), norm(str(artist)))
+-                    if key in used:
+-                        continue
+-
+-                    identifier = item.get("identifier") or item.get("recording_mbid")
+-                    if isinstance(identifier, list):
+-                        identifier = identifier[0] if identifier else None
+-                    if isinstance(identifier, str) and "/" in identifier:
+-                        identifier = identifier.rsplit("/", 1)[-1]
+-                    mbid = str(identifier or "").strip().casefold()
+-                    if mbid and mbid in used_mbids:
+-                        continue
+-                    used.add(key)
+-                    if mbid:
+-                        used_mbids.add(mbid)
+-
+-                    rows.append(
+-                        SongRow(
+-                            title=str(title), main_artist=str(artist), genres=[tag],
+-                            languages=["und"], metric_name="listenbrainz_tag_radio_rank",
+-                            metric_value=float(max(1, 1001 - position)), metric_unit="rank_score",
+-                            musicbrainz_recording_mbid=identifier, source_url="https://listenbrainz.org/",
+-                            retrieved_at=TODAY,
+-                            source_notes="ListenBrainz tag-radio popularity rank; no stream count is implied.",
+-                            extra={"culture_category": category, "source_tag": tag,
+-                                   "source_popularity_band": [pop_begin, pop_end]},
+-                        )
+-                    )
+-                    if len(rows) >= needed:
+-                        break
+-                time.sleep(0.12)
++    # Generic "comedy" includes spoken stand-up; it does not prove a song.
++    if category == "unserious":
++        tags = [t for t in tags if t not in {"comedy", "funny", "humorous", "satire", "absurdist"}]
++    scopes = {"recording", "release-group"} if category in {"unserious", "children_childhood"} else None
++    radio = TagRadio(CACHE, status, category)
++    rows = []
++    for mbid, metadata, evidence in radio.recordings(tags, scopes=scopes):
++        recording = metadata["recording"]
++        artist = metadata["artist"]["name"]
++        title = recording["name"]
++        key = (norm(title), norm(artist))
++        if key in used or mbid in used_mbids:
++            continue
++        album = (metadata.get("release") or {}).get("name")
++        if re.search(r"\b(?:stand[- ]?up|spoken word|audiobook|interview)\b", str(album or ""), re.I):
++            continue
++        used.add(key); used_mbids.add(mbid)
++        percent = _safe_float(evidence.get("percent")) or 0.0
++        rows.append(SongRow(
++            title=title, main_artist=artist, album=album, genres=[evidence["tag"]],
++            languages=["und"], musicbrainz_recording_mbid=mbid,
++            metric_name="listenbrainz_tag_popularity_percent", metric_value=percent,
++            metric_unit="score_0_100", overall_popularity_score=percent * .35,
++            source_url=f"https://musicbrainz.org/recording/{mbid}", retrieved_at=TODAY,
++            source_notes="MusicBrainz tag membership and hydrated recording metadata; ListenBrainz popularity score, not listens.",
++            extra={"culture_category": category, "source_tag": evidence["tag"],
++                   "listenbrainz_source_scope": evidence.get("source"),
++                   "source_popularity_band": evidence["band"]}))
++        if len(rows) >= needed:
++            break
+     return rows
+ 
+ 
+ def _build_tag_list(catalog: pd.DataFrame, status: Any, name: str) -> list[SongRow]:
+     target = TAG_TARGETS[name]
+     tags = TAG_LISTS[name]
++    if name == "unserious":
++        tags = [tag for tag in tags if tag not in {"comedy", "funny", "humorous", "satire", "absurdist"}]
+     output = TAG_OUTPUTS[name]
+ 
+     rows = _seed_rows(name)
+@@ -599,7 +536,13 @@ def _build_tag_list(catalog: pd.DataFrame, status: Any, name: str) -> list[SongR
+     candidates: list[tuple[float, pd.Series, list[str]]] = []
+     for _, row in catalog.iterrows():
+         row_genres = _parse_genres(row.get("genres"))
+-        genre_match = _genre_matches(row_genres, tags)
++        # Reject malformed source identities instead of preserving replacement characters.
++        if "\ufffd" in f"{row.get('title') or ''}{row.get('main_artist') or ''}":
++            continue
++        catalog_tags=[tag for tag in tags if tag != "doujin"] if name == "internet_native" else tags
++        # An ambiguous artist-level doujin tag alone has misclassified Punjabi pop.
++        # Recording/release tag corroboration remains available through ListenBrainz.
++        genre_match = _genre_matches(row_genres, catalog_tags)
+         title_match = name == "unserious" and _unserious_title_match(row.get("title"))
+         if genre_match or title_match:
+             score = _catalog_score(row) + (10.0 if title_match else 0.0)
+@@ -1588,8 +1531,6 @@ GAME_LISTENBRAINZ_TAGS = [
+     "game score",
+     "original game soundtrack",
+     "game ost",
+-    "gaming",
+-    "chiptune",
+ ]
+ GAME_FRANCHISE_ARTISTS = {
+     "league of legends": "League of Legends",
+@@ -1723,7 +1664,11 @@ def _game_title_from_explicit_soundtrack_release(album: Any) -> str | None:
+     marker = GAME_EXPLICIT_SOUNDTRACK_RELEASE.search(value)
+     if not value or not marker:
+         return None
+-    candidate = value[:marker.start()].strip(" \t-–—:|,()[]{}'\"“”・")
++    prefix = value[:marker.start()]
++    prefix = re.sub(r"\s*[\[(][^\])]*(?:edition|volume|vol\.?|remixes)[^\])]*[\])]", "", prefix, flags=re.I)
++    # Drop edition brackets that belong to the soundtrack packaging.
++    prefix = re.sub(r"[\[(][^\])]*$", "", prefix)
++    candidate = prefix.strip(" \t-–—:|,()[]{}'\"“”・")
+     candidate = re.sub(
+         r"\s*(?:collector'?s|deluxe|complete|remastered|expanded)\s+edition\s*$",
+         "",
+@@ -1750,243 +1695,44 @@ def _game_title_from_explicit_soundtrack_release(album: Any) -> str | None:
+ 
+ 
+ def _listenbrainz_video_game_rows(status: Any) -> list[SongRow]:
+-    """Fetch release-group-tagged recordings with explicit soundtrack albums.
+-
+-    Tag-radio evidence is restricted to release-group tags; artist-only tags are too
+-    broad. MusicBrainz recording/release metadata then has to contain an explicit
+-    soundtrack marker, and common film/TV/anime and arrangement markers are rejected.
+-    """
+-    cache_path = CACHE / "listenbrainz_video_game_music.json"
+-    cache: dict[str, Any] = {
+-        "schema_version": 1,
+-        "tag_results": {},
+-        "metadata": {},
+-    }
+-    try:
+-        if cache_path.exists():
+-            value = json.loads(cache_path.read_text(encoding="utf-8"))
+-            if isinstance(value, dict) and value.get("schema_version") == 1:
+-                cache = value
+-    except Exception as exc:
+-        status.warnings.append(f"ListenBrainz video-game checkpoint ignored: {exc}")
+-
+-    tag_cache = cache.setdefault("tag_results", {})
+-    metadata_cache = cache.setdefault("metadata", {})
+-    if not isinstance(tag_cache, dict) or not isinstance(metadata_cache, dict):
+-        tag_cache = {}
+-        metadata_cache = {}
+-        cache = {
+-            "schema_version": 1,
+-            "tag_results": tag_cache,
+-            "metadata": metadata_cache,
+-        }
+-
+-    def save_cache() -> None:
+-        CACHE.mkdir(parents=True, exist_ok=True)
+-        cache["updated_at"] = TODAY
+-        temp_path = cache_path.with_suffix(".tmp")
+-        temp_path.write_text(
+-            json.dumps(cache, ensure_ascii=False, separators=(",", ":")) + "\n",
+-            encoding="utf-8",
+-        )
+-        temp_path.replace(cache_path)
+-
+-    source_errors: list[str] = []
+-    with httpx.Client(
+-        timeout=90,
+-        follow_redirects=True,
+-        headers={
+-            "User-Agent": (
+-                "BeatHit-Dataset/1.0 "
+-                "(+https://github.com/Dummy1-sudo/BeatHit-Dataset)"
+-            )
+-        },
+-    ) as client:
+-        for tag in GAME_LISTENBRAINZ_TAGS:
+-            try:
+-                response = client.get(
+-                    f"{LISTENBRAINZ_API}/lb-radio/tags",
+-                    params={
+-                        "tag": tag,
+-                        "operator": "OR",
+-                        "count": 1000,
+-                        "pop_begin": 0,
+-                        "pop_end": 100,
+-                    },
+-                )
+-                response.raise_for_status()
+-                payload = response.json()
+-                if not isinstance(payload, list):
+-                    raise ValueError("expected a list of tag-radio candidates")
+-                tag_cache[tag] = payload
+-                save_cache()
+-            except Exception as exc:
+-                source_errors.append(f"tag {tag}: {exc}")
+-                if tag not in tag_cache:
+-                    status.warnings.append(
+-                        f"ListenBrainz video-game tag {tag!r}: {exc}"
+-                    )
+-
+-        evidence: dict[str, dict[str, Any]] = {}
+-        for tag in GAME_LISTENBRAINZ_TAGS:
+-            values = tag_cache.get(tag) or []
+-            if not isinstance(values, list):
+-                continue
+-            for value in values:
+-                if not isinstance(value, dict):
+-                    continue
+-                if str(value.get("source") or "").casefold() != "release-group":
+-                    continue
+-                mbid = str(value.get("recording_mbid") or "").strip().casefold()
+-                if not re.fullmatch(
+-                    r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-"
+-                    r"[0-9a-f]{4}-[0-9a-f]{12}",
+-                    mbid,
+-                ):
+-                    continue
+-                item = evidence.setdefault(
+-                    mbid,
+-                    {"percent": 0.0, "tag_count": 0, "tags": []},
+-                )
+-                item["percent"] = max(
+-                    float(item["percent"]),
+-                    _safe_float(value.get("percent")) or 0.0,
+-                )
+-                item["tag_count"] = max(
+-                    int(item["tag_count"]),
+-                    _safe_int(value.get("tag_count")) or 0,
+-                )
+-                if tag not in item["tags"]:
+-                    item["tags"].append(tag)
+-
+-        missing = [mbid for mbid in evidence if mbid not in metadata_cache]
+-        for start in range(0, len(missing), 500):
+-            batch = missing[start:start + 500]
+-            try:
+-                response = client.post(
+-                    f"{LISTENBRAINZ_API}/metadata/recording/",
+-                    json={
+-                        "recording_mbids": batch,
+-                        "inc": "artist release tag",
+-                    },
+-                )
+-                response.raise_for_status()
+-                payload = response.json()
+-                if not isinstance(payload, dict):
+-                    raise ValueError("expected a recording metadata object")
+-                for mbid in batch:
+-                    metadata_cache[mbid] = payload.get(mbid)
+-                save_cache()
+-            except Exception as exc:
+-                source_errors.append(f"metadata batch {start // 500 + 1}: {exc}")
+-                status.warnings.append(
+-                    f"ListenBrainz video-game metadata batch {start // 500 + 1}: {exc}"
+-                )
+-
+-    rows: list[SongRow] = []
+-    rejection_counts: dict[str, int] = defaultdict(int)
+-    for mbid, tag_evidence in evidence.items():
+-        metadata = metadata_cache.get(mbid)
+-        if not isinstance(metadata, dict):
+-            rejection_counts["missing_metadata"] += 1
+-            continue
+-        recording = metadata.get("recording") or {}
+-        artist_data = metadata.get("artist") or {}
++    from .listenbrainz import TagRadio
++    radio = TagRadio(CACHE, status, "video_game_music")
++    rows = []
++    rejections = defaultdict(int)
++    for mbid, metadata, evidence in radio.recordings(GAME_LISTENBRAINZ_TAGS, scopes={"release-group"}):
++        recording = metadata["recording"]
++        artist = metadata["artist"]["name"]
+         release = metadata.get("release") or {}
+-        title = str(recording.get("name") or "").strip()
+-        artist = str(artist_data.get("name") or "").strip()
+-        album = str(release.get("name") or "").strip()
++        title, album = recording["name"], str(release.get("name") or "")
+         combined = f"{album} | {title} | {artist}"
+-        if not title or not artist or not album:
+-            rejection_counts["blank_metadata"] += 1
+-            continue
+-        if GAME_MEDIA_REJECT.search(combined):
+-            rejection_counts["non_game_media"] += 1
++        if GAME_MEDIA_REJECT.search(combined) or GAME_ARRANGEMENT_REJECT.search(combined):
++            rejections["non_game_or_arrangement"] += 1
+             continue
+-        if GAME_ARRANGEMENT_REJECT.search(combined):
+-            rejection_counts["arrangement_or_cover"] += 1
++        game = _game_title_from_explicit_soundtrack_release(album)
++        if not game:
++            rejections["no_explicit_soundtrack_release"] += 1
+             continue
+-        game_title = _game_title_from_explicit_soundtrack_release(album)
+-        if not game_title:
+-            rejection_counts["no_explicit_soundtrack_marker"] += 1
+-            continue
+-
+-        first_release = str(recording.get("first_release_date") or "").strip()
++        percent = _safe_float(evidence.get("percent")) or 0.0
+         isrcs = recording.get("isrcs") or []
+-        isrc = (
+-            str(isrcs[0]).strip().upper()
+-            if isinstance(isrcs, list) and isrcs
+-            else None
+-        )
+-        tags = list(tag_evidence.get("tags") or [])
+-        percent = float(tag_evidence.get("percent") or 0.0)
+-        rows.append(
+-            SongRow(
+-                title=title,
+-                main_artist=artist,
+-                album=album,
+-                release_date=first_release or None,
+-                release_year=_safe_int(first_release[:4]) if first_release else None,
+-                genres=tags,
+-                languages=["und"],
+-                screen_work=game_title,
+-                metric_name="listenbrainz_tag_popularity_percent",
+-                metric_value=max(percent, 0.01),
+-                metric_unit="score_0_100",
+-                overall_popularity_score=max(percent, 0.01),
+-                musicbrainz_recording_mbid=mbid,
+-                isrc=isrc,
+-                source_url=f"https://musicbrainz.org/recording/{mbid}",
+-                retrieved_at=TODAY,
+-                source_notes=(
+-                    "ListenBrainz release-group tag-radio popularity evidence plus "
+-                    "MusicBrainz recording/release metadata. The score is a popularity "
+-                    "percentage, not a stream or listen count."
+-                ),
+-                extra={
+-                    "culture_category": "video_game_music",
+-                    "video_game": game_title,
+-                    "selection": (
+-                        "release-group game-music tag plus explicit soundtrack "
+-                        "release marker"
+-                    ),
+-                    "game_association_kind": "listenbrainz_release_group_tag",
+-                    "listenbrainz_source_scope": "release-group",
+-                    "listenbrainz_source_tags": tags,
+-                    "listenbrainz_tag_count": int(
+-                        tag_evidence.get("tag_count") or 0
+-                    ),
+-                    "listenbrainz_tag_popularity_percent": percent,
+-                    "musicbrainz_release_mbid": release.get("mbid"),
+-                    "musicbrainz_release_group_mbid": release.get(
+-                        "release_group_mbid"
+-                    ),
+-                    "explicit_soundtrack_release": album,
+-                },
+-            )
+-        )
+-
+-    rows.sort(
+-        key=lambda row: (
+-            float(row.metric_value or 0.0),
+-            int((row.extra or {}).get("listenbrainz_tag_count") or 0),
+-        ),
+-        reverse=True,
+-    )
+-    status.sources["listenbrainz_video_game_music"] = {
+-        "source": "ListenBrainz tag radio + recording metadata API",
+-        "tags": GAME_LISTENBRAINZ_TAGS,
+-        "release_group_tagged_recordings": len(evidence),
+-        "metadata_records": sum(
+-            1 for value in metadata_cache.values() if isinstance(value, dict)
+-        ),
+-        "qualified_rows": len(rows),
+-        "rejections": dict(sorted(rejection_counts.items())),
+-        "checkpoint": str(cache_path.relative_to(ROOT)),
+-        "errors": source_errors,
+-        "ok": bool(rows),
+-    }
+-    return rows
++        rows.append(SongRow(
++            title=title, main_artist=artist, album=album, screen_work=game,
++            genres=[evidence["tag"]], languages=["und"],
++            musicbrainz_recording_mbid=mbid, isrc=(isrcs[0] if isrcs else None),
++            metric_name="listenbrainz_tag_popularity_percent", metric_value=percent,
++            metric_unit="score_0_100", overall_popularity_score=percent * .35,
++            source_url=f"https://musicbrainz.org/recording/{mbid}", retrieved_at=TODAY,
++            source_notes="Release-group game-music tag plus explicit soundtrack release; popularity is a score, not listens.",
++            extra={"culture_category": "video_game_music", "video_game": game,
++                   "game_association_kind": "listenbrainz_release_group_tag",
++                   "listenbrainz_source_scope": "release-group",
++                   "listenbrainz_source_tags": [evidence["tag"]],
++                   "musicbrainz_release_group_mbid": release.get("release_group_mbid"),
++                   "explicit_soundtrack_release": album}))
++        # Bounded sample with room for per-game caps and identity deduplication.
++        if len(rows) >= 50_000:
++            break
++    radio.stats.update(qualified_rows=len(rows), rejections=dict(rejections))
++    return sorted(rows, key=lambda r: r.metric_value, reverse=True)
+ 
+ 
+ def build_video_game_music(catalog: pd.DataFrame, status: Any) -> list[SongRow]:
+@@ -2014,10 +1760,10 @@ def build_video_game_music(catalog: pd.DataFrame, status: Any) -> list[SongRow]:
+         if GAME_LICENSED_COMPILATION.search(album) and not genre_hit:
+             continue
+         explicit_title_game = _game_from_track_title(title)
+-        if not genre_hit and not GAME_SOUNDTRACK_MARKER.search(album) and not explicit_title_game:
++        if not genre_hit and not GAME_SOUNDTRACK_MARKER.search(album) and norm(str(row.get("main_artist") or "")) not in GAME_FRANCHISE_ARTISTS:
+             continue
+ 
+-        game_title = _infer_game_title(row)
++        game_title = _game_title_from_explicit_soundtrack_release(album) or _infer_game_title(row)
+         if not game_title:
+             continue
+         association_kind = _game_candidate_kind(row, game_title)
+@@ -2188,7 +1934,7 @@ def build_video_game_music(catalog: pd.DataFrame, status: Any) -> list[SongRow]:
+             break
+         game_key = norm(game_title)
+         game = game_evidence.get(game_key)
+-        if association_kind == "genre_album" and per_game.get(game_key, 0) == 0:
++        if association_kind == "genre_album" and not (game or {}).get("wikidata_id"):
+             continue
+         if association_kind == "explicit_track_reference" and not genre_hit and per_game.get(game_key, 0) == 0:
+             continue
+diff --git a/src/music_megalist/dedupe.py b/src/music_megalist/dedupe.py
+index 0095351..37f1380 100644
+--- a/src/music_megalist/dedupe.py
++++ b/src/music_megalist/dedupe.py
+@@ -74,6 +74,14 @@ def _merge(preferred: SongRow, other: SongRow) -> SongRow:
+     out.featured_artists = list(dict.fromkeys([*out.featured_artists, *other.featured_artists]))
+     out.genres = sorted(set(out.genres) | set(other.genres))
+ 
++    for field in ('hololive_member_ids',):
++        values=list(dict.fromkeys([*(out.extra.get(field) or []),*(other.extra.get(field) or [])]))
++        if values:
++            out.extra[field]=values
++    for field in ('hololive_trusted_spotify_streams','hololive_youtube_views','holodex_channel_id','holodex_video_id'):
++        if out.extra.get(field) is None and other.extra.get(field) is not None:
++            out.extra[field]=other.extra[field]
++
+     # Keep alternate metrics as provenance instead of combining unlike counters.
+     if (other.metric_name, other.metric_value, other.metric_unit) != (out.metric_name, out.metric_value, out.metric_unit):
+         alt = out.extra.setdefault("alternate_metrics", [])
+@@ -97,6 +105,9 @@ def _merge(preferred: SongRow, other: SongRow) -> SongRow:
+ 
+ def _stable_keys(row: SongRow) -> list[tuple[str, str]]:
+     keys: list[tuple[str, str]] = []
++    video_id=str((row.extra or {}).get("holodex_video_id") or "")
++    if row.vtuber and re.fullmatch(r"[A-Za-z0-9_-]{11}",video_id):
++        keys.append(("holodex_video",video_id))
+     if row.isrc:
+         keys.append(("isrc", row.isrc.upper()))
+     if row.spotify_track_id:
+diff --git a/src/music_megalist/fullbuild.py b/src/music_megalist/fullbuild.py
+index b4f2678..0635447 100644
+--- a/src/music_megalist/fullbuild.py
++++ b/src/music_megalist/fullbuild.py
+@@ -129,6 +129,10 @@ MATERIALIZED_OUTPUTS = {
+     "special_required": DATA / "special_required" / "special_required.csv",
+ }
+ 
++BUILDER_REVISIONS = {name: "repair-v3" for name in (
++    "anime", "vocaloid", "screen_soundtracks", "vtuber_original", "vtuber_non_original",
++    "video_game_music", "internet_native", "jazz_depth", "children_childhood", "unserious")}
++
+ WORLDWIDE_BUCKETS = [
+     ("current", None, None, 10_000),
+     ("2020s", 2020, 2029, 10_000),
+@@ -176,6 +180,7 @@ class DatasetStatus:
+     target: int | str
+     rows: int = 0
+     complete: bool = False
++    builder_revision: str | None = None
+     metric_coverage: dict[str, int] = field(default_factory=dict)
+     notes: list[str] = field(default_factory=list)
+ 
+@@ -191,7 +196,8 @@ class BuildStatus:
+     def save(self) -> None:
+         REPORT.parent.mkdir(parents=True, exist_ok=True)
+         payload = asdict(self)
+-        REPORT.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
++        from .listenbrainz import atomic_json
++        atomic_json(REPORT,payload)
+ 
+ 
+ def _now() -> str:
+@@ -1373,89 +1379,44 @@ def _screen_work_from_album(album: str) -> str | None:
+     return s or album
+ 
+ 
+-def _listenbrainz_soundtracks(limit: int, used: set[str], status: BuildStatus) -> list[SongRow]:
+-    """Fill soundtrack coverage from MusicBrainz/ListenBrainz soundtrack tags.
++SCREEN_TAGS = ["film soundtrack", "movie soundtrack", "television soundtrack", "tv soundtrack",
++               "film score", "movie score", "television score", "tv score", "film music",
++               "motion picture soundtrack", "series soundtrack", "anime soundtrack", "anime score"]
++SCREEN_ALBUM_RE = re.compile(r"\b(?:motion picture|film|movie|television|tv series|original series|anime)\b", re.I)
+ 
+-    This fallback is only used after explicit soundtrack/score album metadata is exhausted.
+-    The tags are deliberately screen-specific; generic mood/instrument tags are not accepted.
+-    A release/album title is retained as ``screen_work`` only when the response provides one.
+-    """
++
++def _listenbrainz_soundtracks(limit: int, used: set[str], status: BuildStatus) -> list[SongRow]:
++    from .listenbrainz import TagRadio
++    from .culturelists import GAME_SOUNDTRACK_MARKER
+     if limit <= 0:
+         return []
+-    tags = [
+-        "soundtrack", "film soundtrack", "movie soundtrack", "television soundtrack",
+-        "tv soundtrack", "original soundtrack", "film score", "movie score",
+-        "television score", "tv score", "original score", "film music",
+-        "cinema soundtrack", "motion picture soundtrack", "series soundtrack",
+-        "anime soundtrack", "anime score", "television music", "movie music",
+-        "screen soundtrack",
+-    ]
+-    out: list[SongRow] = []
+-    client = httpx.Client(timeout=60, follow_redirects=True, headers={"User-Agent":"BeatHit-Dataset/1.0"})
+-    try:
+-        # The service caps a response at 1,000 rows.  Spread requests across
+-        # popularity bands so overlapping soundtrack tags do not repeatedly return
+-        # the same head sample.
+-        tag_bands = [(tag, low, high) for tag in tags for low, high in
+-                     ((80, 100), (60, 80), (40, 60), (20, 40), (0, 20))]
+-        for tag, pop_begin, pop_end in tag_bands:
+-            if len(out) >= limit:
+-                break
+-            try:
+-                r = client.get(
+-                    f"{LISTENBRAINZ_API}/lb-radio/tags",
+-                    params={"tag":tag,"operator":"OR","count":1000,
+-                            "pop_begin":pop_begin,"pop_end":pop_end},
+-                )
+-                r.raise_for_status(); data = r.json()
+-            except Exception as exc:
+-                status.warnings.append(f"ListenBrainz soundtrack tag {tag}: {exc}")
+-                continue
+-            payload = data.get("payload", data) if isinstance(data, dict) else data
+-            tracks = payload.get("jspf", {}).get("playlist", {}).get("track", []) if isinstance(payload, dict) else []
+-            if not tracks and isinstance(payload, list):
+-                tracks = payload
+-            for pos, x in enumerate(tracks, 1):
+-                title = x.get("title") or x.get("track_name") or x.get("recording_name")
+-                artist = x.get("creator") or x.get("artist_name") or x.get("artist_credit_name")
+-                if not title or not artist:
+-                    continue
+-                mbid = x.get("identifier") or x.get("recording_mbid")
+-                if isinstance(mbid, list):
+-                    mbid = mbid[0] if mbid else None
+-                if isinstance(mbid, str) and "/" in mbid:
+-                    mbid = mbid.rsplit("/", 1)[-1]
+-                aliases=[_identity(title, artist)]
+-                if mbid:
+-                    aliases.append(f"mbid:{mbid}")
+-                if any(alias in used for alias in aliases):
+-                    continue
+-                used.update(aliases)
+-                album = x.get("album") or x.get("release_name")
+-                if isinstance(album, dict):
+-                    album = album.get("title") or album.get("name")
+-                album = str(album).strip() if album else None
+-                row = SongRow(
+-                    title=str(title).strip(), main_artist=str(artist).strip(), album=album,
+-                    genres=[tag], metric_name="listenbrainz_soundtrack_tag_rank",
+-                    metric_value=float(max(1, 1001-pos)), metric_unit="rank_score",
+-                    musicbrainz_recording_mbid=str(mbid) if mbid else None,
+-                    screen_work=_screen_work_from_album(album or "") if album else None,
+-                    source_url="https://listenbrainz.org/", retrieved_at=TODAY,
+-                    source_notes=(
+-                        "Recording returned by ListenBrainz/MusicBrainz soundtrack-tag radio. "
+-                        "The rank is a popularity-oriented tag-radio signal, not a Spotify stream count; "
+-                        "screen-work title is only populated when release metadata supplies one."
+-                    ),
+-                    extra={"association_method":"listenbrainz_screen_soundtrack_tag","tag":tag,
+-                           "source_popularity_band":[pop_begin,pop_end]},
+-                )
+-                out.append(row)
+-                if len(out) >= limit:
+-                    break
+-    finally:
+-        client.close()
+-    return out
++    rows = []
++    radio = TagRadio(CACHE, status, "screen_soundtracks")
++    for mbid, metadata, evidence in radio.recordings(SCREEN_TAGS, scopes={"recording", "release-group"}):
++        title = metadata["recording"]["name"]
++        artist = metadata["artist"]["name"]
++        album = str((metadata.get("release") or {}).get("name") or "")
++        if GAME_SOUNDTRACK_MARKER.search(album):
++            continue
++        aliases = [_identity(title, artist), f"mbid:{mbid}"]
++        if any(x in used for x in aliases):
++            continue
++        used.update(aliases)
++        percent = _safe_float(evidence.get("percent")) or 0.0
++        rows.append(SongRow(
++            title=title, main_artist=artist, album=album or None,
++            # Generic release titles do not establish which screen work used the song.
++            screen_work=_screen_work_from_album(album) if SCREEN_ALBUM_RE.search(album) else None,
++            genres=[evidence["tag"]], musicbrainz_recording_mbid=mbid,
++            metric_name="listenbrainz_tag_popularity_percent", metric_value=percent,
++            metric_unit="score_0_100", overall_popularity_score=percent * .35,
++            source_url=f"https://musicbrainz.org/recording/{mbid}", retrieved_at=TODAY,
++            source_notes="Recording/release-group screen-specific tag, with MusicBrainz recording metadata; score is not listens.",
++            extra={"association_method": "listenbrainz_screen_soundtrack_tag", "tag": evidence["tag"],
++                   "listenbrainz_source_scope": evidence.get("source")}))
++        if len(rows) >= limit:
++            break
++    return rows
+ 
+ 
+ def build_screen_soundtracks(catalog: pd.DataFrame, status: BuildStatus) -> list[SongRow]:
+@@ -1489,14 +1450,17 @@ def build_screen_soundtracks(catalog: pd.DataFrame, status: BuildStatus) -> list
+                 selected.append(row)
+     album = catalog["album_name"].fillna("").astype(str)
+     genre = catalog["genres"].fillna("").astype(str)
+-    mask = album.str.contains(SOUNDTRACK_RE, na=False) | genre.str.contains(
+-        r"soundtrack|film score|movie|television score|tv score|cinematic", case=False, regex=True, na=False
+-    )
++    # Generic soundtrack/cinematic tags also describe games and unrelated albums.
++    mask = album.str.contains(SCREEN_ALBUM_RE, na=False) | genre.str.contains(
++        r"film score|movie soundtrack|film soundtrack|television score|tv score|anime soundtrack",
++        case=False, regex=True, na=False)
++    mask &= ~album.str.contains(r"(?:video game|game soundtrack|game score)", case=False, regex=True, na=False)
+     cand = _rank_frame(catalog[mask].copy())
+     for _, r in cand.iterrows():
+         if not _claim_selection(r, used): continue
+         row=_catalog_row_to_song(r, extra={"association_method":"album_or_genre_soundtrack_metadata"})
+-        row.screen_work=_screen_work_from_album(str(r.album_name or ""))
++        row.screen_work=(_screen_work_from_album(str(r.album_name or ""))
++                         if SCREEN_ALBUM_RE.search(str(r.album_name or "")) else None)
+         selected.append(row)
+         if len(selected)>=10_000: break
+     if len(selected) < 10_000:
+@@ -1522,6 +1486,12 @@ ANILIST_QUERY = r'''query ($page: Int = 1, $perPage: Int = 50) {
+ }'''
+ 
+ 
++class SourceHTTPError(RuntimeError):
++    def __init__(self, status_code: int, message: str):
++        self.status_code=status_code
++        super().__init__(message)
++
++
+ def _http_json(client: httpx.Client, method: str, url: str, **kwargs: Any) -> Any:
+     last=None
+     for attempt in range(8):
+@@ -1539,7 +1509,8 @@ def _http_json(client: httpx.Client, method: str, url: str, **kwargs: Any) -> An
+             r.raise_for_status(); return r.json()
+         except httpx.HTTPStatusError as exc:
+             body=(exc.response.text or "").strip().replace("\n", " ")[:800]
+-            last=RuntimeError(f"HTTP {exc.response.status_code}: {body or exc}")
++            # Do not copy request URLs containing API keys into committed reports.
++            last=SourceHTTPError(exc.response.status_code,f"HTTP {exc.response.status_code}: {body or 'empty error response'}")
+             # Authentication/permission/not-found errors are not transient. Retrying them only
+             # wastes build time and can aggravate source-side rate controls.
+             _progress(f"HTTP error {method} {url} status={exc.response.status_code} attempt={attempt+1}/8")
+@@ -1555,6 +1526,8 @@ def _http_json(client: httpx.Client, method: str, url: str, **kwargs: Any) -> An
+             wait=min(60,2**attempt)
+             _progress(f"HTTP exception {method} {url} attempt={attempt+1}/8 {type(exc).__name__}: {exc}; wait={wait}s")
+             time.sleep(wait)
++    if isinstance(last,SourceHTTPError):
++        raise last
+     raise RuntimeError(f"{method} {url} failed: {last}")
+ 
+ 
+@@ -1607,17 +1580,30 @@ def fetch_animethemes_all(status: BuildStatus) -> tuple[dict[int,list[dict]],dic
+     """
+     by_anilist=defaultdict(list); by_mal=defaultdict(list); page=1
+     _progress("AnimeThemes START full index fetch")
+-    endpoints=(ANIMETHEMES_API, "https://api.animethemes.moe/api/anime")
++    from .listenbrainz import atomic_json
++    cache_dir = CACHE / "animethemes_pages"
++    endpoints=(ANIMETHEMES_API,)
+     with httpx.Client(timeout=90,follow_redirects=True,headers={"User-Agent":"BeatHit-Dataset/1.0"}) as c:
+         while True:
+             params={"include":"animethemes.song.artists,resources","page[size]":"100","page[number]":str(page)}
+             d=None; failures=[]
+-            for endpoint in endpoints:
++            cache_path=cache_dir/f"{page:04d}.json"
++            try:
++                cached=json.loads(cache_path.read_text(encoding="utf-8"))
++            except (OSError, ValueError):
++                cached={}
++            if time.time()-cached.get("checked_at",0)<7*86400:
++                d=cached.get("data")
++            for endpoint in (() if d is not None else endpoints):
+                 try:
+                     d=_http_json(c,"GET",endpoint,params=params)
++                    atomic_json(cache_path,{"checked_at":time.time(),"data":d})
+                     break
+                 except Exception as exc:
+                     failures.append(f"{endpoint}: {exc}")
++            if d is None and cached.get("data"):
++                d=cached["data"]
++                status.warnings.append(f"AnimeThemes page {page}: reusing stale successful page")
+             if d is None:
+                 status.warnings.append(f"AnimeThemes page {page}: {'; '.join(failures)}"); break
+             items=d.get("anime") or d.get("data") or []
+@@ -1646,7 +1632,7 @@ def fetch_animethemes_all(status: BuildStatus) -> tuple[dict[int,list[dict]],dic
+                 page+=1
+             elif meta.get("current_page") and meta.get("last_page") and meta["current_page"]<meta["last_page"]:
+                 page+=1
+-            elif len(items)>=100:
++            elif "next" not in links and len(items)>=100:
+                 page+=1
+             else: break
+             if page>1000: break
+@@ -1848,9 +1834,9 @@ def _anime_row_from_candidates(
+         title=_clean_theme_component(source_candidate.get("title"))
+         artists=[_clean_theme_component(x) for x in (source_candidate.get("artists") or [])]
+         artists=[x for x in artists if x]
+-        if not title:
++        if not title or not artists:
+             continue
+-        key=(norm(title),norm(artists[0] if artists else ""))
++        key=(norm(title),norm(artists[0]))
+         if key in seen:
+             continue
+         seen.add(key)
+@@ -1948,13 +1934,15 @@ def _anime_row_from_candidates(
+ def _jikan_theme_candidates(
+     mal_id: int,
+     client: httpx.Client,
+-    cache: dict[str,list[dict]],
++    cache: dict[str,Any],
+     status: BuildStatus,
+ ) -> tuple[list[dict],bool,bool]:
+     key=str(mal_id)
+-    if key in cache:
+-        _progress(f"Jikan MAL={mal_id} cache_hit themes={len(cache[key])}")
+-        return cache[key],True,False
++    entry=cache.get(key)
++    if isinstance(entry,list) and entry:
++        return entry,True,False  # migrate successful legacy entries
++    if isinstance(entry,dict) and time.time()-entry.get("checked_at",0)<30*86400:
++        return entry.get("themes",[]),True,False
+ 
+     url=f"{JIKAN_API}/anime/{mal_id}/themes"
+     for attempt in (1,2):
+@@ -1967,7 +1955,6 @@ def _jikan_theme_candidates(
+                     f"Jikan themes MAL {mal_id}: HTTP 429 rate limited; skipping optional fallback"
+                 )
+                 _progress(f"Jikan MAL={mal_id} RATE_LIMITED; no retry in this build")
+-                cache[key]=[]
+                 return [],False,True
+ 
+             if 500 <= r.status_code < 600:
+@@ -1975,7 +1962,6 @@ def _jikan_theme_candidates(
+                 if attempt==1:
+                     time.sleep(1.0)
+                     continue
+-                cache[key]=[]
+                 status.warnings.append(f"Jikan themes MAL {mal_id}: HTTP {r.status_code} after 2 attempts")
+                 return [],False,True
+ 
+@@ -1994,12 +1980,11 @@ def _jikan_theme_candidates(
+                             "sequence":seq if len(parsed)==1 else (seq*100+sub_seq),
+                             "animethemes_url":f"https://myanimelist.net/anime/{mal_id}",
+                         })
+-            cache[key]=out
++            cache[key]={"themes":out,"checked_at":time.time()}
+             _progress(f"Jikan MAL={mal_id} DONE themes={len(out)}")
+             time.sleep(1.05)
+             return out,True,True
+         except httpx.HTTPStatusError as exc:
+-            cache[key]=[]
+             status.warnings.append(
+                 f"Jikan themes MAL {mal_id}: HTTP {exc.response.status_code}; no further retry"
+             )
+@@ -2010,14 +1995,53 @@ def _jikan_theme_candidates(
+             if attempt==1:
+                 time.sleep(1.0)
+                 continue
+-            cache[key]=[]
+             status.warnings.append(f"Jikan themes MAL {mal_id}: {type(exc).__name__}: {exc}")
+             return [],False,True
+ 
+-    cache[key]=[]
+     return [],False,True
+ 
+ 
++def _jikan_ranked_anime(status: BuildStatus) -> list[dict]:
++    """Current popularity index supplements the old MAL snapshot when AniList fails."""
++    from .listenbrainz import atomic_json, request_json
++    out=[]
++    page_budget=max(0,int(os.getenv("BEATHIT_JIKAN_INDEX_PAGES","240")))
++    errors=[]
++    with httpx.Client(timeout=30,follow_redirects=True) as client:
++        for page in range(1,page_budget+1):
++            path=CACHE/"jikan_index"/f"{page:04d}.json"
++            try:
++                cached=json.loads(path.read_text(encoding="utf-8"))
++            except (OSError,ValueError):
++                cached={}
++            payload=cached.get("data")
++            if not payload or time.time()-cached.get("checked_at",0)>30*86400:
++                try:
++                    payload=request_json(client,"GET",f"{JIKAN_API}/top/anime",
++                        params={"filter":"bypopularity","sfw":"true","limit":25,"page":page})
++                    if not isinstance(payload.get("data"),list):
++                        raise ValueError("Jikan popularity page lacks data")
++                    atomic_json(path,{"checked_at":time.time(),"data":payload})
++                    time.sleep(1.05)
++                except (httpx.HTTPError,ValueError) as exc:
++                    errors.append(f"page {page}: {exc}")
++                    if not payload:
++                        break
++            for item in payload.get("data",[]):
++                mid=_safe_int(item.get("mal_id"))
++                if not mid:
++                    continue
++                out.append({"id":None,"idMal":mid,
++                    "title":{"english":item.get("title_english"),"romaji":item.get("title"),"native":item.get("title_japanese")},
++                    "popularity":item.get("members") or 0,
++                    "_popularity_source":"myanimelist_members_snapshot",
++                    "_popularity_source_url":item.get("url") or f"https://myanimelist.net/anime/{mid}"})
++            if not (payload.get("pagination") or {}).get("has_next_page"):
++                break
++    status.sources["jikan_popularity_index"]={"rows":len(out),"page_budget":page_budget,"errors":errors,"ok":bool(out)}
++    return out
++
++
+ def build_anime(catalog: pd.DataFrame, sources:dict[str,Path], status:BuildStatus) -> list[SongRow]:
+     target=FIXED_TARGETS["anime"]
+     candidate_limit=max(5_000,target*5)
+@@ -2026,7 +2050,6 @@ def build_anime(catalog: pd.DataFrame, sources:dict[str,Path], status:BuildStatu
+     output_path=DATA/"anime"/"anime_songs.csv"
+     partial_path=DATA/"anime"/"anime_songs.partial.csv"
+     output_path.parent.mkdir(parents=True,exist_ok=True)
+-    output_path.unlink(missing_ok=True)
+     partial_path.unlink(missing_ok=True)
+ 
+     _progress(
+@@ -2036,6 +2059,8 @@ def build_anime(catalog: pd.DataFrame, sources:dict[str,Path], status:BuildStatu
+ 
+     mal_path=sources.get("mal_theme_fallback")
+     anime=fetch_anilist_top(live_anilist_limit,status)
++    if not anime:
++        anime=_jikan_ranked_anime(status)
+ 
+     mal_ranked=_load_mal_anime_rank_fallback(mal_path,candidate_limit)
+     seen_mal={_safe_int(a.get("idMal")) for a in anime if _safe_int(a.get("idMal"))}
+@@ -2066,6 +2091,14 @@ def build_anime(catalog: pd.DataFrame, sources:dict[str,Path], status:BuildStatu
+     by_al,by_mal=fetch_animethemes_all(status)
+     _progress("Anime LOCAL PASS loading MAL theme snapshot")
+     fallback=_load_mal_theme_fallback(mal_path)
++    if output_path.exists():
++        for old in read_rows(output_path):
++            mid=_safe_int((old.extra or {}).get("mal_id"))
++            if mid and old.title and old.main_artist and old.main_artist != "Unknown verified theme artist":
++                fallback.setdefault(mid,[]).append({"title":old.title,"artists":[old.main_artist],
++                    "type":(old.extra or {}).get("theme_type"),
++                    "sequence":(old.extra or {}).get("theme_sequence"),
++                    "animethemes_url":(old.extra or {}).get("theme_metadata_url") or old.source_url})
+     title_map,exact=_catalog_match_index(catalog)
+ 
+     rows=[]
+@@ -2087,8 +2120,7 @@ def build_anime(catalog: pd.DataFrame, sources:dict[str,Path], status:BuildStatu
+             )[:target]
+             for i,r in enumerate(snapshot,1):
+                 r.rank=i
+-            write_rows(snapshot,output_path)
+-            _progress(f"Anime SNAPSHOT canonical_rows={len(snapshot)} partial_rows={n}")
++            _progress(f"Anime CHECKPOINT partial_rows={n}")
+ 
+     # PASS 1: no per-anime network calls.
+     for anime_rank,a in enumerate(anime,1):
+@@ -2097,8 +2129,8 @@ def build_anime(catalog: pd.DataFrame, sources:dict[str,Path], status:BuildStatu
+         mid=_safe_int(a.get("idMal"))
+         candidates=(
+             list(by_al.get(aid,[]))
+-            or list(by_mal.get(mid,[]))
+-            or list(fallback.get(mid,[]))
++            + list(by_mal.get(mid,[]))
++            + list(fallback.get(mid,[]))
+         )
+         if not candidates:
+             unresolved.append((anime_rank,a))
+@@ -2113,6 +2145,8 @@ def build_anime(catalog: pd.DataFrame, sources:dict[str,Path], status:BuildStatu
+             )
+             if row is not None:
+                 persist(row,"LOCAL")
++            else:
++                unresolved.append((anime_rank,a))
+ 
+         if anime_rank==1 or anime_rank%100==0:
+             _progress(
+@@ -2145,8 +2179,8 @@ def build_anime(catalog: pd.DataFrame, sources:dict[str,Path], status:BuildStatu
+     except Exception:
+         jikan_cache={}
+ 
+-    jikan_query_budget=max(0,_safe_int(os.getenv("BEATHIT_JIKAN_MAX_QUERIES")) or 50)
+-    jikan_time_budget=max(0,_safe_int(os.getenv("BEATHIT_JIKAN_MAX_SECONDS")) or 120)
++    jikan_query_budget=max(0,int(os.getenv("BEATHIT_JIKAN_MAX_QUERIES","1000")))
++    jikan_time_budget=max(0,int(os.getenv("BEATHIT_JIKAN_MAX_SECONDS","1800")))
+     jikan_failure_breaker=max(1,_safe_int(os.getenv("BEATHIT_JIKAN_FAILURE_BREAKER")) or 4)
+ 
+     jikan_queries=0
+@@ -2167,26 +2201,30 @@ def build_anime(catalog: pd.DataFrame, sources:dict[str,Path], status:BuildStatu
+         headers={"User-Agent":"BeatHit-Dataset/1.0"},
+     ) as jikan_client:
+         for anime_rank,a in unresolved:
+-            if jikan_queries>=jikan_query_budget:
+-                jikan_stop_reason="query_budget_exhausted"
+-                break
+-            if time.monotonic()>=deadline:
+-                jikan_stop_reason="time_budget_exhausted"
+-                break
+-            if consecutive_failures>=jikan_failure_breaker:
+-                jikan_stop_reason=f"circuit_breaker_after_{consecutive_failures}_consecutive_failures"
+-                break
+-
+             mid=_safe_int(a.get("idMal"))
+             if not mid:
+                 continue
++            entry=jikan_cache.get(str(mid))
++            cached_ok=(isinstance(entry,list) and bool(entry)) or (
++                isinstance(entry,dict) and time.time()-entry.get("checked_at",0)<30*86400)
++            if not cached_ok:
++                if jikan_queries>=jikan_query_budget:
++                    jikan_stop_reason="query_budget_exhausted"
++                    continue
++                if time.monotonic()>=deadline:
++                    jikan_stop_reason="time_budget_exhausted"
++                    continue
++                if consecutive_failures>=jikan_failure_breaker:
++                    jikan_stop_reason=f"circuit_breaker_after_{consecutive_failures}_consecutive_failures"
++                    continue
+ 
+-            was_cached=str(mid) in jikan_cache
+             candidates,request_ok,network_made=_jikan_theme_candidates(
+                 mid,jikan_client,jikan_cache,status
+             )
+-            if network_made and not was_cached:
++            if network_made:
+                 jikan_queries+=1
++                from .listenbrainz import atomic_json
++                atomic_json(cache_path,jikan_cache)
+ 
+             if not request_ok:
+                 consecutive_failures+=1
+@@ -2217,7 +2255,8 @@ def build_anime(catalog: pd.DataFrame, sources:dict[str,Path], status:BuildStatu
+                 break
+ 
+     cache_path.parent.mkdir(parents=True,exist_ok=True)
+-    cache_path.write_text(json.dumps(jikan_cache,ensure_ascii=False),encoding="utf-8")
++    from .listenbrainz import atomic_json
++    atomic_json(cache_path,jikan_cache)
+ 
+     if jikan_stop_reason is None:
+         jikan_stop_reason="unresolved_candidates_exhausted"
+@@ -2604,7 +2643,7 @@ def _youtube_views_official(ids:list[str],status:BuildStatus)->tuple[dict[str,in
+         temp_path=cache_path.with_suffix(".tmp")
+         temp_path.write_text(
+             json.dumps(
+-                {"schema_version":1,"updated_at":now,"videos":entries},
++                {"schema_version":2,"updated_at":now,"videos":entries},
+                 ensure_ascii=False,
+                 separators=(",",":"),
+             )+"\n",
+@@ -2616,6 +2655,7 @@ def _youtube_views_official(ids:list[str],status:BuildStatus)->tuple[dict[str,in
+     pending=[]
+     fresh_hits=0
+     fresh_missing=0
++    unavailable=set()
+     for video_id in ids:
+         entry=entries.get(video_id) if isinstance(entries.get(video_id),dict) else {}
+         views=_safe_int(entry.get("views"))
+@@ -2623,11 +2663,12 @@ def _youtube_views_official(ids:list[str],status:BuildStatus)->tuple[dict[str,in
+         if views is not None:
+             # Keep the last official value as a resilience fallback even when refresh fails.
+             out[video_id]=views
+-        if checked_at and now-checked_at<=ttl_seconds:
+-            if views is None:
+-                fresh_missing+=1
+-            else:
+-                fresh_hits+=1
++        if checked_at and now-checked_at<=ttl_seconds and views is not None:
++            fresh_hits+=1
++            continue
++        if entry.get("availability")=="unavailable" and now-checked_at<=7*86400:
++            unavailable.add(video_id)
++            fresh_missing+=1
+             continue
+         pending.append(video_id)
+ 
+@@ -2635,21 +2676,23 @@ def _youtube_views_official(ids:list[str],status:BuildStatus)->tuple[dict[str,in
+         status.warnings.append(
+             "Vocaloid build has no YOUTUBE_API_KEY; reusing cached official API values only."
+         )
+-        unresolved=len([video_id for video_id in ids if video_id not in out])
++        unresolved=len([video_id for video_id in ids if video_id not in out and video_id not in unavailable])
+         status.sources["vocaloid_youtube_view_counts"]={
+             "source":"cached YouTube Data API v3 videos.list(part=statistics)",
+             "requested":len(ids),
+             "resolved":len(out),
+             "unresolved":unresolved,
++            "unavailable":len(unavailable),
+             "fresh_cache_hits":fresh_hits,
+             "live_requested":0,
+             "cache":str(cache_path.relative_to(ROOT)),
+-            "ok":False,
++            "ok":unresolved==0 and not pending,
+             "error":"missing YOUTUBE_API_KEY",
+         }
+         return out,unresolved
+ 
+     failed_batches=0
++    live_requested=0
+     quota_stopped=False
+     with httpx.Client(
+         timeout=60,
+@@ -2663,6 +2706,7 @@ def _youtube_views_official(ids:list[str],status:BuildStatus)->tuple[dict[str,in
+     ) as client:
+         for start in range(0,len(pending),50):
+             batch=pending[start:start+50]
++            live_requested+=len(batch)
+             data=None
+             last_error=None
+             for attempt in range(3):
+@@ -2680,6 +2724,8 @@ def _youtube_views_official(ids:list[str],status:BuildStatus)->tuple[dict[str,in
+                     break
+                 except Exception as exc:
+                     last_error=exc
++                    if isinstance(exc,SourceHTTPError) and exc.status_code in {401,403}:
++                        break
+                     time.sleep(1.0*(attempt+1))
+             if data is None:
+                 failed_batches+=1
+@@ -2698,8 +2744,14 @@ def _youtube_views_official(ids:list[str],status:BuildStatus)->tuple[dict[str,in
+                         "and stopped so the next run resumes at the first unresolved video."
+                     )
+                     break
++                if isinstance(last_error,SourceHTTPError) and last_error.status_code in {401,403}:
++                    break
+                 continue
+ 
++            if not isinstance(data.get("items"),list):
++                failed_batches+=1
++                status.warnings.append("YouTube statistics response lacks items; batch remains retryable")
++                continue
+             resolved_batch={}
+             for item in data.get("items",[]) or []:
+                 video_id=str(item.get("id") or "")
+@@ -2707,9 +2759,13 @@ def _youtube_views_official(ids:list[str],status:BuildStatus)->tuple[dict[str,in
+                 if video_id and views is not None:
+                     resolved_batch[video_id]=views
+ 
++            returned_ids={str(item.get("id") or "") for item in data.get("items",[])}
+             for video_id in batch:
+                 views=resolved_batch.get(video_id)
+-                entries[video_id]={"views":views,"checked_at":now}
++                availability="available" if views is not None else ("unavailable" if video_id not in returned_ids else "unresolved")
++                entries[video_id]={"views":views,"checked_at":now,"availability":availability}
++                if availability=="unavailable":
++                    unavailable.add(video_id)
+                 if views is None:
+                     out.pop(video_id,None)
+                 else:
+@@ -2724,21 +2780,23 @@ def _youtube_views_official(ids:list[str],status:BuildStatus)->tuple[dict[str,in
+             )
+ 
+     save_cache()
+-    unresolved=len([video_id for video_id in ids if video_id not in out])
++    unresolved=len([video_id for video_id in ids if video_id not in out and video_id not in unavailable])
+     status.sources["vocaloid_youtube_view_counts"]={
+         "source":"YouTube Data API v3 videos.list(part=statistics) with persistent official-value cache",
+         "requested":len(ids),
+         "resolved":len(out),
+         "unresolved":unresolved,
++        "unavailable":len(unavailable),
+         "fresh_cache_hits":fresh_hits,
+         "fresh_cached_missing":fresh_missing,
+-        "live_requested":len(pending),
++        "live_requested":live_requested,
+         "failed_batches":failed_batches,
+         "quota_stopped":quota_stopped,
+         "cache_days":cache_days,
+         "cache":str(cache_path.relative_to(ROOT)),
+         "ok":bool(out) and unresolved==0 and failed_batches==0,
+         "threshold":None,
++        "unavailable_video_ids":sorted(unavailable),
+         "note":"Only official YouTube API values are cached; no third-party or Spotify fallback.",
+     }
+     return out,unresolved
+@@ -2911,12 +2969,8 @@ def build_vocaloid(catalog:pd.DataFrame,status:BuildStatus)->list[SongRow]:
+             },
+         )
+         rows.append(row)
+-        append_row(row,partial_path)
+-        _progress(
+-            f"Vocaloid INCLUDE provisional={len(rows)} audit_total_views={total_views} "
+-            f"best_upload_views={best_views} title={title!r} artist={main_artist!r} "
+-            f"video={best_pv['video_id']}"
+-        )
++        if len(rows)%5000==0:
++            _progress(f"Vocaloid finalized_candidates={len(rows)}; official API and VocaDB checkpoints saved")
+ 
+     # VocaDB song IDs, rather than title/artist text, define entries in this corpus.
+     # This retains legitimately distinct originals that share a title or producer.
+@@ -2927,9 +2981,9 @@ def build_vocaloid(catalog:pd.DataFrame,status:BuildStatus)->list[SongRow]:
+         if vocadb_id is None:
+             without_vocadb_id.append(row)
+             continue
+-        current=by_vocadb_id.get(str(vocadb_id))
+-        if current is None or int(row.view_count or 0)>int(current.view_count or 0):
+-            by_vocadb_id[str(vocadb_id)]=row
++        # Current source evidence follows preserved rows and wins even if a view
++        # count was corrected downward. Keeping only maxima makes stale data permanent.
++        by_vocadb_id[str(vocadb_id)]=row
+     rows=list(by_vocadb_id.values())+dedupe(without_vocadb_id)
+     rows.sort(key=lambda row:int(row.view_count or row.metric_value),reverse=True)
+     for rank,row in enumerate(rows,1):
+@@ -2945,7 +2999,7 @@ def build_vocaloid(catalog:pd.DataFrame,status:BuildStatus)->list[SongRow]:
+         old_threshold_path.unlink(missing_ok=True)
+     partial_path.unlink(missing_ok=True)
+ 
+-    complete=bool(rows and vocadb_exhaustive and unresolved_video_ids==0 and os.getenv("YOUTUBE_API_KEY","").strip())
++    complete=bool(rows and vocadb_exhaustive and unresolved_video_ids==0 and (status.sources.get("vocaloid_youtube_view_counts") or {}).get("ok"))
+     status.datasets["vocaloid"]=DatasetStatus(
+         target="every VocaDB Original voice-synth song with a resolved official Original YouTube PV, ordered by views",
+         rows=len(rows),
+@@ -2976,24 +3030,48 @@ def _holodex_headers()->dict[str,str]:
+ 
+ 
+ def _fetch_holodex_topic(topic:str,status:BuildStatus,max_items:int=50_000)->list[dict]:
+-    out=[];offset=0;limit=50
+-    _progress(f"Holodex {topic} START max_items={max_items}")
+-    with httpx.Client(timeout=90,follow_redirects=True,headers=_holodex_headers()) as c:
+-        while len(out)<max_items:
++    from .listenbrainz import atomic_json
++    path=CACHE/f"holodex_{topic}.json"
++    try:
++        cached=json.loads(path.read_text(encoding="utf-8"))
++    except (OSError,ValueError):
++        cached={}
++    videos={v["id"]:v for v in cached.get("videos",[]) if v.get("id")}
++    complete=bool(cached.get("complete"))
++    stats={"complete":complete,"cached_rows":len(videos),"errors":[]}
++    status.sources[f"holodex_{topic}"]=stats
++    if complete and time.time()-cached.get("checked_at",0)<7*86400:
++        return list(videos.values())
++    # Resume incomplete scans; overlap protects against offset shifts as new uploads arrive.
++    offset=max(0,int(cached.get("next_offset",0))-100) if not complete else 0
++    complete=False
++    received=0
++    limit=50
++    with httpx.Client(timeout=60,follow_redirects=True,headers=_holodex_headers()) as client:
++        while received<max_items:
+             params={"topic":topic,"status":"past","limit":limit,"offset":offset,"paginated":"1","include":"channel_stats,mentions"}
+-            try:d=_http_json(c,"GET",f"{HOLODEX_API}/videos",params=params)
+-            except Exception as exc:
+-                status.warnings.append(f"Holodex {topic}: {exc}");break
+-            items=d.get("items",[]) if isinstance(d,dict) else d
+-            if not items:break
+-            out.extend(items);offset+=len(items)
+-            total=_safe_int(d.get("total")) if isinstance(d,dict) else None
+-            _progress(f"Holodex {topic} batch={len(items)} loaded={len(out)} api_total={total}")
+-            if total is not None and offset>=total:break
+-            if len(items)<limit:break
+-            time.sleep(.15)
+-    _progress(f"Holodex {topic} DONE loaded={len(out[:max_items])}")
+-    return out[:max_items]
++            try:
++                payload=_http_json(client,"GET",f"{HOLODEX_API}/videos",params=params)
++                items=payload.get("items",[]) if isinstance(payload,dict) else payload
++                if not isinstance(items,list):
++                    raise ValueError("Holodex response lacks video list")
++            except (httpx.HTTPError,ValueError,RuntimeError) as exc:
++                stats["errors"].append(str(exc))
++                status.warnings.append(f"Holodex {topic}: {exc}; retaining cached videos")
++                break
++            for video in items:
++                if video.get("id"):
++                    videos[video["id"]]=video
++            offset+=len(items);received+=len(items)
++            total=_safe_int(payload.get("total")) if isinstance(payload,dict) else None
++            complete=len(items)<limit or (total is not None and offset>=total)
++            atomic_json(path,{"videos":list(videos.values()),"next_offset":offset,
++                              "complete":complete,"checked_at":time.time()})
++            if complete:
++                break
++            time.sleep(.2)
++    stats.update(complete=complete,rows=len(videos),fetched=received,next_offset=offset)
++    return list(videos.values())
+ 
+ 
+ def _youtube_views(ids:list[str],status:BuildStatus)->dict[str,int]:
+@@ -3004,7 +3082,26 @@ def _youtube_views(ids:list[str],status:BuildStatus)->dict[str,int]:
+     is not confused with an official API response.
+     """
+     ids=list(dict.fromkeys(x for x in ids if x))
++    from .listenbrainz import atomic_json
++    path=CACHE/"vtuber_youtube_views.json"
++    try:
++        cached=json.loads(path.read_text(encoding="utf-8"))
++    except (OSError,ValueError):
++        cached={}
+     key=os.getenv("YOUTUBE_API_KEY","").strip();out={}
++    now=time.time()
++    original_ids=list(ids)
++    for vid in ids:
++        entry=cached.get(vid) or {}
++        if now-entry.get("checked_at",0)<86400 and entry.get("views") is not None:
++            if not key or entry.get("source")=="YouTube Data API v3":
++                out[vid]=int(entry["views"])
++    ids=[vid for vid in ids if vid not in out]
++    def save(source):
++        for vid,views in out.items():
++            if vid in ids:
++                cached[vid]={"views":views,"checked_at":now,"source":source}
++        atomic_json(path,cached)
+     _progress(f"YouTube views START ids={len(ids)} official_api={'yes' if key else 'no'}")
+     if key:
+         with httpx.Client(timeout=60) as c:
+@@ -3014,12 +3111,14 @@ def _youtube_views(ids:list[str],status:BuildStatus)->dict[str,int]:
+                     for x in d.get("items",[]):
+                         v=_safe_int((x.get("statistics") or {}).get("viewCount"))
+                         if v is not None:out[x["id"]]=v
+-                    _progress(f"YouTube views batch_start={i} batch_size={len(ids[i:i+50])} resolved={len(out)}/{len(ids)}")
++                    save("YouTube Data API v3")
+                 except Exception as exc:
+                     status.warnings.append(f"YouTube API batch {i}: {exc}")
+-                    _progress(f"YouTube views batch_start={i} ERROR {type(exc).__name__}: {exc}")
+-        status.sources["youtube_view_counts"]={"source":"YouTube Data API v3","requested":len(ids),"resolved":len(out),"ok":bool(out)}
++                    if isinstance(exc,SourceHTTPError) and exc.status_code in {401,403}:
++                        break
++        status.sources["youtube_view_counts"]={"source":"YouTube Data API v3","requested":len(original_ids),"resolved":len(out),"ok":bool(out)}
+         _progress(f"YouTube views DONE resolved={len(out)}/{len(ids)}")
++        save("YouTube Data API v3")
+         return out
+ 
+     # High-throughput no-key fallback. RYD returns a cached viewCount field obtained for the
+@@ -3041,7 +3140,7 @@ def _youtube_views(ids:list[str],status:BuildStatus)->dict[str,int]:
+                     vid,v=f.result()
+                     if v is not None:out[vid]=v
+             status.sources["youtube_view_counts"]={"source":"Return YouTube Dislike API viewCount fallback","url":RYD_API,
+-                "requested":len(ids),"resolved":len(out),"ok":bool(out),"note":"third-party cached viewCount; official YouTube API preferred when key supplied"}
++                "requested":len(original_ids),"resolved":len(out),"ok":bool(out),"note":"third-party cached viewCount; official YouTube API preferred when key supplied"}
+         except Exception as exc:
+             status.warnings.append(f"Return YouTube Dislike view fallback: {exc}")
+ 
+@@ -3062,13 +3161,18 @@ def _youtube_views(ids:list[str],status:BuildStatus)->dict[str,int]:
+         except Exception as exc:status.warnings.append(f"yt-dlp YouTube view fallback: {exc}")
+     elif missing and not out:
+         status.warnings.append("No official YouTube API key and no view-count fallback resolved; VTuber rows use Spotify counts/proxies where available.")
++    save("Return YouTube Dislike API cached viewCount")
+     return out
+ 
+ 
++VTUBER_COVER_MARKER = re.compile(r"(?:\(\s*cover\s*\)|[【\[][^】\]]*cover[^】\]]*[】\]]|\bcovered by\b|歌ってみた)",re.I)
++
++
+ def _clean_vtuber_title(title:str)->str:
+     s=re.sub(r"[【\[].*?(?:cover|original|歌ってみた|オリジナル).*?[】\]]","",title,flags=re.I)
+     s=re.sub(r"\s*[|｜].*$","",s).strip()
+-    return s or title.strip()
++    s=re.sub(r"\s*\((?:original song|original music|cover|オリジナル曲)(?:\s*[:：].*)?\)\s*$","",s,flags=re.I)
++    return s.strip() or title.strip()
+ 
+ 
+ 
+@@ -3119,15 +3223,22 @@ def build_vtuber(catalog:pd.DataFrame,status:BuildStatus,*,original:bool)->list[
+     partial_path.parent.mkdir(parents=True,exist_ok=True)
+     partial_path.unlink(missing_ok=True)
+     _progress(f"VTuber {topic} START target={target} partial={partial_path}")
+-    videos=_fetch_holodex_topic(topic,status,max_items=60_000)
++    from .hololive import load_roster, credited_members
++    roster=load_roster(DATA)
++    videos=_fetch_holodex_topic(topic,status,max_items=int(os.getenv("BEATHIT_HOLODEX_SCAN_BUDGET","100000")))
+     _progress(f"VTuber {topic} candidates={len(videos)}")
+     if not videos:
+-        rows=_fetch_holostats_rows(original=original,status=status)
++        existing=DATA/folder/filename
++        rows=read_rows(existing) if existing.exists() else []
++        rows.extend(_fetch_holostats_rows(original=original,status=status))
+         for pos,row in enumerate(rows,1):
+             append_row(row,partial_path)
+             _progress(f"VTuber {topic} WRITE fallback={pos} title={row.title!r} artist={row.main_artist!r}")
++        if original:
++            rows=[row for row in rows if not VTUBER_COVER_MARKER.search(row.title)]
+         rows=dedupe(rows)
+         rows.sort(key=lambda r:r.metric_value,reverse=True)
++        write_rows(rows,CACHE/(folder+"_candidates.jsonl.gz"))
+         for i,r in enumerate(rows[:target],1):r.rank=i
+         rows=rows[:target]
+     else:
+@@ -3136,6 +3247,10 @@ def build_vtuber(catalog:pd.DataFrame,status:BuildStatus,*,original:bool)->list[
+         title_map,exact=_catalog_match_index(catalog)
+         rows=[]
+         for pos,v in enumerate(videos,1):
++            if original and VTUBER_COVER_MARKER.search(str(v.get("title") or "")):
++                rejected=status.sources.setdefault("vtuber_original_topic_conflicts",{"videos":[]})
++                rejected["videos"].append({"id":v.get("id"),"title":v.get("title")})
++                continue
+             ch={}
+             if isinstance(v.get("channel_stats"),dict): ch.update(v.get("channel_stats") or {})
+             if isinstance(v.get("channel"),dict): ch.update(v.get("channel") or {})
+@@ -3147,14 +3262,26 @@ def build_vtuber(catalog:pd.DataFrame,status:BuildStatus,*,original:bool)->list[
+                 if not isinstance(m,dict): continue
+                 nm=m.get("english_name") or m.get("name")
+                 if nm: mention_names.append(str(nm))
+-            artist=(mention_names[0] if len(mention_names)==1 else None) or ch.get("english_name") or ch.get("name") or v.get("channel_name") or v.get("channel_id") or "Unknown VTuber"
++            named_mentions=[name for name in mention_names if norm(name) and norm(name) in norm(str(v.get("title") or ""))]
++            artist=(named_mentions[0] if len(named_mentions)==1 else None) or ch.get("english_name") or ch.get("name") or v.get("channel_name") or v.get("channel_id") or "Unknown VTuber"
++            member_ids=credited_members(v,roster)
++            if member_ids:
++                artist=roster[member_ids[0]]["name"]
+             title=_clean_vtuber_title(str(v.get("title") or "Untitled"))
++            for separator in (" - "," / ","／"):
++                if separator in title and member_ids:
++                    left,right=title.rsplit(separator,1)
++                    if any(norm(alias) and norm(alias) in norm(right) for mid in member_ids for alias in roster[mid]["aliases"]):
++                        title=left.strip()
+             view=views.get(v.get("id"))
+             matched,method=_match_song(title,[artist],catalog,title_map,exact)
++            if matched is not None and (norm(str(matched.get("title") or "")),norm(str(matched.get("main_artist") or ""))) != (norm(title),norm(artist)):
++                matched=None
++            trusted_streams=_safe_int(matched.get("trusted_cumulative_streams")) if matched is not None else None
+             if view is not None:
+                 metric=("youtube_views",float(view),"views")
+-            elif matched is not None and _safe_float(matched.get("streams")) is not None:
+-                metric=("spotify_streams",float(matched.streams),"streams")
++            elif trusted_streams is not None:
++                metric=("spotify_streams",float(trusted_streams),"streams")
+             else:
+                 subs=_safe_int(ch.get("subscriber_count") or ch.get("subscribers") or ch.get("subscriberCount"))
+                 if subs is not None:
+@@ -3186,10 +3313,27 @@ def build_vtuber(catalog:pd.DataFrame,status:BuildStatus,*,original:bool)->list[
+                     release_date=(str(v.get("published_at"))[:10] if v.get("published_at") else None), release_year=_parse_year(v.get("published_at")),
+                     extra={"holodex_video_id":v.get("id"),"holodex_topic":topic,"mentions":mention_names})
+             row.vtuber=artist;row.is_original=original
++            if view is not None:
++                row.source_url=f"https://www.youtube.com/watch?v={v.get('id')}"
++            if trusted_streams is not None:
++                trusted_url=str(matched.get("trusted_streams_source_url") or "")
++                row.extra["hololive_spotify_source_url"]=trusted_url
++                if metric[0]=="spotify_streams" and trusted_url:
++                    row.source_url=trusted_url
++            row.extra.update({"hololive_member_ids":member_ids,"holodex_channel_id":ch.get("id") or v.get("channel_id"),
++                              "hololive_trusted_spotify_streams":trusted_streams,"hololive_youtube_views":view})
++            if member_ids:
++                row.featured_artists=list(dict.fromkeys([*row.featured_artists,*[roster[mid]["name"] for mid in member_ids[1:]]]))
+             rows.append(row)
+             append_row(row,partial_path)
+             if pos == 1 or pos % 25 == 0:
+                 _progress(f"VTuber {topic} WRITE candidate={pos}/{len(videos)} title={row.title!r} artist={row.main_artist!r} metric={row.metric_name}:{row.metric_value}")
++        candidate_path=CACHE/(folder+"_candidates.jsonl.gz")
++        if candidate_path.exists():
++            rows.extend(read_rows(candidate_path))
++        existing=DATA/folder/filename
++        if existing.exists():
++            rows.extend(read_rows(existing))
+         # Augment with HoloStats where available; dedupe keeps the stronger row by metric.
+         holostats_rows=_fetch_holostats_rows(original=original,status=status)
+         for row in holostats_rows:
+@@ -3197,8 +3341,11 @@ def build_vtuber(catalog:pd.DataFrame,status:BuildStatus,*,original:bool)->list[
+         if holostats_rows:
+             _progress(f"VTuber {topic} appended_holostats={len(holostats_rows)}")
+         rows.extend(holostats_rows)
++        if original:
++            rows=[row for row in rows if not VTUBER_COVER_MARKER.search(row.title)]
+         rows=dedupe(rows)
+         rows.sort(key=lambda r:(0 if r.metric_name in {"holodex_source_rank","vtuber_channel_subscribers_proxy"} else 1,r.metric_value),reverse=True)
++        write_rows(rows,CACHE/(folder+"_candidates.jsonl.gz"))
+         for i,r in enumerate(rows[:target],1):r.rank=i
+         rows=rows[:target]
+     write_rows(rows,DATA/folder/filename)
+@@ -3320,12 +3467,13 @@ def write_status_json(status: BuildStatus) -> None:
+         "spotify_country_lists_complete":countries_complete,
+         "all_requested_lists_complete":fixed_complete and vocaloid_complete and kpop_complete and countries_complete,
+       },
+-      "datasets":{k:{"target":v.target,"materialized_rows":v.rows,"complete":v.complete,"metric_coverage":v.metric_coverage,"notes":v.notes} for k,v in status.datasets.items()},
++      "datasets":{k:{"target":v.target,"materialized_rows":v.rows,"complete":v.complete,"builder_revision":v.builder_revision,"metric_coverage":v.metric_coverage,"notes":v.notes} for k,v in status.datasets.items()},
+       "source_status":status.sources,
+       "warnings":status.warnings,
+       "completion_rule":"Do not treat this repository as fully complete unless completion_summary.all_requested_lists_complete is true and validation/target checks pass. Conditional/finite corpora are never padded.",
+     }
+-    (ROOT/"STATUS.json").write_text(json.dumps(payload,ensure_ascii=False,indent=2)+"\n",encoding="utf-8")
++    from .listenbrainz import atomic_json
++    atomic_json(ROOT/"STATUS.json",payload)
+ 
+ 
+ def _previous_dataset_status() -> dict[str, dict[str, Any]]:
+@@ -3363,7 +3511,11 @@ def _reuse_complete_output(
+         return None
+ 
+     old = previous.get(name) or {}
+-    if name in FIXED_TARGETS:
++    if name in BUILDER_REVISIONS and old.get("builder_revision") != BUILDER_REVISIONS[name]:
++        return None
++    if name in {"vtuber_original","vtuber_non_original"}:
++        complete=len(rows)>=FIXED_TARGETS[name] and bool(old.get("complete"))
++    elif name in FIXED_TARGETS:
+         complete = len(rows) == FIXED_TARGETS[name]
+     else:
+         # Conditional corpora cannot be declared complete from row count alone.
+@@ -3374,6 +3526,7 @@ def _reuse_complete_output(
+     st = status.datasets[name]
+     st.rows = len(rows)
+     st.complete = True
++    st.builder_revision = old.get("builder_revision")
+     st.metric_coverage = dict(_metric_counts(rows))
+     st.notes = list(old.get("notes") or st.notes)
+     st.notes.append(f"Reused validated materialized output: {path.relative_to(ROOT)}")
+@@ -3388,6 +3541,7 @@ def full_build(
+     reuse_complete:bool=False,
+     force:list[str]|None=None,
+ )->BuildStatus:
++    previous = _previous_dataset_status()
+     status=BuildStatus(started_at=_now())
+     force_set=set(force or [])
+     _progress(
+@@ -3422,7 +3576,7 @@ def full_build(
+     wanted=set(only or ["worldwide","genres","classical","emerging","screen_soundtracks","anime","vocaloid","vtuber_original","vtuber_non_original","video_game_music","kpop","internet_native","electronic_subcultures","alternative_extreme","jazz_depth","children_childhood","unserious","special_required","countries"])
+     _progress(f"Selected builders={sorted(wanted)}")
+     built:dict[str,list[SongRow]]={}
+-    previous = _previous_dataset_status()
++    rebuilt=set()
+     def run(name:str, fn):
+         if name not in wanted:
+             _progress(f"SKIP builder={name}")
+@@ -3437,6 +3591,8 @@ def full_build(
+         started=time.monotonic()
+         try:
+             built[name]=fn()
++            rebuilt.add(name)
++            status.datasets[name].builder_revision=BUILDER_REVISIONS.get(name)
+             _progress(f"DONE builder={name} rows={len(built[name])} elapsed={time.monotonic()-started:.1f}s")
+         except Exception as exc:
+             _progress(f"FAIL builder={name} elapsed={time.monotonic()-started:.1f}s {type(exc).__name__}: {exc}")
+@@ -3488,7 +3644,7 @@ def full_build(
+                     st.rows=len(built[k])
+                     st.metric_coverage=dict(_metric_counts(built[k]))
+                     if k in FIXED_TARGETS:
+-                        st.complete=len(built[k])==FIXED_TARGETS[k]
++                        st.complete=len(built[k])==FIXED_TARGETS[k] and not any("build failed:" in note for note in st.notes)
+                 if k=="vocaloid":
+                     # Preserve the previous corpus-completeness claim on a partial run by
+                     # reading STATUS.json below if available; row count alone cannot prove it.
+@@ -3515,6 +3671,15 @@ def full_build(
+                 )
+         except Exception as exc:
+             status.warnings.append(f"existing countries: {exc}")
++    if {"vtuber_original","vtuber_non_original"}.issubset(built) and any(k in rebuilt for k in ("vtuber_original","vtuber_non_original")):
++        from .hololive import finalize, OVERRIDE_VIDEO_ID
++        step=max(1,int(os.getenv("BEATHIT_HOLOLIVE_ROUND_DOWN","100000")))
++        baseline=_youtube_views([OVERRIDE_VIDEO_ID],status).get(OVERRIDE_VIDEO_ID)
++        threshold=(baseline//step)*step if baseline is not None else None
++        finalize(DATA,CACHE,status,built,threshold,{"video_id":OVERRIDE_VIDEO_ID,
++            "source_url":f"https://www.youtube.com/watch?v={OVERRIDE_VIDEO_ID}",
++            "observed_views":baseline,"rounded_down_to":step,"threshold":threshold,
++            "retrieved_at":TODAY,"count_source":"YouTube Data API v3" if os.getenv("YOUTUBE_API_KEY","") else "Return YouTube Dislike cached viewCount"})
+     _progress("PHASE megalist START inputs=" + repr({k:len(v) for k,v in built.items()}))
+     mega=build_megalist(built,status)
+     _progress(f"PHASE megalist DONE unique_rows={len(mega)}")
+diff --git a/src/music_megalist/hololive.py b/src/music_megalist/hololive.py
+new file mode 100644
+index 0000000..349f080
+--- /dev/null
++++ b/src/music_megalist/hololive.py
+@@ -0,0 +1,181 @@
++"""Hololive selection rules, applied jointly to originals and covers."""
++from __future__ import annotations
++
++import json
++import math
++from collections import defaultdict
++from pathlib import Path
++
++from .dedupe import dedupe, norm
++from .io import read_rows, write_rows
++from .listenbrainz import atomic_json
++
++OVERRIDE_VIDEO_ID = 'hgMl8y2ufIg'
++
++
++def load_roster(data: Path) -> dict:
++    payload = json.loads((data / 'seeds' / 'hololive_members.json').read_text(encoding='utf-8'))
++    return {m['member_id']: m for m in payload['members']}
++
++
++def credited_members(video: dict, roster: dict) -> list[str]:
++    channel = video.get('channel') or {}
++    channel_id = channel.get('id') or video.get('channel_id')
++    title = norm(str(video.get('title') or ''))
++    owners = [key for key, m in roster.items() if channel_id in m.get('channel_ids', [])]
++    named = [key for key in owners if any(norm(a) and norm(a) in title for a in roster[key]['aliases'])]
++    # Shared duo channels may credit a solo performance explicitly.
++    members = set(named or owners)
++    for mention in video.get('mentions') or []:
++        if not isinstance(mention, dict):
++            continue
++        for key, member in roster.items():
++            if mention.get('id') in member.get('channel_ids', []) and any(
++                    norm(a) and norm(a) in title for a in member['aliases']):
++                members.add(key)
++    return sorted(members)
++
++
++def popular(row, threshold: int | None) -> bool:
++    ex = row.extra or {}
++    # Exact trusted cumulative Spotify matching takes precedence. Chart-window
++    # aggregates, fuzzy artist matches and untrusted snapshots do not qualify.
++    streams = ex.get('hololive_trusted_spotify_streams')
++    if streams is not None:
++        return int(streams) > 500_000
++    views = ex.get('hololive_youtube_views')
++    return threshold is not None and views is not None and int(views) > threshold
++
++
++def priority(row):
++    # Counts from different services are not compared as if their units were equal.
++    ex = row.extra or {}
++    views = ex.get('hololive_youtube_views', row.view_count)
++    if views is not None:
++        return (2, math.log10(max(0, int(views)) + 1))
++    streams = ex.get('hololive_trusted_spotify_streams')
++    if streams is not None:
++        return (1, math.log10(max(0, int(streams)) + 1))
++    return (0, row.overall_popularity_score or 0)
++
++
++def select_joint(pools: dict, roster: dict, threshold: int | None, target=10_000):
++    """Reserve high-reach songs and five distinct songs per member across both lists."""
++    ranked = {key: sorted(dedupe(rows), key=priority, reverse=True) for key, rows in pools.items()}
++    candidates = [(key, row) for key, rows in ranked.items() for row in rows]
++    candidates.sort(key=lambda pair: priority(pair[1]), reverse=True)
++    required = set()
++    by_member = defaultdict(list)
++    for key, row in candidates:
++        identity = (key, norm(row.title), norm(row.main_artist))
++        members = set((row.extra or {}).get('hololive_member_ids') or []) & roster.keys()
++        if members and popular(row, threshold):
++            required.add(identity)
++        for member in members:
++            by_member[member].append((identity, row))
++    for member in roster:
++        songs = set()
++        for identity, row in by_member[member]:
++            # Multiple uploads of one song cannot satisfy the five-song minimum.
++            song = norm(row.title)
++            if song in songs:
++                continue
++            songs.add(song)
++            required.add(identity)
++            if len(songs) == 5:
++                break
++    selected = {}
++    for key, rows in ranked.items():
++        mandatory = [r for r in rows if (key, norm(r.title), norm(r.main_artist)) in required]
++        optional = [r for r in rows if (key, norm(r.title), norm(r.main_artist)) not in required]
++        # The user's "all qualifying songs" rule takes precedence over the nominal cap.
++        selected[key] = sorted(mandatory + optional[:max(0, target-len(mandatory))], key=priority, reverse=True)
++        for rank, row in enumerate(selected[key], 1):
++            row.rank = rank
++    counts = {}
++    for member in roster:
++        songs = {norm(r.title) for rows in selected.values() for r in rows
++                 if member in (r.extra or {}).get('hololive_member_ids', [])}
++        counts[member] = len(songs)
++    report = {'minimum_per_member': 5, 'scope': 'originals and covers combined',
++              'members': {key: {'name': roster[key]['name'], 'songs': value,
++                                  'missing': max(0, 5-value)} for key, value in counts.items()},
++              'required_songs_selected': len(required),
++              'required_song_keys': [list(key) for key in sorted(required)],
++              'coverage_complete': bool(roster) and all(c >= 5 for c in counts.values())}
++    return selected, report
++
++
++def finalize(data, cache, status, built, threshold, threshold_evidence, target=10_000):
++    roster = load_roster(data)
++    pools = {}
++    for key in ('vtuber_original', 'vtuber_non_original'):
++        path = cache / (key + '_candidates.jsonl.gz')
++        pools[key] = read_rows(path) if path.exists() else list(built.get(key, []))
++    selected, report = select_joint(pools, roster, threshold, target)
++    report['youtube_threshold'] = threshold_evidence
++    scans = {key: status.sources.get('holodex_' + ('Original_Song' if key == 'vtuber_original' else 'Music_Cover'), {}) for key in pools}
++    report['source_scans'] = scans
++    report['unresolved_popularity'] = [
++        {'title':r.title,'artist':r.main_artist,'video_id':r.extra.get('holodex_video_id')}
++        for rows in pools.values() for r in rows if r.extra.get('hololive_member_ids')
++        and r.extra.get('hololive_trusted_spotify_streams') is None
++        and r.extra.get('hololive_youtube_views') is None]
++    report['complete'] = bool(report['coverage_complete'] and threshold is not None and
++                              all(s.get('complete') for s in scans.values()) and not report['unresolved_popularity'])
++    report['qualification_note'] = 'Trusted Spotify streams >500000, otherwise individual YouTube views above the rounded-down OVER//RIDE baseline. No invented threshold.'
++    atomic_json(data / 'hololive_coverage.json', report)
++    for key, rows in selected.items():
++        filename = 'vtuber_original_10000.csv' if key == 'vtuber_original' else 'vtuber_non_original_10000.csv'
++        write_rows(rows, data / key / filename)
++        built[key] = rows
++        st = status.datasets[key]
++        st.rows = len(rows)
++        st.complete = len(rows) >= target and report['complete']
++        st.metric_coverage = dict(__import__('collections').Counter(r.metric_name for r in rows))
++        st.notes.append('Hololive member coverage and threshold evidence: data/hololive_coverage.json. Mandatory inclusions may exceed 10000.')
++    status.save()
++    return report
++
++
++def coverage_errors(data: Path, *, require_complete: bool = False) -> list[str]:
++    """Verify the coverage report against materialized CSVs, not just its booleans."""
++    path=data/'hololive_coverage.json'
++    if not path.exists():
++        return ['missing coverage report'] if require_complete else []
++    try:
++        report=json.loads(path.read_text(encoding='utf-8'))
++        roster=load_roster(data)
++        rows_by_key={}
++        for key in ('vtuber_original','vtuber_non_original'):
++            filename='vtuber_original_10000.csv' if key=='vtuber_original' else 'vtuber_non_original_10000.csv'
++            rows_by_key[key]=read_rows(data/key/filename)
++        errors=[]
++        if set(report.get('members',{}))!=set(roster):
++            errors.append('reported roster differs from source roster')
++        for member in roster:
++            actual=len({norm(r.title) for rows in rows_by_key.values() for r in rows
++                        if member in r.extra.get('hololive_member_ids',[])})
++            stated=report.get('members',{}).get(member,{})
++            if stated.get('songs')!=actual or stated.get('missing')!=max(0,5-actual):
++                errors.append(f'{member}: coverage count mismatch')
++            if require_complete and actual<5:
++                errors.append(f'{member}: {actual}/5 distinct songs')
++        identities={(key,norm(r.title),norm(r.main_artist)) for key,rows in rows_by_key.items() for r in rows}
++        required={tuple(key) for key in report.get('required_song_keys',[])}
++        if required-identities:
++            errors.append(f'{len(required-identities)} mandatory songs absent from outputs')
++        threshold=report.get('youtube_threshold') or {}
++        views=threshold.get('observed_views');step=threshold.get('rounded_down_to')
++        if views is not None and (not isinstance(step,int) or step<=0 or threshold.get('threshold')!=(int(views)//step)*step):
++            errors.append('invalid rounded YouTube threshold')
++        if threshold.get('video_id')!=OVERRIDE_VIDEO_ID:
++            errors.append('wrong baseline video ID')
++        scans=report.get('source_scans') or {}
++        if require_complete and (not report.get('complete') or views is None
++                or threshold.get('threshold') is None or report.get('unresolved_popularity')
++                or not all((scans.get(key) or {}).get('complete') for key in ('vtuber_original','vtuber_non_original'))):
++            errors.append('incomplete source scan, member coverage or popularity resolution')
++        return errors
++    except (OSError,ValueError,TypeError,KeyError) as exc:
++        return [f'invalid coverage data: {exc}']
+diff --git a/src/music_megalist/io.py b/src/music_megalist/io.py
+index 8449b9b..3f2c3b5 100644
+--- a/src/music_megalist/io.py
++++ b/src/music_megalist/io.py
+@@ -1,5 +1,5 @@
+ from __future__ import annotations
+-import csv, gzip, io, json
++import csv, gzip, io, json, os, tempfile
+ from contextlib import contextmanager
+ from pathlib import Path
+ from typing import Iterable, Iterator, TextIO
+@@ -65,6 +65,21 @@ def append_row(row: SongRow, path: str | Path) -> int:
+ 
+ 
+ def write_rows(rows: Iterable[SongRow], path: str | Path) -> int:
++    """Replace a canonical file only after the complete serialization succeeds."""
++    path = Path(path)
++    path.parent.mkdir(parents=True, exist_ok=True)
++    fd, name = tempfile.mkstemp(prefix=".beathit-", suffix="-" + path.name, dir=path.parent)
++    os.close(fd)
++    temp = Path(name)
++    try:
++        count = _write_rows(rows, temp)
++        temp.replace(path)
++        return count
++    finally:
++        temp.unlink(missing_ok=True)
++
++
++def _write_rows(rows: Iterable[SongRow], path: str | Path) -> int:
+     path = Path(path); path.parent.mkdir(parents=True, exist_ok=True)
+     rows = list(rows)
+     if path.name.endswith(".jsonl") or path.name.endswith(".jsonl.gz"):
+diff --git a/src/music_megalist/listenbrainz.py b/src/music_megalist/listenbrainz.py
+new file mode 100644
+index 0000000..3195a5c
+--- /dev/null
++++ b/src/music_megalist/listenbrainz.py
+@@ -0,0 +1,178 @@
++"""Resumable tag-radio discovery with recording metadata hydration.
++
++Radio is a bounded sample, not an exhaustive discography. Popularity bands are
++preferences in the upstream API, so overlap is expected and never counted twice.
++"""
++from __future__ import annotations
++
++import json
++import os
++import re
++import time
++from pathlib import Path
++from typing import Any
++
++import httpx
++
++API = 'https://api.listenbrainz.org/1'
++MBID = re.compile(r'^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$')
++
++
++def atomic_json(path: Path, value: Any) -> None:
++    path.parent.mkdir(parents=True, exist_ok=True)
++    temp = path.with_name(path.name + '.tmp')
++    temp.write_text(json.dumps(value, ensure_ascii=False, separators=(',', ':')) + '\n', encoding='utf-8')
++    temp.replace(path)
++
++
++def request_json(client: httpx.Client, method: str, url: str, **kwargs: Any) -> Any:
++    for attempt in range(3):
++        try:
++            response = client.request(method, url, **kwargs)
++        except httpx.TransportError:
++            if attempt == 2:
++                raise
++            time.sleep(2 ** attempt)
++            continue
++        if response.status_code == 429 or response.status_code >= 500:
++            if attempt < 2:
++                try:
++                    delay = float(response.headers.get('Retry-After', 2 ** attempt))
++                except ValueError:
++                    delay = 2 ** attempt
++                time.sleep(min(30, max(1, delay)))
++                continue
++        response.raise_for_status()
++        return response.json()
++    raise RuntimeError('request retry loop exhausted')
++
++
++def tag_support(metadata: dict, evidence: dict) -> dict | None:
++    """Reject weak/mismatched tags using the hydrated entity's own tag votes.
++
++    Radio's tag_count is not the vote count for the requested tag. A stray jazz
++    vote on a strongly pop/rock release must not establish jazz membership.
++    """
++    scope=str(evidence.get('source') or '').replace('-', '_')
++    tags=(metadata.get('tag') or {}).get(scope) or []
++    normalize=lambda value: re.sub(r"[\s_-]+", " ", str(value).casefold()).strip()
++    matching=[t for t in tags if normalize(t.get('tag')) == normalize(evidence.get('tag'))]
++    votes=max((int(t.get('count') or 0) for t in matching),default=0)
++    strongest=max((int(t.get('count') or 0) for t in tags if t.get('genre_mbid')),default=0)
++    if votes <= 0 or votes < strongest * .5:
++        return None
++    return {'matching_tag_votes':votes,'strongest_genre_votes':strongest}
++
++
++class TagRadio:
++    def __init__(self, cache: Path, status: Any, category: str):
++        self.path = cache / 'listenbrainz_radio_v1.json'
++        self.status = status
++        self.category = category
++        self.data: dict = {'queries': {}, 'metadata': {}}
++        try:
++            if self.path.exists():
++                self.data.update(json.loads(self.path.read_text(encoding='utf-8')))
++            # Migrate positive metadata from previous builds; no large refetch.
++            legacy = cache / 'listenbrainz_video_game_music.json'
++            if legacy.exists():
++                old = json.loads(legacy.read_text(encoding='utf-8'))
++                for mbid, value in (old.get('metadata') or {}).items():
++                    if isinstance(value, dict):
++                        self.data['metadata'].setdefault(mbid, value)
++        except (ValueError, OSError, TypeError) as exc:
++            status.warnings.append(f'ListenBrainz cache read: {exc}')
++        self.stats = {'queries': 0, 'cached_queries': 0, 'candidates': 0,
++                      'hydrated': 0, 'errors': [], 'exhaustive': False}
++        status.sources['listenbrainz_' + category] = self.stats
++
++    def recordings(self, tags: list[str], *, scopes: set[str] | None = None):
++        """Yield hydrated records in descending preferred popularity bands.
++
++        The caller may stop after filling its target. Every successful request is
++        checkpointed first; errors and missing metadata are retried on the next run.
++        """
++        seen: set[str] = set()
++        attempted_metadata: set[str] = set()
++        now = time.time()
++        deadline=time.monotonic()+max(0,int(os.getenv('BEATHIT_LB_MAX_SECONDS','900')))
++        max_requests=max(0,int(os.getenv('BEATHIT_LB_MAX_QUERIES','400')))
++        consecutive_failures=0
++        with httpx.Client(timeout=45, follow_redirects=True,
++                          headers={'User-Agent': 'BeatHit-Dataset/1.0 (+https://github.com/Dummy1-sudo/BeatHit-Dataset)'}) as client:
++            # Five-point windows cover deeper candidates than the former head query.
++            for high in range(100, 0, -5):
++                for tag in dict.fromkeys(tags):
++                    key = f'{tag}|{high-5}|{high}'
++                    cached = self.data['queries'].get(key) or {}
++                    payload = cached.get('items')
++                    if isinstance(payload, list) and now - cached.get('checked_at', 0) < 7 * 86400:
++                        self.stats['cached_queries'] += 1
++                    else:
++                        if self.stats['queries']>=max_requests or time.monotonic()>=deadline or consecutive_failures>=3:
++                            self.stats['stop_reason']='request_budget_or_circuit_breaker'
++                            return
++                        self.stats['queries'] += 1
++                        if self.stats['queries'] % 20 == 0:
++                            print(f"ListenBrainz {self.category}: requests={self.stats['queries']} hydrated={self.stats['hydrated']}",flush=True)
++                        try:
++                            payload = request_json(client, 'GET', API + '/lb-radio/tags', params={
++                                'tag': tag, 'operator': 'OR', 'count': 1000,
++                                'pop_begin': high-5, 'pop_end': high})
++                            if not isinstance(payload, list):
++                                raise ValueError('expected tag-radio list of recording MBIDs')
++                            self.data['queries'][key] = {'items': payload, 'checked_at': now}
++                            atomic_json(self.path, self.data)
++                            consecutive_failures=0
++                            time.sleep(.2)
++                        except (httpx.HTTPError, ValueError) as exc:
++                            consecutive_failures+=1
++                            self.stats['errors'].append(f'{tag} {high-5}-{high}: {exc}')
++                            if not isinstance(payload, list):
++                                continue
++                    candidates = {}
++                    for item in payload:
++                        mbid = str(item.get('recording_mbid') or '').lower()
++                        if not MBID.fullmatch(mbid) or mbid in seen:
++                            continue
++                        if scopes is not None and item.get('source') not in scopes:
++                            continue
++                        candidates[mbid] = item
++                    self.stats['candidates'] += len(candidates)
++                    missing = [m for m in candidates if not self.data['metadata'].get(m) and m not in attempted_metadata]
++                    for start in range(0, len(missing), 500):
++                        batch = missing[start:start+500]
++                        attempted_metadata.update(batch)
++                        if time.monotonic()>=deadline or consecutive_failures>=3:
++                            self.stats['stop_reason']='metadata_budget_or_circuit_breaker'
++                            return
++                        try:
++                            metadata = request_json(client, 'POST', API + '/metadata/recording/',
++                                                    json={'recording_mbids': batch, 'inc': 'artist release tag'})
++                            if not isinstance(metadata, dict):
++                                raise ValueError('expected metadata keyed by recording MBID')
++                            for mbid in batch:
++                                value = metadata.get(mbid)
++                                if isinstance(value, dict) and (value.get('recording') or {}).get('name') and (value.get('artist') or {}).get('name'):
++                                    self.data['metadata'][mbid] = value
++                            atomic_json(self.path, self.data)
++                            consecutive_failures=0
++                            time.sleep(.2)
++                        except (httpx.HTTPError, ValueError) as exc:
++                            consecutive_failures+=1
++                            self.stats['errors'].append(f'metadata: {exc}')
++                    for mbid, item in candidates.items():
++                        metadata = self.data['metadata'].get(mbid)
++                        if not isinstance(metadata, dict):
++                            continue
++                        # Missing titles may become available later; never cache a failure as empty.
++                        if not (metadata.get('recording') or {}).get('name') or not (metadata.get('artist') or {}).get('name'):
++                            continue
++                        evidence={**item,'tag':tag,'band':[high-5,high]}
++                        support=tag_support(metadata,evidence)
++                        if support is None:
++                            self.stats['weak_or_unconfirmed_tags']=self.stats.get('weak_or_unconfirmed_tags',0)+1
++                            continue
++                        seen.add(mbid)
++                        self.stats['hydrated'] += 1
++                        yield mbid, metadata, {**evidence,**support}
+diff --git a/src/music_megalist/quality.py b/src/music_megalist/quality.py
+new file mode 100644
+index 0000000..0cdba8c
+--- /dev/null
++++ b/src/music_megalist/quality.py
+@@ -0,0 +1,29 @@
++"""Semantic row checks shared by build and verification entry points."""
++import re
++
++GAME_TAGS = {'video game music', 'video game soundtrack', 'game soundtrack', 'vgm',
++             'game music', 'computer game music', 'video game score', 'game score',
++             'original game soundtrack', 'game ost'}
++BAD_GAME_WORK = re.compile(r'\b(?:soundtrack|original score|volume|vol\.?|music collection|for piano|played by)\b', re.I)
++BAD_GAME_MEDIA = re.compile(r'\b(?:motion picture|original film|film soundtrack|movie soundtrack|television soundtrack|anime soundtrack|piano cover|tribute|lullaby|music box|karaoke|cover album|played by|remix album)\b', re.I)
++
++
++def video_game_row_error(row, extra):
++    work = str(row.get('screen_work') or '').strip()
++    kind = extra.get('game_association_kind')
++    if not work or extra.get('culture_category') != 'video_game_music':
++        return 'missing game classification'
++    if kind not in {'official_soundtrack_album', 'franchise_artist', 'explicit_track_reference', 'genre_album', 'listenbrainz_release_group_tag'}:
++        return 'unknown association kind'
++    if BAD_GAME_WORK.search(work):
++        return 'soundtrack packaging left in game title'
++    if BAD_GAME_MEDIA.search(f"{row.get('album') or ''} | {work} | {row.get('genres') or ''}"):
++        return 'non-game or arrangement evidence'
++    if kind == 'genre_album' and not extra.get('game_wikidata_id'):
++        return 'genre-only album lacks independently identified game'
++    if kind == 'listenbrainz_release_group_tag' and not (
++        row.get('musicbrainz_recording_mbid') and extra.get('listenbrainz_source_scope') == 'release-group'
++        and GAME_TAGS.intersection(extra.get('listenbrainz_source_tags') or [])
++        and extra.get('explicit_soundtrack_release')):
++        return 'missing recording/release-group game evidence'
++    return None
+diff --git a/src/music_megalist/validate.py b/src/music_megalist/validate.py
+index ab948f4..edfd2e1 100644
+--- a/src/music_megalist/validate.py
++++ b/src/music_megalist/validate.py
+@@ -59,7 +59,7 @@ def _generic_csv_errors(path: Path) -> list[str]:
+         try: first_rank=int((rows[0].get('rank') or '').strip())
+         except Exception: first_rank=0
+         if first_rank<1: errors.append(f'RANK_INVALID {path} row 1: {rows[0].get("rank")}')
+-    seen_spotify=set(); seen_mbid=set(); seen_isrc=set(); seen_text=set(); seen_vocadb=set()
++    seen_spotify=set(); seen_mbid=set(); seen_isrc=set(); seen_text=set(); seen_vocadb=set(); seen_anime=set()
+     for i,r in enumerate(rows,1):
+         rank=(r.get('rank') or '').strip()
+         if rank:
+@@ -103,8 +103,16 @@ def _generic_csv_errors(path: Path) -> list[str]:
+                 anime_extra=json.loads(r.get('extra') or '{}')
+             except Exception:
+                 anime_extra={}
+-            anime_key=str(r.get('anime_title') or anime_extra.get('anilist_id') or '').strip()
++            # English titles collide across specials, seasons and films. Stable
++            # source IDs define anime entries; repeated songs across entries are valid.
++            mal_id=anime_extra.get('mal_id')
++            anilist_id=anime_extra.get('anilist_id')
++            anime_key=(f'mal:{mal_id}' if mal_id else f'anilist:{anilist_id}' if anilist_id
++                       else str(r.get('anime_title') or '').strip())
+             scope=(anime_key,) if anime_key else ()
++            if anime_key in seen_anime:
++                errors.append(f'DUP_ANIME {path} row {i}: {anime_key}')
++            seen_anime.add(anime_key)
+         else:
+             scope=()
+         if vocaloid_ids:
+@@ -192,6 +200,15 @@ def validate(data_dir: str|Path='data', *, require_complete: bool=False) -> list
+                 errors.append(f'VOCALOID_PV_SERVICE row {i}')
+             if not selected_video_id:
+                 errors.append(f'VOCALOID_VIDEO_ID row {i}')
++    game_path=data/'video_games'/'video_game_music_10000.csv'
++    if game_path.exists():
++        from .quality import video_game_row_error
++        for i,row in enumerate(read_rows(game_path),1):
++            reason=video_game_row_error(row.model_dump(),row.extra)
++            if reason:
++                errors.append(f'VIDEO_GAME_CLASSIFICATION row {i}: {reason}')
++    from .hololive import coverage_errors
++    errors.extend('HOLOLIVE_COVERAGE '+error for error in coverage_errors(data,require_complete=require_complete))
+     kp=data/'kpop'/'kpop_youtube_over_100m.csv'
+     if kp.exists():
+         rows=read_rows(kp)
+@@ -285,5 +302,6 @@ def validate(data_dir: str|Path='data', *, require_complete: bool=False) -> list
+             p=data/rel
+             if not p.exists(): errors.append(f'MISSING {rel}'); continue
+             with p.open(encoding='utf-8',newline='') as f: n=max(0,sum(1 for _ in csv.reader(f))-1)
+-            if n != target: errors.append(f'COUNT {rel}: {n} != {target}')
++            count_ok=n>=target if rel.startswith(('vtuber_original/','vtuber_non_original/')) else n==target
++            if not count_ok: errors.append(f'COUNT {rel}: {n} does not meet {target}')
+     return errors
+diff --git a/tests/test_repair_regressions.py b/tests/test_repair_regressions.py
+new file mode 100644
+index 0000000..e3afb4d
+--- /dev/null
++++ b/tests/test_repair_regressions.py
+@@ -0,0 +1,368 @@
++import csv
++import importlib.util
++import json
++from pathlib import Path
++from types import SimpleNamespace
++
++import httpx
++import pandas as pd
++import pytest
++
++from music_megalist import fullbuild as fb
++from music_megalist import listenbrainz as lb
++from music_megalist.hololive import credited_members, popular, select_joint
++from music_megalist.io import read_rows, write_rows
++from music_megalist.models import SongRow
++from music_megalist.validate import _generic_csv_errors
++
++MBID = '11111111-1111-1111-1111-111111111111'
++
++
++def song(title='Song', artist='Artist', **kwargs):
++    return SongRow(title=title, main_artist=artist, metric_name='youtube_views',
++                   metric_value=kwargs.pop('metric_value',100), metric_unit='views',
++                   view_count=kwargs.pop('view_count',100), source_url='https://example.test', **kwargs)
++
++
++def client_factory(monkeypatch, module, handler):
++    original = httpx.Client
++    monkeypatch.setattr(module.httpx, 'Client', lambda **kwargs: original(transport=httpx.MockTransport(handler)))
++    monkeypatch.setattr(module.time, 'sleep', lambda _: None)
++
++
++def test_tag_radio_hydrates_real_api_shape_and_migrates_existing_metadata(tmp_path, monkeypatch):
++    calls=[]
++    def handler(req):
++        calls.append(req.url.path)
++        if req.method=='GET':
++            return httpx.Response(200,json=[{'recording_mbid':MBID,'source':'release-group','percent':0}])
++        return httpx.Response(200,json={MBID:{'recording':{'name':'Actual song'},'artist':{'name':'Actual artist'},'tag':{'release_group':[{'tag':'jazz','count':1}]}}})
++    client_factory(monkeypatch,lb,handler)
++    status=SimpleNamespace(sources={},warnings=[])
++    rows=lb.TagRadio(tmp_path,status,'test').recordings(['jazz'])
++    mbid,meta,evidence=next(rows);rows.close()
++    assert meta['recording']['name']=='Actual song' and evidence['percent']==0
++    assert calls==['/1/lb-radio/tags','/1/metadata/recording/']
++    calls.clear()
++    rows=lb.TagRadio(tmp_path,status,'test').recordings(['jazz']);next(rows);rows.close()
++    assert calls==[]
++    # Existing video-game metadata is a reusable successful source checkpoint.
++    other=tmp_path/'legacy';other.mkdir()
++    (other/'listenbrainz_video_game_music.json').write_text(json.dumps({'metadata':{MBID:meta}}))
++    rows=lb.TagRadio(other,status,'test').recordings(['jazz']);next(rows);rows.close()
++    assert calls==['/1/lb-radio/tags']
++
++
++def test_missing_recording_metadata_is_not_permanently_cached(tmp_path, monkeypatch):
++    calls={'post':0}
++    def handler(req):
++        if req.method=='GET':
++            return httpx.Response(200,json=[{'recording_mbid':MBID,'source':'recording','percent':10}])
++        calls['post']+=1
++        return httpx.Response(200,json={} if calls['post']==1 else {MBID:{'recording':{'name':'Recovered'},'artist':{'name':'Artist'},'tag':{'recording':[{'tag':'novelty','count':1}]}}})
++    client_factory(monkeypatch,lb,handler)
++    status=SimpleNamespace(sources={},warnings=[])
++    assert list(lb.TagRadio(tmp_path,status,'test').recordings(['novelty']))==[]
++    rows=lb.TagRadio(tmp_path,status,'test').recordings(['novelty'])
++    assert next(rows)[1]['recording']['name']=='Recovered'
++    rows.close();assert calls['post']==2
++
++
++@pytest.mark.parametrize('code',[429,500,504])
++def test_jikan_transient_errors_do_not_poison_theme_cache(monkeypatch,code):
++    monkeypatch.setattr(fb.time,'sleep',lambda _:None)
++    cache={};status=SimpleNamespace(warnings=[])
++    with httpx.Client(transport=httpx.MockTransport(lambda req:httpx.Response(code,json={}))) as client:
++        rows,ok,network=fb._jikan_theme_candidates(42,client,cache,status)
++    assert not ok and network and '42' not in cache
++
++
++def test_jikan_retries_legacy_empty_and_retains_successful_empty(monkeypatch):
++    monkeypatch.setattr(fb.time,'sleep',lambda _:None)
++    cache={'42':[]};status=SimpleNamespace(warnings=[]);calls=[]
++    def handler(req):calls.append(req);return httpx.Response(200,json={'data':{'openings':[],'endings':[]}})
++    with httpx.Client(transport=httpx.MockTransport(handler)) as client:
++        assert fb._jikan_theme_candidates(42,client,cache,status)==([],True,True)
++        assert fb._jikan_theme_candidates(42,client,cache,status)==([],True,False)
++    assert len(calls)==1
++
++
++def test_anime_identity_uses_mal_ids_not_colliding_english_titles(tmp_path):
++    path=tmp_path/'anime_songs.csv'
++    rows=[song(rank=i,anime_title='Same English title',spotify_track_id='shared',extra={'mal_id':i}) for i in (1,2)]
++    write_rows(rows,path)
++    assert _generic_csv_errors(path)==[]
++    rows[1].extra['mal_id']=1
++    write_rows(rows,path)
++    assert any('DUP_ANIME' in err for err in _generic_csv_errors(path))
++
++
++def test_atomic_output_survives_serialization_error(tmp_path, monkeypatch):
++    from music_megalist import io
++    path=tmp_path/'songs.csv.gz';write_rows([song()],path);before=path.read_bytes()
++    def fail(rows,path):path.write_bytes(b'truncated');raise OSError('disk failure')
++    monkeypatch.setattr(io,'_write_rows',fail)
++    with pytest.raises(OSError):write_rows([song('Replacement')],path)
++    assert path.read_bytes()==before
++    assert not list(tmp_path.glob('.beathit-*'))
++
++
++def test_hololive_quota_combines_originals_and_covers_and_reports_absent_members():
++    roster={'a':{'name':'A'},'absent':{'name':'Absent'}}
++    originals=[song(f'Original {i}',extra={'hololive_member_ids':['a'],'hololive_youtube_views':i}) for i in range(3)]
++    covers=[song(f'Cover {i}',extra={'hololive_member_ids':['a'],'hololive_youtube_views':i}) for i in range(2)]
++    selected,report=select_joint({'original':originals,'cover':covers},roster,1000,target=2)
++    assert sum(len(rows) for rows in selected.values())==5
++    assert report['members']['a']['songs']==5
++    assert report['members']['absent']['missing']==5
++    assert not report['coverage_complete']
++
++
++def test_hololive_high_reach_survives_nominal_cap_and_duplicate_uploads():
++    rows=[song(f'Song {i}',extra={'hololive_member_ids':['a'],'hololive_youtube_views':2000}) for i in range(8)]
++    rows.append(rows[0].model_copy(deep=True))
++    selected,report=select_joint({'original':rows},{'a':{'name':'A'}},1000,target=3)
++    assert len(selected['original'])==8
++    assert report['members']['a']['songs']==8
++
++
++@pytest.mark.parametrize('streams,views,threshold,expected',[
++    (500001,0,None,True),(500000,9999999,1000,False),(None,1000,1000,False),
++    (None,1001,1000,True),(None,9999999,None,False)])
++def test_hololive_threshold_uses_trusted_spotify_then_youtube(streams,views,threshold,expected):
++    row=song(extra={'hololive_trusted_spotify_streams':streams,'hololive_youtube_views':views})
++    assert popular(row,threshold) is expected
++
++
++def test_hololive_mentions_must_be_credited_and_shared_channels_handle_solos():
++    roster={key:{'name':key,'aliases':[key],'channel_ids':[cid]} for key,cid in [('Member A','duo'),('Member B','duo'),('Guest C','guest')]}
++    video={'title':'Song / Member A','channel':{'id':'duo'},'mentions':[{'id':'guest'}]}
++    assert credited_members(video,roster)==['Member A']
++    video['title']='Song / Member A feat. Guest C'
++    assert credited_members(video,roster)==['Guest C','Member A']
++
++
++def test_vocaloid_unavailable_is_distinct_from_failed_or_legacy_missing(tmp_path,monkeypatch):
++    monkeypatch.setattr(fb,'CACHE',tmp_path/'cache');monkeypatch.setattr(fb,'ROOT',tmp_path)
++    monkeypatch.setenv('YOUTUBE_API_KEY','test-key');monkeypatch.setattr(fb.time,'sleep',lambda _:None)
++    fb.CACHE.mkdir();(fb.CACHE/'vocadb_youtube_view_counts.json').write_text(json.dumps({'videos':{'gone':{'views':None,'checked_at':int(fb.time.time())}}}))
++    calls=[]
++    def fetch(client,method,url,**kwargs):
++        calls.append(kwargs['params']['id']);return {'items':[{'id':'ok','statistics':{'viewCount':'123'}},{'id':'nostats'}]}
++    monkeypatch.setattr(fb,'_http_json',fetch)
++    status=fb.BuildStatus(started_at='test')
++    views,unresolved=fb._youtube_views_official(['gone','ok','nostats'],status)
++    assert views=={'ok':123} and unresolved==1
++    assert calls==['gone,ok,nostats']
++    report=status.sources['vocaloid_youtube_view_counts']
++    assert report['unavailable']==1 and not report['ok']
++    cached=json.loads((fb.CACHE/'vocadb_youtube_view_counts.json').read_text())['videos']
++    assert cached['gone']['availability']=='unavailable'
++    assert cached['nostats']['availability']=='unresolved'
++
++
++def test_game_packaging_cleanup_and_strong_source_evidence():
++    from music_megalist.culturelists import _game_title_from_explicit_soundtrack_release
++    from music_megalist.quality import video_game_row_error
++    assert _game_title_from_explicit_soundtrack_release("Assassin's Creed 4: Black Flag (Sea Shanty Edition, Vol. 2) (Original Game Soundtrack)")=="Assassin's Creed 4: Black Flag"
++    row={'screen_work':'Game','musicbrainz_recording_mbid':MBID}
++    evidence={'culture_category':'video_game_music','game_association_kind':'listenbrainz_release_group_tag','listenbrainz_source_scope':'release-group','listenbrainz_source_tags':['chiptune'],'explicit_soundtrack_release':'Game OST'}
++    assert video_game_row_error(row,evidence)
++    evidence['listenbrainz_source_tags']=['video game music']
++    assert video_game_row_error(row,evidence) is None
++
++
++def test_checked_in_roster_has_real_channel_ids_and_no_navigation_channel():
++    from music_megalist.hololive import load_roster
++    roster=load_roster(Path(__file__).resolve().parents[1]/'data')
++    assert len(roster)>=100
++    assert all(r['channel_ids'] for r in roster.values())
++    assert all('UCJFZiqLMntJufDCHc6bQixg' not in r['channel_ids'] for r in roster.values())
++    assert roster['mori-calliope']['channel_ids']==['UCL_qhgtOy0dy1Agp8vkySQg']
++
++
++def load_script(name):
++    import sys
++    scripts=Path(__file__).resolve().parents[1]/'scripts'
++    sys.path.insert(0,str(scripts))
++    spec=importlib.util.spec_from_file_location(name,scripts/(name+'.py'))
++    module=importlib.util.module_from_spec(spec);spec.loader.exec_module(module)
++    return module
++
++
++def test_staging_includes_standard_outputs_and_excludes_raw_inputs(tmp_path,monkeypatch):
++    import subprocess
++    stage=load_script('stage_generated')
++    subprocess.run(['git','init','-q',str(tmp_path)],check=True)
++    for rel in ['STATUS.json','data/screen_soundtracks/result.csv','data/countries/CA.csv',
++                'data/worldwide/worldwide.csv','data/anime/anime_songs.partial.csv',
++                'data/raw/private-source.csv','README.md']:
++        p=tmp_path/rel;p.parent.mkdir(parents=True,exist_ok=True);p.write_text('test')
++    monkeypatch.setattr(stage,'ROOT',tmp_path);stage.main()
++    names=set(subprocess.check_output(['git','diff','--cached','--name-only'],cwd=tmp_path).decode().splitlines())
++    assert names=={'STATUS.json','data/screen_soundtracks/result.csv','data/countries/CA.csv','data/worldwide/worldwide.csv'}
++
++
++def test_restore_both_artifact_layouts_and_ignore_partial_files(tmp_path):
++    restore=load_script('restore_outputs').restore
++    for current in [True,False]:
++        source=tmp_path/('current' if current else 'legacy')
++        data=source/'data' if current else source
++        (data/'anime').mkdir(parents=True)
++        (data/'anime'/'anime_songs.csv').write_text('canonical')
++        (data/'anime'/'anime_songs.partial.csv').write_text('unfinished')
++        if current:(source/'STATUS.json').write_text('status')
++        dest=tmp_path/('dest-current' if current else 'dest-legacy')
++        restore(source,dest)
++        assert (dest/'data/anime/anime_songs.csv').read_text()=='canonical'
++        assert not (dest/'data/anime/anime_songs.partial.csv').exists()
++        assert (dest/'STATUS.json').exists() is current
++
++
++def test_target_checker_returns_failure_for_shortfalls(tmp_path,monkeypatch,capsys):
++    checker=load_script('verify_targets')
++    monkeypatch.setattr(checker,'ROOT',tmp_path);monkeypatch.setattr(checker,'DATA',tmp_path/'data')
++    assert checker.main()==1
++    report=json.loads(capsys.readouterr().out)
++    assert not report['overall_complete']
++
++
++def test_reuse_requires_corrected_builder_revision_but_reuses_unchanged_lists(tmp_path,monkeypatch):
++    path=tmp_path/'anime_songs.csv';write_rows([song(rank=1,anime_title='Anime',extra={'mal_id':1})],path)
++    monkeypatch.setattr(fb,'MATERIALIZED_OUTPUTS',{'anime':path})
++    monkeypatch.setattr(fb,'FIXED_TARGETS',{'anime':1});monkeypatch.setattr(fb,'ROOT',tmp_path)
++    monkeypatch.setattr(fb,'REPORT',tmp_path/'report.json')
++    status=fb.BuildStatus(started_at='test',datasets={'anime':fb.DatasetStatus(target=1)})
++    assert fb._reuse_complete_output('anime',status,{'anime':{'complete':True}}) is None
++    old={'anime':{'complete':True,'builder_revision':fb.BUILDER_REVISIONS['anime']}}
++    assert len(fb._reuse_complete_output('anime',status,old))==1
++
++
++def test_successfully_cached_unavailable_vocaloid_video_does_not_block_completion(tmp_path,monkeypatch):
++    monkeypatch.setattr(fb,'CACHE',tmp_path/'cache');monkeypatch.setattr(fb,'ROOT',tmp_path)
++    monkeypatch.setenv('YOUTUBE_API_KEY','test-key')
++    fb.CACHE.mkdir();(fb.CACHE/'vocadb_youtube_view_counts.json').write_text(json.dumps({'videos':{
++        'gone':{'views':None,'checked_at':int(fb.time.time()),'availability':'unavailable'},
++        'ok':{'views':123,'checked_at':int(fb.time.time()),'availability':'available'}}}))
++    monkeypatch.setattr(fb,'_http_json',lambda *a,**k:pytest.fail('fresh cache should not refetch'))
++    status=fb.BuildStatus(started_at='test')
++    views,unresolved=fb._youtube_views_official(['gone','ok'],status)
++    assert views=={'ok':123} and unresolved==0
++    assert status.sources['vocaloid_youtube_view_counts']['ok']
++
++
++def test_weak_jazz_tag_on_pop_rock_release_does_not_qualify():
++    meta={'tag':{'release_group':[{'tag':'jazz','count':1,'genre_mbid':'jazz'},
++                                  {'tag':'pop rock','count':5,'genre_mbid':'pop-rock'}]}}
++    evidence={'source':'release-group','tag':'jazz','tag_count':14}
++    assert lb.tag_support(meta,evidence) is None
++    meta['tag']['release_group'][0]['count']=5
++    assert lb.tag_support(meta,evidence)['matching_tag_votes']==5
++
++
++def test_vtuber_builder_preserves_candidate_pool_for_joint_policy(tmp_path,monkeypatch):
++    monkeypatch.setattr(fb,'DATA',tmp_path/'data');monkeypatch.setattr(fb,'CACHE',tmp_path/'cache')
++    monkeypatch.setattr(fb,'REPORT',tmp_path/'report.json')
++    monkeypatch.setattr(fb,'FIXED_TARGETS',{'vtuber_original':2})
++    seed=fb.DATA/'seeds/hololive_members.json';seed.parent.mkdir(parents=True)
++    seed.write_text(json.dumps({'members':[{'member_id':'member','name':'Member Name','aliases':['Member Name'],'channel_ids':['channel']}]}))
++    videos=[{'id':str(i),'title':f'Song {i} - Member Name (Original Song)',
++             'channel':{'id':'channel','english_name':'Member channel'},'mentions':[]} for i in range(4)]
++    monkeypatch.setattr(fb,'_fetch_holodex_topic',lambda *a,**k:videos)
++    monkeypatch.setattr(fb,'_youtube_views',lambda *a,**k:{str(i):100+i for i in range(4)})
++    monkeypatch.setattr(fb,'_fetch_holostats_rows',lambda **k:[])
++    status=fb.BuildStatus(started_at='test')
++    result=fb.build_vtuber(pd.DataFrame(),status,original=True)
++    assert len(result)==2
++    pool=read_rows(fb.CACHE/'vtuber_original_candidates.jsonl.gz')
++    assert len(pool)==4
++    assert {row.title for row in pool}=={f'Song {i}' for i in range(4)}
++    assert all(row.extra['hololive_member_ids']==['member'] for row in pool)
++
++
++def test_vtuber_outage_preserves_existing_rows(tmp_path,monkeypatch):
++    monkeypatch.setattr(fb,'DATA',tmp_path/'data');monkeypatch.setattr(fb,'CACHE',tmp_path/'cache')
++    monkeypatch.setattr(fb,'REPORT',tmp_path/'report.json')
++    monkeypatch.setattr(fb,'FIXED_TARGETS',{'vtuber_original':2})
++    seed=fb.DATA/'seeds/hololive_members.json';seed.parent.mkdir(parents=True);seed.write_text('{"members":[]}')
++    output=fb.DATA/'vtuber_original/vtuber_original_10000.csv'
++    write_rows([song('Preserved one'),song('Preserved two')],output)
++    monkeypatch.setattr(fb,'_fetch_holodex_topic',lambda *a,**k:[])
++    monkeypatch.setattr(fb,'_fetch_holostats_rows',lambda **k:[])
++    result=fb.build_vtuber(pd.DataFrame(),fb.BuildStatus(started_at='test'),original=True)
++    assert {r.title for r in result}=={'Preserved one','Preserved two'}
++
++
++def test_hololive_report_detects_missing_reserved_song(tmp_path):
++    from music_megalist.hololive import coverage_errors,OVERRIDE_VIDEO_ID
++    seed=tmp_path/'seeds/hololive_members.json';seed.parent.mkdir()
++    seed.write_text(json.dumps({'members':[{'member_id':'a','name':'A'}]}))
++    row=song('Present',extra={'hololive_member_ids':['a']})
++    write_rows([row],tmp_path/'vtuber_original/vtuber_original_10000.csv')
++    write_rows([],tmp_path/'vtuber_non_original/vtuber_non_original_10000.csv')
++    report={'members':{'a':{'songs':1,'missing':4}},'required_song_keys':[['vtuber_original','missing','artist']],
++            'youtube_threshold':{'video_id':OVERRIDE_VIDEO_ID,'observed_views':1450000,'rounded_down_to':100000,'threshold':1400000}}
++    (tmp_path/'hololive_coverage.json').write_text(json.dumps(report))
++    assert any('mandatory songs absent' in error for error in coverage_errors(tmp_path))
++
++
++def test_explicit_cover_markers_do_not_reject_ordinary_song_titles():
++    assert fb.VTUBER_COVER_MARKER.search('Some Song (Cover)')
++    assert fb.VTUBER_COVER_MARKER.search('【歌ってみた】Song')
++    assert not fb.VTUBER_COVER_MARKER.search('Cover Me In Sunshine')
++
++
++def test_holodex_http_error_retains_cached_scan(tmp_path,monkeypatch):
++    monkeypatch.setattr(fb,'CACHE',tmp_path)
++    (tmp_path/'holodex_Original_Song.json').write_text(json.dumps({'videos':[{'id':'saved'}],'complete':False}))
++    def fail(*a,**k):raise fb.SourceHTTPError(403,'HTTP 403')
++    monkeypatch.setattr(fb,'_http_json',fail)
++    status=fb.BuildStatus(started_at='test')
++    assert fb._fetch_holodex_topic('Original_Song',status)==[{'id':'saved'}]
++    assert not status.sources['holodex_Original_Song']['complete']
++
++
++def test_youtube_permission_failure_stops_remaining_batches(tmp_path,monkeypatch):
++    monkeypatch.setattr(fb,'CACHE',tmp_path/'cache');monkeypatch.setattr(fb,'ROOT',tmp_path)
++    monkeypatch.setenv('YOUTUBE_API_KEY','test-key');calls=[]
++    def fail(*a,**k):calls.append(1);raise fb.SourceHTTPError(403,'HTTP 403 key invalid')
++    monkeypatch.setattr(fb,'_http_json',fail)
++    status=fb.BuildStatus(started_at='test')
++    views,unresolved=fb._youtube_views_official([str(i) for i in range(120)],status)
++    assert len(calls)==1 and unresolved==120 and not views
++    assert status.sources['vocaloid_youtube_view_counts']['live_requested']==50
++
++
++def test_anime_uses_cached_jikan_themes_when_network_budget_is_zero(tmp_path,monkeypatch):
++    monkeypatch.setattr(fb,'DATA',tmp_path/'data');monkeypatch.setattr(fb,'CACHE',tmp_path/'cache')
++    monkeypatch.setattr(fb,'REPORT',tmp_path/'report.json');monkeypatch.setattr(fb,'FIXED_TARGETS',{'anime':1})
++    monkeypatch.setenv('BEATHIT_JIKAN_MAX_QUERIES','0');monkeypatch.setenv('BEATHIT_JIKAN_MAX_SECONDS','0')
++    anime={'id':1,'idMal':1,'title':{'english':'Anime'},'popularity':100}
++    monkeypatch.setattr(fb,'fetch_anilist_top',lambda *a,**k:[anime])
++    monkeypatch.setattr(fb,'_load_mal_anime_rank_fallback',lambda *a:[])
++    monkeypatch.setattr(fb,'fetch_animethemes_all',lambda *a:({},{}))
++    monkeypatch.setattr(fb,'_load_mal_theme_fallback',lambda *a:{})
++    fb.CACHE.mkdir();(fb.CACHE/'jikan_themes.json').write_text(json.dumps({'1':{'checked_at':fb.time.time(),
++        'themes':[{'title':'Cached song','artists':['Artist'],'type':'OP','sequence':1}]}}))
++    status=fb.BuildStatus(started_at='test')
++    rows=fb.build_anime(pd.DataFrame(),{},status)
++    assert len(rows)==1 and rows[0].title=='Cached song'
++    assert status.sources['jikan_theme_fallback']['queried']==0
++
++
++def test_radio_outage_has_a_circuit_breaker(tmp_path,monkeypatch):
++    calls=[]
++    def handler(req):calls.append(req);return httpx.Response(503,json={})
++    client_factory(monkeypatch,lb,handler)
++    status=SimpleNamespace(sources={},warnings=[])
++    assert list(lb.TagRadio(tmp_path,status,'outage').recordings(['jazz','bebop','swing','bossa nova']))==[]
++    assert len(calls)==9  # three requests, each with at most three attempts
++    assert status.sources['listenbrainz_outage']['stop_reason']=='request_budget_or_circuit_breaker'
++
++
++def test_vtuber_title_cleanup_does_not_duplicate_an_existing_video():
++    from music_megalist.dedupe import dedupe
++    old=song('Song - Artist (Official)',vtuber='Artist',extra={'holodex_video_id':'abcdefghijk'})
++    new=song('Song',vtuber='Artist',extra={'holodex_video_id':'abcdefghijk','hololive_member_ids':['member']})
++    rows=dedupe([old,new])
++    assert len(rows)==1 and rows[0].extra['hololive_member_ids']==['member']

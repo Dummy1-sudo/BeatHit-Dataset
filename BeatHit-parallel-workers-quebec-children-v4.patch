@@ -1,0 +1,1651 @@
+diff --git a/.github/parallel/build_list.py b/.github/parallel/build_list.py
+new file mode 100644
+index 0000000..046a5ae
+--- /dev/null
++++ b/.github/parallel/build_list.py
+@@ -0,0 +1,608 @@
++#!/usr/bin/env python3
++from __future__ import annotations
++
++import json
++import math
++import os
++import re
++import sys
++import time
++from datetime import date
++from pathlib import Path
++from urllib.parse import quote_plus
++
++import httpx
++
++ROOT = Path(__file__).resolve().parents[2]
++sys.path.insert(0, str(ROOT / "src"))
++sys.path.insert(0, str(ROOT / "scripts"))
++sys.path.insert(0, str(Path(__file__).resolve().parent))
++
++from common import ALL_TARGETS, DATA, dataset_name, read_json, status_path, write_json
++from music_megalist import fullbuild
++from music_megalist.dedupe import norm
++from music_megalist.io import read_rows, write_rows
++from music_megalist.models import SongRow
++
++TODAY = date.today().isoformat()
++
++
++def _status_fragment(target: str, dataset: dict, **extra: object) -> None:
++    payload = {
++        "target_name": target,
++        "dataset_name": dataset_name(target),
++        "worker_success": False,
++        "dataset": dataset,
++        **extra,
++    }
++    write_json(status_path(target), payload)
++
++
++def _load_children_policy() -> dict:
++    policy_path = DATA / "seeds" / "children_quebec_policy.json"
++    policy = read_json(policy_path)
++    if not policy:
++        raise RuntimeError(f"Missing or invalid children policy: {policy_path}")
++    return policy
++
++
++def _children_text(row: SongRow) -> str:
++    parts = [row.title, row.main_artist, " ".join(row.genres or [])]
++    try:
++        parts.append(json.dumps(row.extra or {}, ensure_ascii=False))
++    except Exception:
++        pass
++    return norm(" ".join(str(x or "") for x in parts))
++
++
++def _children_marker_match(text: str, markers: list[str]) -> bool:
++    return any(norm(marker) in text for marker in markers if norm(marker))
++
++
++def _children_queries(policy: dict, start_year: int) -> list[dict]:
++    queries = [dict(q) for q in (policy.get("queries") or []) if isinstance(q, dict)]
++    end_year = date.today().year
++    for template in policy.get("year_query_templates") or []:
++        if not isinstance(template, dict):
++            continue
++        term_template = str(template.get("term") or "")
++        if "{year}" not in term_template:
++            continue
++        for year in range(start_year, end_year + 1):
++            item = dict(template)
++            item["term"] = term_template.format(year=year)
++            if item.get("youtube_term"):
++                item["youtube_term"] = str(item["youtube_term"]).format(year=year)
++            queries.append(item)
++    return queries
++
++
++def _children_filter_existing(rows: list[SongRow], policy: dict, start_year: int) -> list[SongRow]:
++    """Keep only existing rows with explicit Quebec-childhood relevance evidence.
++
++    The old global children/tag list is intentionally not grandfathered in. A row must
++    either identify a Quebec/Canada childhood property/artist or a globally common child
++    franchise that is explicitly allowed by the Quebec policy. Generic world-wide
++    children's music is discarded rather than treated as Quebec exposure evidence.
++    """
++    local_markers = list(policy.get("quebec_markers") or [])
++    franchise_markers = list(policy.get("franchise_markers") or [])
++    evergreen_markers = list(policy.get("evergreen_markers") or [])
++    reject_terms = [norm(x) for x in (policy.get("reject_terms") or [])]
++    out: list[SongRow] = []
++    for row in rows:
++        text = _children_text(row)
++        if any(term and term in text for term in reject_terms):
++            continue
++        local = _children_marker_match(text, local_markers)
++        franchise = _children_marker_match(text, franchise_markers)
++        evergreen = _children_marker_match(text, evergreen_markers)
++        recent = bool(row.release_year and row.release_year >= start_year)
++        if not (local or franchise):
++            continue
++        if not (recent or evergreen):
++            continue
++        extra = dict(row.extra or {})
++        extra.update({
++            "children_policy": "quebec_age_0_12_last_10_years",
++            "quebec_exposure_evidence": "existing row matched curated Quebec/child-franchise marker",
++            "observation_window_start_year": start_year,
++        })
++        row.extra = extra
++        out.append(row)
++    return out
++
++
++def _apple_children_candidates(policy: dict, start_year: int) -> list[SongRow]:
++    """Discover Quebec-relevant child songs from the Canadian Apple storefront."""
++    queries = _children_queries(policy, start_year)
++    reject_terms = [norm(x) for x in (policy.get("reject_terms") or [])]
++    child_genres = {norm(x) for x in (policy.get("apple_children_genres") or ["Children's Music"])}
++    franchise_markers = list(policy.get("franchise_markers") or [])
++    local_markers = list(policy.get("quebec_markers") or [])
++    evergreen_markers = list(policy.get("evergreen_markers") or [])
++    min_score = float(policy.get("minimum_accept_score") or 55.0)
++    rows: list[SongRow] = []
++    seen_text: set[tuple[str, str]] = set()
++    seen_ids: set[str] = set()
++    headers = {"User-Agent": "BeatHit-Dataset/1.0 (+https://github.com/Dummy1-sudo/BeatHit-Dataset)"}
++
++    with httpx.Client(timeout=45, follow_redirects=True, headers=headers) as client:
++        for q in queries:
++            term = str(q.get("term") or "").strip()
++            if not term:
++                continue
++            kind = str(q.get("kind") or "generic")
++            lang = str(q.get("language") or "und")
++            weight = float(q.get("weight") or 30.0)
++            evergreen_query = bool(q.get("evergreen"))
++            anchors = [str(x) for x in (q.get("anchors") or []) if str(x).strip()]
++            url = (
++                "https://itunes.apple.com/search?entity=song&limit=200&country=CA&term="
++                f"{quote_plus(term)}"
++            )
++            try:
++                response = client.get(url)
++                response.raise_for_status()
++                items = response.json().get("results") or []
++            except Exception:
++                continue
++
++            for rank, item in enumerate(items, 1):
++                title = str(item.get("trackName") or "").strip()
++                artist = str(item.get("artistName") or "").strip()
++                album = str(item.get("collectionName") or "").strip()
++                genre = str(item.get("primaryGenreName") or "").strip()
++                track_id = str(item.get("trackId") or "").strip()
++                if not title or not artist:
++                    continue
++                combined = norm(f"{title} {artist} {album} {genre}")
++                if any(term_norm and term_norm in combined for term_norm in reject_terms):
++                    continue
++                if str(item.get("trackExplicitness") or "").casefold() == "explicit":
++                    continue
++
++                anchor_match = _children_marker_match(combined, anchors)
++                local_match = _children_marker_match(combined, local_markers)
++                franchise_match = _children_marker_match(combined, franchise_markers)
++                genre_match = norm(genre) in child_genres or "children" in norm(genre)
++
++                if kind in {"quebec_artist", "franchise"} and anchors and not anchor_match:
++                    continue
++                if kind in {"generic", "quebec_generic"} and not genre_match:
++                    continue
++                if not (genre_match or local_match or franchise_match or anchor_match):
++                    continue
++
++                release = str(item.get("releaseDate") or "")
++                year = int(release[:4]) if re.match(r"^\d{4}", release) else None
++                evergreen = evergreen_query or _children_marker_match(combined, evergreen_markers)
++                recent = bool(year and year >= start_year)
++                if not (recent or evergreen):
++                    continue
++
++                rank_score = max(0.0, 20.0 - ((rank - 1) / max(1, len(items))) * 20.0)
++                score = weight + rank_score
++                if genre_match:
++                    score += 15.0
++                if local_match or kind.startswith("quebec"):
++                    score += 20.0
++                if franchise_match or kind == "franchise":
++                    score += 10.0
++                if recent:
++                    score += 10.0
++                score = min(100.0, score)
++                if score < min_score:
++                    continue
++
++                key = (norm(title), norm(artist))
++                if key in seen_text or (track_id and track_id in seen_ids):
++                    continue
++                seen_text.add(key)
++                if track_id:
++                    seen_ids.add(track_id)
++
++                rows.append(SongRow(
++                    title=title,
++                    main_artist=artist,
++                    release_year=year,
++                    genres=[genre or "children's music"],
++                    languages=[lang if lang in {"fr", "en"} else "und"],
++                    metric_name="quebec_child_exposure_score",
++                    metric_value=score,
++                    metric_unit="score_0_100",
++                    overall_popularity_score=score,
++                    source_url=str(item.get("trackViewUrl") or item.get("collectionViewUrl") or "https://music.apple.com/ca/"),
++                    retrieved_at=TODAY,
++                    source_notes=(
++                        "Canadian Apple storefront candidate selected by a Quebec age-0-12 childhood query; "
++                        "recent-window or curated-evergreen evidence required."
++                    ),
++                    extra={
++                        "culture_category": "children_childhood",
++                        "children_policy": "quebec_age_0_12_last_10_years",
++                        "source": "apple_itunes_ca",
++                        "itunes_track_id": track_id,
++                        "itunes_query": term,
++                        "itunes_query_kind": kind,
++                        "itunes_primary_genre": genre,
++                        "quebec_exposure_score": score,
++                        "observation_window_start_year": start_year,
++                        "evidence": {
++                            "canadian_storefront": True,
++                            "children_genre": genre_match,
++                            "quebec_marker": local_match,
++                            "franchise_marker": franchise_match,
++                            "query_anchor": anchor_match,
++                            "recent_release": recent,
++                            "evergreen": evergreen,
++                        },
++                    },
++                ))
++            time.sleep(0.06)
++    return rows
++
++
++def _youtube_children_candidates(policy: dict, start_year: int) -> list[SongRow]:
++    """Use targeted Canadian YouTube Music searches as exposure evidence.
++
++    Search requests are deliberately bounded because search.list is expensive. The
++    results are ordered by views, use regionCode=CA and safeSearch=strict, and only
++    child-specific Quebec/franchise queries from the policy are issued.
++    """
++    api_key = os.getenv("YOUTUBE_API_KEY", "").strip()
++    if not api_key:
++        return []
++    queries = _children_queries(policy, start_year)
++    max_searches = int(os.getenv("BEATHIT_CHILDREN_YOUTUBE_SEARCHES", str(policy.get("youtube_max_searches") or 48)))
++    reject_terms = [norm(x) for x in (policy.get("youtube_reject_terms") or policy.get("reject_terms") or [])]
++    min_views_generic = int(policy.get("youtube_min_views_generic") or 5_000)
++    min_views_local = int(policy.get("youtube_min_views_local") or 500)
++    rows: list[SongRow] = []
++    seen_ids: set[str] = set()
++    headers = {"User-Agent": "BeatHit-Dataset/1.0 (+https://github.com/Dummy1-sudo/BeatHit-Dataset)"}
++
++    def clean_video_title(value: str) -> tuple[str, str]:
++        text = re.sub(r"\s*[\[(](?:official|lyrics?|paroles|clip officiel|music video|video officiel)[^\])]*[\])]\s*", " ", value, flags=re.I)
++        text = re.sub(r"\s+", " ", text).strip(" -|")
++        for sep in (" - ", " – ", " — ", " | "):
++            if sep in text:
++                left, right = text.split(sep, 1)
++                if left.strip() and right.strip():
++                    return right.strip(), left.strip()
++        return text, ""
++
++    with httpx.Client(timeout=45, follow_redirects=True, headers=headers) as client:
++        for q in queries[:max_searches]:
++            term = str(q.get("youtube_term") or q.get("term") or "").strip()
++            if not term:
++                continue
++            kind = str(q.get("kind") or "generic")
++            lang = str(q.get("language") or "und")
++            params = {
++                "part": "snippet",
++                "type": "video",
++                "videoCategoryId": "10",
++                "maxResults": 50,
++                "order": "viewCount",
++                "safeSearch": "strict",
++                "regionCode": "CA",
++                "q": term,
++                "publishedAfter": f"{start_year}-01-01T00:00:00Z",
++                "key": api_key,
++            }
++            if lang in {"fr", "en"}:
++                params["relevanceLanguage"] = lang
++            try:
++                search = client.get("https://www.googleapis.com/youtube/v3/search", params=params)
++                search.raise_for_status()
++                items = search.json().get("items") or []
++            except Exception:
++                continue
++            ids = [str((item.get("id") or {}).get("videoId") or "") for item in items]
++            ids = [x for x in ids if x and x not in seen_ids]
++            if not ids:
++                continue
++            try:
++                details = client.get("https://www.googleapis.com/youtube/v3/videos", params={
++                    "part": "snippet,statistics",
++                    "id": ",".join(ids),
++                    "key": api_key,
++                })
++                details.raise_for_status()
++                videos = details.json().get("items") or []
++            except Exception:
++                continue
++            for video in videos:
++                vid = str(video.get("id") or "")
++                snippet = video.get("snippet") or {}
++                raw_title = str(snippet.get("title") or "").strip()
++                channel = str(snippet.get("channelTitle") or "").strip()
++                combined = norm(f"{raw_title} {channel} {snippet.get('description') or ''}")
++                if any(term_norm and term_norm in combined for term_norm in reject_terms):
++                    continue
++                anchors = [str(x) for x in (q.get("anchors") or []) if str(x).strip()]
++                if kind in {"quebec_artist", "franchise"} and anchors and not _children_marker_match(combined, anchors):
++                    continue
++                try:
++                    views = int((video.get("statistics") or {}).get("viewCount") or 0)
++                except Exception:
++                    views = 0
++                minimum = min_views_local if kind.startswith("quebec") else min_views_generic
++                if views < minimum:
++                    continue
++                title, parsed_artist = clean_video_title(raw_title)
++                artist = parsed_artist or channel
++                if not title or not artist:
++                    continue
++                seen_ids.add(vid)
++                # View count is global, but discovery is a Canada-region, child-specific query.
++                score = min(100.0, 45.0 + (20.0 if kind.startswith("quebec") else 10.0) + min(35.0, max(0.0, math.log10(max(views, 1)) * 5.0)))
++                rows.append(SongRow(
++                    title=title,
++                    main_artist=artist,
++                    genres=["children's music"],
++                    languages=[lang if lang in {"fr", "en"} else "und"],
++                    metric_name="youtube_views",
++                    metric_value=float(views),
++                    metric_unit="views",
++                    view_count=views,
++                    overall_popularity_score=score,
++                    source_url=f"https://www.youtube.com/watch?v={vid}",
++                    retrieved_at=TODAY,
++                    source_notes=(
++                        "Discovered by a Canada-region YouTube Music search restricted to the current 10-year Quebec childhood window; "
++                        "safeSearch=strict and child-specific query."
++                    ),
++                    extra={
++                        "culture_category": "children_childhood",
++                        "children_policy": "quebec_age_0_12_last_10_years",
++                        "source": "youtube_ca_child_search",
++                        "youtube_video_id": vid,
++                        "youtube_query": term,
++                        "youtube_query_kind": kind,
++                        "youtube_region": "CA",
++                        "observation_window_start_year": start_year,
++                    },
++                ))
++    return rows
++
++
++def _build_children_quebec(limit: int = 10_000) -> dict:
++    policy = _load_children_policy()
++    window_years = int(os.getenv("BEATHIT_CHILDREN_WINDOW_YEARS", str(policy.get("window_years") or 10)))
++    start_year = date.today().year - max(1, window_years)
++    path = DATA / "children_childhood" / "children_childhood_10000.csv"
++    existing = read_rows(path) if path.exists() else []
++    existing_qualified = _children_filter_existing(existing, policy, start_year)
++    apple_candidates = _apple_children_candidates(policy, start_year)
++    youtube_candidates = _youtube_children_candidates(policy, start_year)
++    candidates = [*existing_qualified, *apple_candidates, *youtube_candidates]
++
++    candidates.sort(
++        key=lambda r: (float(r.overall_popularity_score or 0), float(r.metric_value or 0)),
++        reverse=True,
++    )
++    out: list[SongRow] = []
++    seen_text: set[tuple[str, str]] = set()
++    seen_spotify: set[str] = set()
++    seen_mbid: set[str] = set()
++    seen_isrc: set[str] = set()
++    seen_youtube: set[str] = set()
++    seen_itunes: set[str] = set()
++    for row in candidates:
++        key = (norm(row.title), norm(row.main_artist))
++        sid = str(row.spotify_track_id or "").casefold()
++        mbid = str(row.musicbrainz_recording_mbid or "").casefold()
++        isrc = str(row.isrc or "").casefold()
++        extra = row.extra or {}
++        yid = str(extra.get("youtube_video_id") or "").casefold()
++        iid = str(extra.get("itunes_track_id") or "").casefold()
++        if not all(key) or key in seen_text:
++            continue
++        if sid and sid in seen_spotify:
++            continue
++        if mbid and mbid in seen_mbid:
++            continue
++        if isrc and isrc in seen_isrc:
++            continue
++        if yid and yid in seen_youtube:
++            continue
++        if iid and iid in seen_itunes:
++            continue
++        seen_text.add(key)
++        if sid: seen_spotify.add(sid)
++        if mbid: seen_mbid.add(mbid)
++        if isrc: seen_isrc.add(isrc)
++        if yid: seen_youtube.add(yid)
++        if iid: seen_itunes.add(iid)
++        out.append(row)
++        if len(out) >= limit:
++            break
++
++    for rank, row in enumerate(out, 1):
++        row.rank = rank
++    write_rows(out, path)
++    return {
++        "target": limit,
++        "materialized_rows": len(out),
++        "complete": len(out) > 9_000,
++        "builder_revision": "quebec-children-v1",
++        "metric_coverage": {},
++        "notes": [
++            f"Quebec age-0-12 childhood scope; observation window {start_year}-{date.today().year}.",
++            "Global generic children's-music rows are not accepted without curated Quebec/franchise exposure evidence.",
++            "Primary discovery sources: Canadian Apple storefront and Canada-region YouTube Music child queries; no fabricated quota padding.",
++            f"existing_qualified={len(existing_qualified)}; apple_candidates={len(apple_candidates)}; youtube_candidates={len(youtube_candidates)}",
++        ],
++    }
++
++
++def _build_core(target: str) -> dict:
++    if target == "children_childhood":
++        return _build_children_quebec()
++    if target == "countries":
++        import build_remaining_core
++        build_remaining_core._install_country_deep_history()
++
++    fullbuild.full_build(
++        skip_zenodo=os.getenv("BEATHIT_SKIP_ZENODO", "0") == "1",
++        only=[target],
++        reuse_complete=True,
++    )
++
++    status = read_json(ROOT / "STATUS.json")
++    return dict((status.get("datasets") or {}).get(target) or {})
++
++
++
++def _build_language_cover_musicbrainz(target: str, deadline: float, request_budget: int) -> dict:
++    """Build one language independently using valid MusicBrainz work/recording APIs.
++
++    This deliberately avoids the old recording-search `lang:` query and the invalid
++    recording-browse `inc=releases` combination.  Work search owns the lyric-language
++    field; recordings are then browsed from each work and explicit `cover` performance
++    relationships are preferred.
++    """
++    import build_expansion_lists as expansion
++
++    slug = target.removeprefix("cover_")
++    lang_name, lang3, lang2 = expansion.LANGUAGE_COVERS[slug]
++    folder = DATA / "language_covers" / slug
++    stem = f"{slug}_covers"
++    rows, seen = expansion._load_existing_parts(folder, stem)
++    state_file = expansion.CACHE / f"language_cover_{slug}_parallel.json"
++    state = read_json(state_file)
++    offset = int(state.get("work_offset") or 0)
++    requests = 0
++    exhausted = bool(state.get("source_exhausted"))
++    mb = expansion.MusicBrainzClient()
++    try:
++        while len(rows) < expansion.LANGUAGE_TARGET and not exhausted and time.monotonic() < deadline and requests < request_budget:
++            works = mb.get("/work", {
++                "query": f"lang:{lang3} AND type:song AND recording_count:[2 TO *]",
++                "limit": 100,
++                "offset": offset,
++            })
++            requests += 1
++            batch = works.get("works") or []
++            total = int(works.get("count") or 0)
++            if not batch:
++                exhausted = True
++                break
++            for work in batch:
++                if len(rows) >= expansion.LANGUAGE_TARGET or time.monotonic() >= deadline or requests >= request_budget:
++                    break
++                wid = str(work.get("id") or "").strip()
++                if not wid:
++                    continue
++                rec_offset = 0
++                while time.monotonic() < deadline and requests < request_budget:
++                    data = mb.get("/recording", {
++                        "work": wid,
++                        "inc": "artist-credits+work-rels",
++                        "limit": 100,
++                        "offset": rec_offset,
++                    })
++                    requests += 1
++                    recs = data.get("recordings") or []
++                    if not recs:
++                        break
++                    for rec in recs:
++                        rid = str(rec.get("id") or "").casefold()
++                        if not rid or rid in seen:
++                            continue
++                        explicit_cover = False
++                        for rel in rec.get("relations") or []:
++                            attrs = {str(x).casefold() for x in (rel.get("attributes") or [])}
++                            related_work = (rel.get("work") or {}).get("id")
++                            if str(related_work or "") == wid and "cover" in attrs:
++                                explicit_cover = True
++                                break
++                        if not explicit_cover:
++                            continue
++                        row = expansion._language_cover_row(
++                            rec,
++                            lang_name=lang_name,
++                            lang2=lang2,
++                            evidence="MusicBrainz performance relationship explicitly marked cover; language from the related work",
++                            work_id=wid,
++                            score=100.0,
++                        )
++                        if row:
++                            rows.append(row)
++                            seen.add(rid)
++                            if len(rows) >= expansion.LANGUAGE_TARGET:
++                                break
++                    rec_offset += len(recs)
++                    rec_total = int(data.get("recording-count") or data.get("count") or 0)
++                    if len(recs) < 100 or (rec_total and rec_offset >= rec_total):
++                        break
++                state.update({"work_offset": offset, "rows": len(rows), "source_exhausted": False})
++                write_json(state_file, state)
++            offset += len(batch)
++            if offset >= total:
++                exhausted = True
++            state.update({"work_offset": offset, "rows": len(rows), "source_exhausted": exhausted})
++            write_json(state_file, state)
++    finally:
++        mb.close()
++
++    expansion._write_partitioned(rows[: expansion.LANGUAGE_TARGET], folder, stem)
++    return {
++        "target": expansion.LANGUAGE_TARGET,
++        "rows": min(len(rows), expansion.LANGUAGE_TARGET),
++        "complete": len(rows) >= expansion.LANGUAGE_TARGET,
++        "source_exhausted": exhausted,
++        "requests_this_run": requests,
++        "source_strategy": "MusicBrainz work language + explicit cover performance relationship",
++    }
++
++def _build_expansion(target: str) -> dict:
++    import build_expansion_lists as expansion
++
++    expansion.CACHE.mkdir(parents=True, exist_ok=True)
++    seconds = int(os.getenv("BEATHIT_WORKER_MAX_SECONDS", "19000"))
++    deadline = time.monotonic() + max(60, seconds)
++
++    if target == "per_game_vgm":
++        return expansion.build_per_game_vgm(deadline, int(os.getenv("BEATHIT_PER_GAME_MAX_GAMES", "3162")))
++    if target == "vocaloid_covers":
++        return expansion.build_vocaloid_covers(deadline, int(os.getenv("BEATHIT_VOCALOID_COVER_REQUESTS", "50000")))
++    if target.startswith("cover_"):
++        slug = target.removeprefix("cover_")
++        if slug not in expansion.LANGUAGE_COVERS:
++            raise ValueError(f"Unknown language cover target: {slug}")
++        return _build_language_cover_musicbrainz(
++            target,
++            deadline,
++            int(os.getenv("BEATHIT_COVER_MB_REQUESTS_PER_LANGUAGE", "12000")),
++        )
++    raise ValueError(target)
++
++
++def main() -> int:
++    if len(sys.argv) != 2 or sys.argv[1] not in ALL_TARGETS:
++        print("usage: build_list.py <target>", file=sys.stderr)
++        return 2
++    target = sys.argv[1]
++    try:
++        dataset = _build_core(target) if target in {"anime", "vocaloid", "video_game_music", "children_childhood", "countries"} else _build_expansion(target)
++        normalized = {
++            "target": dataset.get("target"),
++            "materialized_rows": int(dataset.get("materialized_rows", dataset.get("rows", 0)) or 0),
++            "complete": bool(dataset.get("complete")),
++            "builder_revision": "parallel-workers-v1",
++            "metric_coverage": dataset.get("metric_coverage") or {},
++            "notes": dataset.get("notes") or [json.dumps({k: v for k, v in dataset.items() if k not in {"target", "rows", "materialized_rows", "complete"}}, ensure_ascii=False)],
++        }
++        _status_fragment(target, normalized)
++        print(json.dumps({"target": target, "dataset": normalized}, ensure_ascii=False, indent=2))
++        return 0
++    except Exception as exc:
++        _status_fragment(target, {}, build_error=f"{type(exc).__name__}: {exc}")
++        raise
++
++
++if __name__ == "__main__":
++    raise SystemExit(main())
+diff --git a/.github/parallel/common.py b/.github/parallel/common.py
+new file mode 100644
+index 0000000..2641839
+--- /dev/null
++++ b/.github/parallel/common.py
+@@ -0,0 +1,93 @@
++from __future__ import annotations
++
++import json
++import shutil
++from pathlib import Path
++from typing import Iterable
++
++ROOT = Path(__file__).resolve().parents[2]
++DATA = ROOT / "data"
++PARALLEL = ROOT / ".parallel"
++STATUS_DIR = PARALLEL / "status"
++
++CORE_TARGETS = {"anime", "vocaloid", "video_game_music", "children_childhood", "countries"}
++EXPANSION_TARGETS = {
++    "per_game_vgm", "vocaloid_covers",
++    "cover_russian", "cover_japanese", "cover_german", "cover_afrikaans",
++    "cover_korean", "cover_chinese", "cover_ukrainian", "cover_swedish",
++    "cover_norwegian", "cover_indonesian",
++}
++ALL_TARGETS = CORE_TARGETS | EXPANSION_TARGETS
++
++
++def status_path(target: str) -> Path:
++    STATUS_DIR.mkdir(parents=True, exist_ok=True)
++    return STATUS_DIR / f"{target}.json"
++
++
++def read_json(path: Path) -> dict:
++    try:
++        value = json.loads(path.read_text(encoding="utf-8"))
++        return value if isinstance(value, dict) else {}
++    except Exception:
++        return {}
++
++
++def write_json(path: Path, value: dict) -> None:
++    path.parent.mkdir(parents=True, exist_ok=True)
++    tmp = path.with_suffix(path.suffix + ".tmp")
++    tmp.write_text(json.dumps(value, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
++    tmp.replace(path)
++
++
++def dataset_name(target: str) -> str:
++    if target == "per_game_vgm":
++        return "video_game_per_game"
++    return target
++
++
++def target_paths(target: str) -> list[Path]:
++    if target == "anime":
++        return [DATA / "anime" / "anime_songs.csv"]
++    if target == "vocaloid":
++        gz = DATA / "vocaloid" / "vocaloid_originals_youtube_views.csv.gz"
++        plain = DATA / "vocaloid" / "vocaloid_originals_youtube_views.csv"
++        return [gz if gz.exists() else plain]
++    if target == "video_game_music":
++        return [DATA / "video_games" / "video_game_music_10000.csv"]
++    if target == "children_childhood":
++        return [DATA / "children_childhood" / "children_childhood_10000.csv"]
++    if target == "countries":
++        return [DATA / "countries"]
++    if target == "per_game_vgm":
++        return [DATA / "video_games" / "per_game"]
++    if target == "vocaloid_covers":
++        return [DATA / "vocaloid_covers"]
++    if target.startswith("cover_"):
++        return [DATA / "language_covers" / target.removeprefix("cover_")]
++    raise KeyError(target)
++
++
++def iter_csvs(target: str) -> Iterable[Path]:
++    for path in target_paths(target):
++        if path.is_file() and (path.name.endswith(".csv") or path.name.endswith(".csv.gz")):
++            yield path
++        elif path.is_dir():
++            yield from sorted(path.rglob("*.csv"))
++            yield from sorted(path.rglob("*.csv.gz"))
++
++
++def copy_target_output(target: str, destination_root: Path) -> None:
++    for src in target_paths(target):
++        if not src.exists():
++            continue
++        rel = src.relative_to(ROOT)
++        dst = destination_root / rel
++        if src.is_dir():
++            if dst.exists():
++                shutil.rmtree(dst)
++            dst.parent.mkdir(parents=True, exist_ok=True)
++            shutil.copytree(src, dst)
++        else:
++            dst.parent.mkdir(parents=True, exist_ok=True)
++            shutil.copy2(src, dst)
+diff --git a/.github/parallel/consolidate.py b/.github/parallel/consolidate.py
+new file mode 100644
+index 0000000..d01fb89
+--- /dev/null
++++ b/.github/parallel/consolidate.py
+@@ -0,0 +1,101 @@
++#!/usr/bin/env python3
++from __future__ import annotations
++
++import json
++import shutil
++import sys
++from pathlib import Path
++
++ROOT = Path(__file__).resolve().parents[2]
++sys.path.insert(0, str(ROOT / "src"))
++sys.path.insert(0, str(ROOT / "scripts"))
++sys.path.insert(0, str(Path(__file__).resolve().parent))
++
++from common import read_json, write_json
++from music_megalist import fullbuild
++
++EXPANSION = [
++    "cover_russian", "cover_japanese", "cover_german", "cover_afrikaans",
++    "cover_korean", "cover_chinese", "cover_ukrainian", "cover_swedish",
++    "cover_norwegian", "cover_indonesian", "vocaloid_covers", "video_game_per_game",
++]
++
++
++def _copy_tree(src: Path, dst: Path) -> None:
++    if not src.exists():
++        return
++    for path in src.rglob("*"):
++        if not path.is_file():
++            continue
++        rel = path.relative_to(src)
++        out = dst / rel
++        out.parent.mkdir(parents=True, exist_ok=True)
++        shutil.copy2(path, out)
++
++
++def main() -> int:
++    incoming = Path(sys.argv[1]) if len(sys.argv) > 1 else ROOT / "incoming"
++    status = read_json(ROOT / "STATUS.json")
++    datasets = status.setdefault("datasets", {})
++    successful = []
++    failed = []
++
++    for artifact in sorted(incoming.glob("result-*")):
++        fragments = list((artifact / "status").glob("*.json"))
++        if not fragments:
++            continue
++        fragment = read_json(fragments[0])
++        target = str(fragment.get("target_name") or fragments[0].stem)
++        if not fragment.get("worker_success"):
++            failed.append(target)
++            continue
++        _copy_tree(artifact / "data", ROOT / "data")
++        name = str(fragment.get("dataset_name") or target)
++        dataset = dict(fragment.get("dataset") or {})
++        dataset["builder_revision"] = "parallel-workers-v1"
++        datasets[name] = dataset
++        successful.append(target)
++
++    # Per-game soundtrack evidence is merged only after every producer is finished, so the
++    # aggregate VGM worker never races the per-game worker.
++    if "per_game_vgm" in successful:
++        try:
++            import build_remaining_core
++            merged_rows = build_remaining_core._merge_per_game_into_general_vgm()
++            ds = datasets.setdefault("video_game_music", {})
++            ds["materialized_rows"] = merged_rows
++            if merged_rows > 9_000:
++                ds["complete"] = True
++        except Exception as exc:
++            failed.append(f"aggregate_vgm_merge:{type(exc).__name__}:{exc}")
++
++    for name, target in fullbuild.FIXED_TARGETS.items():
++        ds = datasets.get(name) or {}
++        rows = int(ds.get("materialized_rows") or 0)
++        if target == 10_000 and rows > 9_000:
++            ds["complete"] = True
++        datasets[name] = ds
++
++    summary = status.setdefault("completion_summary", {})
++    fixed_complete = all(bool((datasets.get(name) or {}).get("complete")) for name in fullbuild.FIXED_TARGETS)
++    core_complete = (
++        fixed_complete
++        and bool((datasets.get("vocaloid") or {}).get("complete"))
++        and bool((datasets.get("kpop") or {}).get("complete"))
++        and bool((datasets.get("countries") or {}).get("complete"))
++    )
++    expansion_complete = all(bool((datasets.get(name) or {}).get("complete")) for name in EXPANSION)
++    summary["all_fixed_size_targets_complete"] = fixed_complete
++    summary["core_lists_complete"] = core_complete
++    summary["expansion_lists_complete"] = expansion_complete
++    summary["all_requested_lists_complete"] = core_complete and expansion_complete
++    summary["last_parallel_successes"] = successful
++    summary["last_parallel_failures"] = failed
++    write_json(ROOT / "STATUS.json", status)
++    write_json(ROOT / ".parallel" / "consolidation.json", {"successful": successful, "failed": failed})
++    print(json.dumps({"successful": successful, "failed": failed}, indent=2))
++    return 0
++
++
++if __name__ == "__main__":
++    raise SystemExit(main())
+diff --git a/.github/parallel/finalize_list.py b/.github/parallel/finalize_list.py
+new file mode 100644
+index 0000000..29d547f
+--- /dev/null
++++ b/.github/parallel/finalize_list.py
+@@ -0,0 +1,152 @@
++#!/usr/bin/env python3
++from __future__ import annotations
++
++import json
++import sys
++from pathlib import Path
++
++ROOT = Path(__file__).resolve().parents[2]
++sys.path.insert(0, str(ROOT / "src"))
++sys.path.insert(0, str(Path(__file__).resolve().parent))
++
++from common import ALL_TARGETS, DATA, iter_csvs, read_json, status_path, target_paths, write_json
++from music_megalist.dedupe import norm
++from music_megalist.io import read_rows, write_rows
++from music_megalist.validate import _generic_csv_errors
++
++PART_SIZE = 10_000
++
++
++def _aliases(row, *, vocaloid_ids_only: bool = False, anime_scope: bool = False):
++    extra = row.extra or {}
++    if vocaloid_ids_only:
++        vid = str(extra.get("vocadb_id") or "").casefold()
++        return ("vocadb", vid) if vid else ("fallback", norm(row.title), norm(row.main_artist))
++
++    scope = ()
++    if anime_scope:
++        anime_id = extra.get("mal_id") or extra.get("anilist_id") or extra.get("anime_title") or ""
++        scope = (str(anime_id),)
++
++    ids = []
++    if row.spotify_track_id:
++        ids.append(("spotify", str(row.spotify_track_id).casefold()))
++    if row.musicbrainz_recording_mbid:
++        ids.append(("mbid", str(row.musicbrainz_recording_mbid).casefold()))
++    if row.isrc:
++        ids.append(("isrc", str(row.isrc).casefold()))
++    vocadb = str(extra.get("vocadb_id") or "").casefold()
++    if vocadb:
++        ids.append(("vocadb", vocadb))
++    text = ("text", norm(row.title), norm(row.main_artist))
++    return scope, ids, text
++
++
++def _dedupe_rows(rows, *, vocaloid_ids_only: bool = False, anime_scope: bool = False):
++    out = []
++    seen_ids = set()
++    seen_text = set()
++    seen_vocadb = set()
++    for row in rows:
++        if vocaloid_ids_only:
++            key = _aliases(row, vocaloid_ids_only=True)
++            if key in seen_vocadb:
++                continue
++            seen_vocadb.add(key)
++            out.append(row)
++            continue
++        scope, ids, text = _aliases(row, anime_scope=anime_scope)
++        scoped_ids = [(scope, *item) for item in ids]
++        scoped_text = (scope, *text)
++        if any(key in seen_ids for key in scoped_ids) or scoped_text in seen_text:
++            continue
++        seen_ids.update(scoped_ids)
++        seen_text.add(scoped_text)
++        out.append(row)
++    return out
++
++
++def _rewrite_one(path: Path, *, target: str) -> int:
++    rows = read_rows(path)
++    rows = _dedupe_rows(
++        rows,
++        vocaloid_ids_only=(target == "vocaloid"),
++        anime_scope=(target == "anime"),
++    )
++    for rank, row in enumerate(rows, 1):
++        row.rank = rank
++    write_rows(rows, path)
++    return len(rows)
++
++
++def _rewrite_partitioned(folder: Path, stem: str) -> int:
++    files = sorted(folder.glob(f"{stem}_part_*.csv"))
++    rows = []
++    for path in files:
++        rows.extend(read_rows(path))
++    rows = _dedupe_rows(rows)
++    for old in files:
++        old.unlink()
++    for start in range(0, len(rows), PART_SIZE):
++        part = rows[start:start + PART_SIZE]
++        for rank, row in enumerate(part, 1):
++            row.rank = rank
++        write_rows(part, folder / f"{stem}_part_{start // PART_SIZE + 1:03d}.csv")
++    return len(rows)
++
++
++def _finalize(target: str) -> int:
++    if target == "vocaloid_covers":
++        return _rewrite_partitioned(DATA / "vocaloid_covers", "vocaloid_covers")
++    if target.startswith("cover_"):
++        slug = target.removeprefix("cover_")
++        return _rewrite_partitioned(DATA / "language_covers" / slug, f"{slug}_covers")
++    if target == "per_game_vgm":
++        total = 0
++        folder = DATA / "video_games" / "per_game"
++        for path in sorted(folder.glob("*.csv")):
++            total += _rewrite_one(path, target=target)
++        return total
++    if target == "countries":
++        total = 0
++        for path in sorted((DATA / "countries").glob("*.csv")):
++            total += _rewrite_one(path, target=target)
++        return total
++    paths = [p for p in target_paths(target) if p.is_file()]
++    if not paths:
++        return 0
++    return sum(_rewrite_one(path, target=target) for path in paths)
++
++
++def main() -> int:
++    if len(sys.argv) != 2 or sys.argv[1] not in ALL_TARGETS:
++        return 2
++    target = sys.argv[1]
++    fragment_path = status_path(target)
++    fragment = read_json(fragment_path)
++    rows = _finalize(target)
++
++    errors = []
++    for path in iter_csvs(target):
++        errors.extend(_generic_csv_errors(path))
++
++    dataset = fragment.setdefault("dataset", {})
++    dataset["materialized_rows"] = rows
++    if dataset.get("target") == 10_000 and rows > 9_000:
++        dataset["complete"] = True
++    if target.startswith("cover_"):
++        dataset["complete"] = rows >= 100_000
++    fragment["deduplicated_rows"] = rows
++    fragment["validation_errors"] = errors[:200]
++    write_json(fragment_path, fragment)
++
++    if errors:
++        for error in errors[:100]:
++            print(error, file=sys.stderr)
++        return 1
++    print(json.dumps({"target": target, "rows": rows, "validation_errors": 0}, indent=2))
++    return 0
++
++
++if __name__ == "__main__":
++    raise SystemExit(main())
+diff --git a/.github/parallel/stage_result.py b/.github/parallel/stage_result.py
+new file mode 100644
+index 0000000..4760cb8
+--- /dev/null
++++ b/.github/parallel/stage_result.py
+@@ -0,0 +1,32 @@
++#!/usr/bin/env python3
++from __future__ import annotations
++
++import sys
++from pathlib import Path
++
++ROOT = Path(__file__).resolve().parents[2]
++sys.path.insert(0, str(Path(__file__).resolve().parent))
++
++from common import ALL_TARGETS, copy_target_output, read_json, status_path, write_json
++
++
++def main() -> int:
++    if len(sys.argv) != 4 or sys.argv[1] not in ALL_TARGETS:
++        print("usage: stage_result.py <target> <build-outcome> <finalize-outcome>", file=sys.stderr)
++        return 2
++    target, build_outcome, finalize_outcome = sys.argv[1:]
++    out = ROOT / ".parallel" / "out" / target
++    out.mkdir(parents=True, exist_ok=True)
++    fragment = read_json(status_path(target))
++    success = build_outcome == "success" and finalize_outcome == "success"
++    fragment["worker_success"] = success
++    fragment["build_outcome"] = build_outcome
++    fragment["finalize_outcome"] = finalize_outcome
++    if success:
++        copy_target_output(target, out)
++    write_json(out / "status" / f"{target}.json", fragment)
++    return 0
++
++
++if __name__ == "__main__":
++    raise SystemExit(main())
+diff --git a/.github/workflows/expansion-build.yml b/.github/workflows/expansion-build.yml
+deleted file mode 100644
+index c0256f2..0000000
+--- a/.github/workflows/expansion-build.yml
++++ /dev/null
+@@ -1,98 +0,0 @@
+-name: expansion-high-coverage-build
+-
+-on:
+-  workflow_dispatch:
+-    inputs:
+-      max_seconds:
+-        description: "Maximum runtime for expansion builders"
+-        required: false
+-        default: "19000"
+-        type: string
+-  schedule:
+-    - cron: '17 5 * * *'
+-  push:
+-    branches: [main]
+-    paths:
+-      - 'scripts/build_expansion_lists.py'
+-      - 'data/seeds/beathit_video_games_master_list.txt'
+-      - '.github/workflows/expansion-build.yml'
+-
+-permissions:
+-  contents: write
+-  actions: read
+-
+-concurrency:
+-  group: beathit-expansion-build
+-  cancel-in-progress: false
+-
+-jobs:
+-  expansion:
+-    runs-on: ubuntu-latest
+-    timeout-minutes: 355
+-    steps:
+-      - uses: actions/checkout@v4
+-        with:
+-          fetch-depth: 1
+-
+-      - uses: actions/setup-python@v5
+-        with:
+-          python-version: '3.12'
+-          cache: pip
+-
+-      - name: Install builder
+-        run: |
+-          python -m pip install --upgrade pip
+-          pip install -e . -r requirements-full.txt
+-
+-      - name: Restore expansion checkpoints
+-        uses: actions/cache/restore@v4
+-        with:
+-          path: .cache/beathit-expansion
+-          key: beathit-expansion-v2-${{ runner.os }}-${{ github.run_id }}-${{ github.run_attempt }}
+-          restore-keys: |
+-            beathit-expansion-v2-${{ runner.os }}-
+-            beathit-expansion-v1-${{ runner.os }}-
+-
+-      - name: Build language covers, Vocaloid covers, and per-game VGM
+-        env:
+-          PYTHONUNBUFFERED: '1'
+-          BEATHIT_EXPANSION_MAX_SECONDS: ${{ github.event_name == 'workflow_dispatch' && inputs.max_seconds || '19000' }}
+-          BEATHIT_COVER_MB_REQUESTS_PER_LANGUAGE: ${{ vars.BEATHIT_COVER_MB_REQUESTS_PER_LANGUAGE || '1200' }}
+-          BEATHIT_VOCALOID_COVER_REQUESTS: ${{ vars.BEATHIT_VOCALOID_COVER_REQUESTS || '4000' }}
+-          BEATHIT_PER_GAME_MAX_GAMES: ${{ vars.BEATHIT_PER_GAME_MAX_GAMES || '3162' }}
+-        run: python scripts/build_expansion_lists.py
+-
+-      - name: Save expansion checkpoints
+-        if: always()
+-        uses: actions/cache/save@v4
+-        with:
+-          path: .cache/beathit-expansion
+-          key: beathit-expansion-v2-${{ runner.os }}-${{ github.run_id }}-${{ github.run_attempt }}
+-
+-      - name: Validate generated CSV structure
+-        run: python -m music_megalist validate
+-
+-      - name: Update manifest
+-        run: python scripts/update_manifest.py
+-
+-      - name: Upload expansion outputs
+-        if: always()
+-        uses: actions/upload-artifact@v4
+-        with:
+-          name: beathit-expansion-output
+-          path: |
+-            STATUS.json
+-            data/MANIFEST.json
+-            data/language_covers/**/*.csv
+-            data/vocaloid_covers/*.csv
+-            data/video_games/per_game/*.csv
+-
+-      - name: Commit expansion outputs
+-        run: |
+-          git config user.name "BeatHit Dataset Builder"
+-          git config user.email "actions@users.noreply.github.com"
+-          git add -A -- STATUS.json data/MANIFEST.json data/language_covers data/vocaloid_covers data/video_games/per_game
+-          if ! git diff --cached --quiet; then
+-            git commit -m "Build resumable BeatHit expansion lists [skip full-build]"
+-            git push origin HEAD:main
+-          fi
+diff --git a/.github/workflows/fill-remaining-core.yml b/.github/workflows/fill-remaining-core.yml
+deleted file mode 100644
+index 79a0eb2..0000000
+--- a/.github/workflows/fill-remaining-core.yml
++++ /dev/null
+@@ -1,108 +0,0 @@
+-name: fill-remaining-core-lists
+-
+-on:
+-  workflow_dispatch:
+-  schedule:
+-    - cron: '43 3 * * *'
+-  push:
+-    branches: [main]
+-    paths:
+-      - 'scripts/build_remaining_core.py'
+-      - '.github/workflows/fill-remaining-core.yml'
+-
+-permissions:
+-  contents: write
+-  actions: read
+-
+-concurrency:
+-  group: beathit-core-fill
+-  cancel-in-progress: false
+-
+-jobs:
+-  fill:
+-    runs-on: ubuntu-latest
+-    timeout-minutes: 355
+-    steps:
+-      - uses: actions/checkout@v4
+-        with:
+-          fetch-depth: 1
+-
+-      - uses: actions/setup-python@v5
+-        with:
+-          python-version: '3.12'
+-          cache: pip
+-
+-      - name: Install builder
+-        run: |
+-          python -m pip install --upgrade pip
+-          pip install -e . -r requirements-full.txt pytest
+-
+-      - name: Restore full-build caches
+-        uses: actions/cache/restore@v4
+-        with:
+-          path: |
+-            data/raw/full_build
+-            .cache/full_build
+-          key: beathit-core-fill-v2-${{ runner.os }}-${{ github.run_id }}-${{ github.run_attempt }}
+-          restore-keys: |
+-            beathit-core-fill-v2-${{ runner.os }}-
+-            beathit-builder-checkpoints-v3-${{ runner.os }}-
+-            beathit-sources-v5-${{ runner.os }}-
+-
+-      - name: Fill genuinely short core lists
+-        env:
+-          YOUTUBE_API_KEY: ${{ secrets.YOUTUBE_API_KEY }}
+-          PYTHONUNBUFFERED: '1'
+-          BEATHIT_RYD_FALLBACK: '1'
+-          BEATHIT_RYD_WORKERS: '20'
+-          BEATHIT_JIKAN_MAX_QUERIES: ${{ vars.BEATHIT_JIKAN_MAX_QUERIES || '5000' }}
+-          BEATHIT_JIKAN_INDEX_PAGES: ${{ vars.BEATHIT_JIKAN_INDEX_PAGES || '400' }}
+-          BEATHIT_JIKAN_MAX_SECONDS: ${{ vars.BEATHIT_JIKAN_MAX_SECONDS || '7200' }}
+-          BEATHIT_JIKAN_FAILURE_BREAKER: '16'
+-          BEATHIT_VOCADB_SCAN_LIMIT: ${{ vars.BEATHIT_VOCADB_SCAN_LIMIT || '500000' }}
+-          BEATHIT_VOCALOID_VIEW_CACHE_DAYS: '30'
+-          BEATHIT_LB_MAX_SECONDS: ${{ vars.BEATHIT_LB_MAX_SECONDS || '10800' }}
+-          BEATHIT_LB_MAX_QUERIES: ${{ vars.BEATHIT_LB_MAX_QUERIES || '1200' }}
+-          BEATHIT_COUNTRY_WORKERS: ${{ vars.BEATHIT_COUNTRY_WORKERS || '8' }}
+-        run: python scripts/build_remaining_core.py
+-
+-      - name: Save full-build caches
+-        if: always()
+-        uses: actions/cache/save@v4
+-        with:
+-          path: |
+-            data/raw/full_build
+-            .cache/full_build
+-          key: beathit-core-fill-v2-${{ runner.os }}-${{ github.run_id }}-${{ github.run_attempt }}
+-
+-      - name: Validate canonical CSV structure
+-        run: python -m music_megalist validate
+-
+-      - name: Update manifest
+-        run: python scripts/update_manifest.py
+-
+-      - name: Upload core outputs
+-        if: always()
+-        uses: actions/upload-artifact@v4
+-        with:
+-          name: beathit-core-fill-output
+-          path: |
+-            STATUS.json
+-            data/MANIFEST.json
+-            data/BUILD_REPORT.json
+-            data/coverage_report.csv
+-            data/anime/*.csv
+-            data/vocaloid/*.csv*
+-            data/video_games/video_game_music_10000.csv
+-            data/children_childhood/*.csv
+-            data/countries/*
+-
+-      - name: Commit core outputs
+-        run: |
+-          git config user.name "BeatHit Dataset Builder"
+-          git config user.email "actions@users.noreply.github.com"
+-          git add -A -- STATUS.json data/MANIFEST.json data/BUILD_REPORT.json data/coverage_report.csv data/anime data/vocaloid data/video_games/video_game_music_10000.csv data/children_childhood data/countries
+-          if ! git diff --cached --quiet; then
+-            git commit -m "Fill remaining BeatHit core lists [skip full-build]"
+-            git push origin HEAD:main
+-          fi
+diff --git a/data/seeds/children_quebec_policy.json b/data/seeds/children_quebec_policy.json
+new file mode 100644
+index 0000000..e0bf2e3
+--- /dev/null
++++ b/data/seeds/children_quebec_policy.json
+@@ -0,0 +1,194 @@
++{
++  "schema_version": 1,
++  "scope": "Songs reasonably likely to have been heard by a child living in Quebec, age 0-12, during the most recent 10-year observation window.",
++  "window_years": 10,
++  "minimum_accept_score": 55,
++  "youtube_max_searches": 48,
++  "youtube_min_views_generic": 5000,
++  "youtube_min_views_local": 500,
++  "apple_children_genres": [
++    "Children's Music",
++    "Musique pour enfants"
++  ],
++  "reject_terms": [
++    "karaoke",
++    "instrumental",
++    "reaction",
++    "nightcore",
++    "sped up",
++    "slowed",
++    "8d audio",
++    "cover tutorial",
++    "piano tutorial",
++    "guitar tutorial",
++    "compilation",
++    "non stop",
++    "1 hour",
++    "60 minutes",
++    "30 minutes",
++    "music box",
++    "lullaby version"
++  ],
++  "youtube_reject_terms": [
++    "karaoke",
++    "instrumental",
++    "reaction",
++    "nightcore",
++    "sped up",
++    "slowed",
++    "8d audio",
++    "tutorial",
++    "compilation",
++    "non stop",
++    "1 hour",
++    "60 minutes",
++    "30 minutes",
++    "full episode",
++    "episode complet",
++    "playlist"
++  ],
++  "quebec_markers": [
++    "Passe-Partout",
++    "Passe-Montagne",
++    "Télé-Québec",
++    "Arthur L'aventurier",
++    "Les Petites Tounes",
++    "Annie Brocoli",
++    "Shilvi",
++    "Caillou",
++    "Mini TFO",
++    "Carmen Campagne",
++    "Henri Dès",
++    "Raffi",
++    "Ari Cui Cui",
++    "Atchoum",
++    "Le Gros Orteil",
++    "Benoît Archambault",
++    "Toc Toc Toc",
++    "1, 2, 3... Géant",
++    "Cornemuse",
++    "Salmigondis"
++  ],
++  "franchise_markers": [
++    "Disney Junior",
++    "Disney",
++    "Pixar",
++    "Frozen",
++    "La Reine des neiges",
++    "Encanto",
++    "Moana",
++    "Vaiana",
++    "Trolls",
++    "Bluey",
++    "PAW Patrol",
++    "Pat'Patrouille",
++    "Gabby's Dollhouse",
++    "La maison magique de Gabby",
++    "Cocomelon",
++    "Pinkfong",
++    "Baby Shark",
++    "Super Simple Songs",
++    "The Wiggles",
++    "Sesame Street",
++    "Rue Sésame",
++    "Peppa Pig",
++    "Dora the Explorer",
++    "Dora l'exploratrice",
++    "Mickey Mouse",
++    "Minnie Mouse",
++    "Spidey and His Amazing Friends",
++    "Cars",
++    "Toy Story",
++    "Minions",
++    "Despicable Me",
++    "Moi, moche et méchant",
++    "Sing",
++    "Tous en scène",
++    "The Lion King",
++    "Le Roi Lion",
++    "Aladdin",
++    "Beauty and the Beast",
++    "La Belle et la Bête",
++    "Little Mermaid",
++    "La Petite Sirène"
++  ],
++  "evergreen_markers": [
++    "Passe-Partout",
++    "Arthur L'aventurier",
++    "Les Petites Tounes",
++    "Annie Brocoli",
++    "Shilvi",
++    "Caillou",
++    "Carmen Campagne",
++    "Henri Dès",
++    "Raffi",
++    "Sesame Street",
++    "Rue Sésame",
++    "The Wiggles",
++    "Super Simple Songs",
++    "Disney",
++    "Mickey Mouse"
++  ],
++  "queries": [
++    {"term": "chansons pour enfants québec", "youtube_term": "chansons pour enfants québec", "kind": "quebec_generic", "language": "fr", "weight": 50},
++    {"term": "comptines québécoises", "youtube_term": "comptines québécoises", "kind": "quebec_generic", "language": "fr", "weight": 50},
++    {"term": "musique jeunesse québec", "youtube_term": "musique jeunesse québec", "kind": "quebec_generic", "language": "fr", "weight": 48},
++    {"term": "chansons jeunesse québec", "youtube_term": "chansons jeunesse québec", "kind": "quebec_generic", "language": "fr", "weight": 48},
++    {"term": "chansons garderie québec", "youtube_term": "chansons garderie québec", "kind": "quebec_generic", "language": "fr", "weight": 48},
++    {"term": "chansons maternelle québec", "youtube_term": "chansons maternelle québec", "kind": "quebec_generic", "language": "fr", "weight": 48},
++    {"term": "chansons école primaire québec", "youtube_term": "chansons école primaire québec", "kind": "quebec_generic", "language": "fr", "weight": 46},
++    {"term": "chansons camp de jour québec", "youtube_term": "chansons camp de jour québec", "kind": "quebec_generic", "language": "fr", "weight": 46},
++
++    {"term": "Passe-Partout", "kind": "quebec_artist", "language": "fr", "weight": 65, "evergreen": true, "anchors": ["Passe-Partout", "Passe-Montagne"]},
++    {"term": "Arthur L'aventurier", "kind": "quebec_artist", "language": "fr", "weight": 65, "evergreen": true, "anchors": ["Arthur L'aventurier"]},
++    {"term": "Les Petites Tounes", "kind": "quebec_artist", "language": "fr", "weight": 65, "evergreen": true, "anchors": ["Les Petites Tounes"]},
++    {"term": "Annie Brocoli", "kind": "quebec_artist", "language": "fr", "weight": 64, "evergreen": true, "anchors": ["Annie Brocoli"]},
++    {"term": "Shilvi", "kind": "quebec_artist", "language": "fr", "weight": 62, "evergreen": true, "anchors": ["Shilvi"]},
++    {"term": "Ari Cui Cui", "kind": "quebec_artist", "language": "fr", "weight": 62, "anchors": ["Ari Cui Cui"]},
++    {"term": "Atchoum", "kind": "quebec_artist", "language": "fr", "weight": 60, "anchors": ["Atchoum"]},
++    {"term": "Le Gros Orteil", "kind": "quebec_artist", "language": "fr", "weight": 60, "anchors": ["Le Gros Orteil"]},
++    {"term": "Benoît Archambault enfants", "kind": "quebec_artist", "language": "fr", "weight": 58, "anchors": ["Benoît Archambault"]},
++    {"term": "Caillou chansons français", "youtube_term": "Caillou chansons français", "kind": "franchise", "language": "fr", "weight": 60, "evergreen": true, "anchors": ["Caillou"]},
++    {"term": "Mini TFO chansons", "youtube_term": "Mini TFO chansons", "kind": "quebec_artist", "language": "fr", "weight": 56, "anchors": ["Mini TFO"]},
++    {"term": "Carmen Campagne", "kind": "quebec_artist", "language": "fr", "weight": 58, "evergreen": true, "anchors": ["Carmen Campagne"]},
++    {"term": "Henri Dès", "kind": "quebec_artist", "language": "fr", "weight": 56, "evergreen": true, "anchors": ["Henri Dès"]},
++    {"term": "Raffi kids", "youtube_term": "Raffi kids songs", "kind": "quebec_artist", "language": "en", "weight": 58, "evergreen": true, "anchors": ["Raffi"]},
++
++    {"term": "Disney Junior français chansons", "youtube_term": "Disney Junior français chansons", "kind": "franchise", "language": "fr", "weight": 54, "anchors": ["Disney Junior", "Disney"]},
++    {"term": "La Reine des neiges chansons français", "youtube_term": "La Reine des neiges chansons français", "kind": "franchise", "language": "fr", "weight": 58, "anchors": ["La Reine des neiges", "Frozen"]},
++    {"term": "Encanto chansons français", "youtube_term": "Encanto chansons français", "kind": "franchise", "language": "fr", "weight": 58, "anchors": ["Encanto"]},
++    {"term": "Vaiana chansons français", "youtube_term": "Vaiana chansons français", "kind": "franchise", "language": "fr", "weight": 56, "anchors": ["Vaiana", "Moana"]},
++    {"term": "Le Roi Lion chansons français", "youtube_term": "Le Roi Lion chansons français", "kind": "franchise", "language": "fr", "weight": 54, "evergreen": true, "anchors": ["Le Roi Lion", "The Lion King"]},
++    {"term": "La Petite Sirène chansons français", "youtube_term": "La Petite Sirène chansons français", "kind": "franchise", "language": "fr", "weight": 54, "anchors": ["La Petite Sirène", "Little Mermaid"]},
++    {"term": "Pat Patrouille chansons français", "youtube_term": "Pat Patrouille chansons français", "kind": "franchise", "language": "fr", "weight": 56, "anchors": ["Pat'Patrouille", "PAW Patrol"]},
++    {"term": "Bluey chansons français", "youtube_term": "Bluey chansons français", "kind": "franchise", "language": "fr", "weight": 56, "anchors": ["Bluey"]},
++    {"term": "La maison magique de Gabby chansons français", "youtube_term": "La maison magique de Gabby chansons français", "kind": "franchise", "language": "fr", "weight": 56, "anchors": ["Gabby", "La maison magique de Gabby"]},
++    {"term": "Cocomelon français", "youtube_term": "Cocomelon français chansons", "kind": "franchise", "language": "fr", "weight": 54, "anchors": ["Cocomelon"]},
++    {"term": "Pinkfong français", "youtube_term": "Pinkfong français chansons", "kind": "franchise", "language": "fr", "weight": 52, "anchors": ["Pinkfong", "Baby Shark"]},
++
++    {"term": "kids songs Canada", "youtube_term": "kids songs Canada", "kind": "generic", "language": "en", "weight": 38},
++    {"term": "children songs Canada", "youtube_term": "children songs Canada", "kind": "generic", "language": "en", "weight": 38},
++    {"term": "nursery rhymes Canada", "youtube_term": "nursery rhymes Canada", "kind": "generic", "language": "en", "weight": 36},
++    {"term": "preschool songs Canada", "youtube_term": "preschool songs Canada", "kind": "generic", "language": "en", "weight": 36},
++    {"term": "school songs kids Canada", "youtube_term": "school songs kids Canada", "kind": "generic", "language": "en", "weight": 34},
++    {"term": "camp songs kids Canada", "youtube_term": "camp songs kids Canada", "kind": "generic", "language": "en", "weight": 34},
++    {"term": "Super Simple Songs", "youtube_term": "Super Simple Songs", "kind": "franchise", "language": "en", "weight": 50, "evergreen": true, "anchors": ["Super Simple Songs"]},
++    {"term": "The Wiggles", "youtube_term": "The Wiggles songs", "kind": "franchise", "language": "en", "weight": 50, "evergreen": true, "anchors": ["The Wiggles"]},
++    {"term": "Sesame Street songs", "youtube_term": "Sesame Street songs", "kind": "franchise", "language": "en", "weight": 50, "evergreen": true, "anchors": ["Sesame Street"]},
++    {"term": "Cocomelon songs", "youtube_term": "Cocomelon songs", "kind": "franchise", "language": "en", "weight": 48, "anchors": ["Cocomelon"]},
++    {"term": "Pinkfong songs", "youtube_term": "Pinkfong songs", "kind": "franchise", "language": "en", "weight": 48, "anchors": ["Pinkfong", "Baby Shark"]},
++    {"term": "Bluey songs", "youtube_term": "Bluey songs", "kind": "franchise", "language": "en", "weight": 48, "anchors": ["Bluey"]},
++    {"term": "PAW Patrol songs", "youtube_term": "PAW Patrol songs", "kind": "franchise", "language": "en", "weight": 48, "anchors": ["PAW Patrol"]},
++    {"term": "Gabby's Dollhouse songs", "youtube_term": "Gabby's Dollhouse songs", "kind": "franchise", "language": "en", "weight": 48, "anchors": ["Gabby's Dollhouse"]},
++    {"term": "Frozen songs", "youtube_term": "Frozen songs", "kind": "franchise", "language": "en", "weight": 46, "anchors": ["Frozen"]},
++    {"term": "Encanto songs", "youtube_term": "Encanto songs", "kind": "franchise", "language": "en", "weight": 46, "anchors": ["Encanto"]},
++    {"term": "Moana songs", "youtube_term": "Moana songs", "kind": "franchise", "language": "en", "weight": 46, "anchors": ["Moana"]},
++    {"term": "Trolls songs", "youtube_term": "Trolls songs", "kind": "franchise", "language": "en", "weight": 44, "anchors": ["Trolls"]},
++    {"term": "Disney Junior songs", "youtube_term": "Disney Junior songs", "kind": "franchise", "language": "en", "weight": 44, "anchors": ["Disney Junior", "Disney"]}
++  ],
++  "year_query_templates": [
++    {"term": "chansons enfants {year}", "youtube_term": "chansons enfants {year}", "kind": "quebec_generic", "language": "fr", "weight": 42},
++    {"term": "comptines enfants {year}", "youtube_term": "comptines enfants {year}", "kind": "quebec_generic", "language": "fr", "weight": 40},
++    {"term": "kids songs {year}", "youtube_term": "kids songs {year}", "kind": "generic", "language": "en", "weight": 34}
++  ]
++}
+diff --git a/.github/workflows/parallel-list-build.yml b/.github/workflows/parallel-list-build.yml
+new file mode 100644
+index 0000000..8490d28
+--- /dev/null
++++ b/.github/workflows/parallel-list-build.yml
+@@ -0,0 +1,211 @@
++name: parallel-list-build
++
++on:
++  workflow_dispatch:
++  schedule:
++    - cron: '17 4 * * *'
++  push:
++    branches: [main]
++    paths:
++      - '.github/parallel/**'
++      - '.github/workflows/parallel-list-build.yml'
++      - 'data/seeds/beathit_video_games_master_list.txt'
++      - 'data/seeds/children_quebec_policy.json'
++
++permissions:
++  contents: write
++  actions: read
++
++concurrency:
++  group: beathit-parallel-lists
++  cancel-in-progress: false
++
++jobs:
++  build-list:
++    strategy:
++      fail-fast: false
++      max-parallel: 20
++      matrix:
++        list:
++          - anime
++          - vocaloid
++          - video_game_music
++          - children_childhood
++          - countries
++          - per_game_vgm
++          - vocaloid_covers
++          - cover_russian
++          - cover_japanese
++          - cover_german
++          - cover_afrikaans
++          - cover_korean
++          - cover_chinese
++          - cover_ukrainian
++          - cover_swedish
++          - cover_norwegian
++          - cover_indonesian
++
++    runs-on: ubuntu-latest
++    timeout-minutes: 355
++
++    steps:
++      - uses: actions/checkout@v4
++        with:
++          fetch-depth: 1
++
++      - uses: actions/setup-python@v5
++        with:
++          python-version: '3.12'
++          cache: pip
++
++      - name: Install builder
++        run: |
++          python -m pip install --upgrade pip
++          pip install -e . -r requirements-full.txt pytest
++
++      - name: Restore core cache
++        if: contains(fromJSON('["anime","vocaloid","video_game_music","children_childhood","countries"]'), matrix.list)
++        uses: actions/cache/restore@v4
++        with:
++          path: |
++            data/raw/full_build
++            .cache/full_build
++          key: beathit-parallel-core-${{ matrix.list }}-${{ runner.os }}-${{ github.run_id }}-${{ github.run_attempt }}
++          restore-keys: |
++            beathit-parallel-core-${{ matrix.list }}-${{ runner.os }}-
++            beathit-core-fill-v2-${{ runner.os }}-
++            beathit-builder-checkpoints-v3-${{ runner.os }}-
++            beathit-sources-v5-${{ runner.os }}-
++
++      - name: Restore expansion cache
++        if: ${{ !contains(fromJSON('["anime","vocaloid","video_game_music","children_childhood","countries"]'), matrix.list) }}
++        uses: actions/cache/restore@v4
++        with:
++          path: .cache/beathit-expansion
++          key: beathit-parallel-expansion-${{ matrix.list }}-${{ runner.os }}-${{ github.run_id }}-${{ github.run_attempt }}
++          restore-keys: |
++            beathit-parallel-expansion-${{ matrix.list }}-${{ runner.os }}-
++            beathit-expansion-v2-${{ runner.os }}-
++
++      - name: Build ${{ matrix.list }}
++        id: build
++        continue-on-error: true
++        env:
++          PYTHONUNBUFFERED: '1'
++          YOUTUBE_API_KEY: ${{ secrets.YOUTUBE_API_KEY }}
++          BEATHIT_WORKER_MAX_SECONDS: ${{ vars.BEATHIT_WORKER_MAX_SECONDS || '19000' }}
++          BEATHIT_RYD_FALLBACK: '1'
++          BEATHIT_RYD_WORKERS: '20'
++          BEATHIT_JIKAN_MAX_QUERIES: ${{ vars.BEATHIT_JIKAN_MAX_QUERIES || '5000' }}
++          BEATHIT_JIKAN_INDEX_PAGES: ${{ vars.BEATHIT_JIKAN_INDEX_PAGES || '400' }}
++          BEATHIT_JIKAN_MAX_SECONDS: ${{ vars.BEATHIT_JIKAN_MAX_SECONDS || '7200' }}
++          BEATHIT_JIKAN_FAILURE_BREAKER: '16'
++          BEATHIT_VOCADB_SCAN_LIMIT: ${{ vars.BEATHIT_VOCADB_SCAN_LIMIT || '500000' }}
++          BEATHIT_VOCALOID_VIEW_CACHE_DAYS: '30'
++          BEATHIT_LB_MAX_SECONDS: ${{ vars.BEATHIT_LB_MAX_SECONDS || '10800' }}
++          BEATHIT_LB_MAX_QUERIES: ${{ vars.BEATHIT_LB_MAX_QUERIES || '2400' }}
++          BEATHIT_CHILDREN_WINDOW_YEARS: ${{ vars.BEATHIT_CHILDREN_WINDOW_YEARS || '10' }}
++          BEATHIT_CHILDREN_YOUTUBE_SEARCHES: ${{ vars.BEATHIT_CHILDREN_YOUTUBE_SEARCHES || '48' }}
++          BEATHIT_COUNTRY_WORKERS: ${{ vars.BEATHIT_COUNTRY_WORKERS || '8' }}
++          BEATHIT_COVER_MB_REQUESTS_PER_LANGUAGE: ${{ vars.BEATHIT_COVER_MB_REQUESTS_PER_LANGUAGE || '12000' }}
++          BEATHIT_VOCALOID_COVER_REQUESTS: ${{ vars.BEATHIT_VOCALOID_COVER_REQUESTS || '50000' }}
++          BEATHIT_PER_GAME_MAX_GAMES: ${{ vars.BEATHIT_PER_GAME_MAX_GAMES || '3162' }}
++        run: python .github/parallel/build_list.py "${{ matrix.list }}"
++
++      - name: Deduplicate and validate ${{ matrix.list }}
++        id: finalize
++        if: steps.build.outcome == 'success'
++        continue-on-error: true
++        run: python .github/parallel/finalize_list.py "${{ matrix.list }}"
++
++      - name: Stage worker result
++        if: always()
++        run: >-
++          python .github/parallel/stage_result.py
++          "${{ matrix.list }}"
++          "${{ steps.build.outcome }}"
++          "${{ steps.finalize.outcome }}"
++
++      - name: Save core cache
++        if: always() && contains(fromJSON('["anime","vocaloid","video_game_music","children_childhood","countries"]'), matrix.list)
++        uses: actions/cache/save@v4
++        with:
++          path: |
++            data/raw/full_build
++            .cache/full_build
++          key: beathit-parallel-core-${{ matrix.list }}-${{ runner.os }}-${{ github.run_id }}-${{ github.run_attempt }}
++
++      - name: Save expansion cache
++        if: always() && !contains(fromJSON('["anime","vocaloid","video_game_music","children_childhood","countries"]'), matrix.list)
++        uses: actions/cache/save@v4
++        with:
++          path: .cache/beathit-expansion
++          key: beathit-parallel-expansion-${{ matrix.list }}-${{ runner.os }}-${{ github.run_id }}-${{ github.run_attempt }}
++
++      - name: Upload ${{ matrix.list }} result
++        if: always()
++        uses: actions/upload-artifact@v4
++        with:
++          name: result-${{ matrix.list }}
++          path: .parallel/out/${{ matrix.list }}/
++          if-no-files-found: error
++
++      - name: Propagate worker failure after preserving artifacts
++        if: always()
++        run: |
++          test "${{ steps.build.outcome }}" = "success"
++          test "${{ steps.finalize.outcome }}" = "success"
++
++  consolidate:
++    needs: build-list
++    if: ${{ always() }}
++    runs-on: ubuntu-latest
++    timeout-minutes: 60
++
++    steps:
++      - uses: actions/checkout@v4
++        with:
++          fetch-depth: 1
++
++      - uses: actions/setup-python@v5
++        with:
++          python-version: '3.12'
++          cache: pip
++
++      - name: Install builder
++        run: |
++          python -m pip install --upgrade pip
++          pip install -e . -r requirements-full.txt
++
++      - name: Download every worker result
++        uses: actions/download-artifact@v4
++        with:
++          pattern: result-*
++          path: incoming
++          merge-multiple: false
++
++      - name: Consolidate successful workers
++        run: python .github/parallel/consolidate.py incoming
++
++      - name: Update manifest after consolidation
++        run: python scripts/update_manifest.py
++
++      - name: Upload consolidation report
++        if: always()
++        uses: actions/upload-artifact@v4
++        with:
++          name: beathit-parallel-consolidation
++          path: |
++            .parallel/consolidation.json
++            STATUS.json
++            data/MANIFEST.json
++
++      - name: Commit successful list outputs together
++        run: |
++          git config user.name "BeatHit Dataset Builder"
++          git config user.email "actions@users.noreply.github.com"
++          git add -A -- STATUS.json data/MANIFEST.json data/anime data/vocaloid data/video_games data/children_childhood data/countries data/language_covers data/vocaloid_covers
++          if ! git diff --cached --quiet; then
++            git commit -m "Consolidate parallel BeatHit lists [skip full-build]"
++            git push origin HEAD:main
++          fi

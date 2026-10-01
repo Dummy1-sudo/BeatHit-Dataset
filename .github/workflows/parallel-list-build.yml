@@ -1,0 +1,211 @@
+name: parallel-list-build
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '17 4 * * *'
+  push:
+    branches: [main]
+    paths:
+      - '.github/parallel/**'
+      - '.github/workflows/parallel-list-build.yml'
+      - 'data/seeds/beathit_video_games_master_list.txt'
+      - 'data/seeds/children_quebec_policy.json'
+
+permissions:
+  contents: write
+  actions: read
+
+concurrency:
+  group: beathit-parallel-lists
+  cancel-in-progress: false
+
+jobs:
+  build-list:
+    strategy:
+      fail-fast: false
+      max-parallel: 20
+      matrix:
+        list:
+          - anime
+          - vocaloid
+          - video_game_music
+          - children_childhood
+          - countries
+          - per_game_vgm
+          - vocaloid_covers
+          - cover_russian
+          - cover_japanese
+          - cover_german
+          - cover_afrikaans
+          - cover_korean
+          - cover_chinese
+          - cover_ukrainian
+          - cover_swedish
+          - cover_norwegian
+          - cover_indonesian
+
+    runs-on: ubuntu-latest
+    timeout-minutes: 355
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+
+      - name: Install builder
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e . -r requirements-full.txt pytest
+
+      - name: Restore core cache
+        if: contains(fromJSON('["anime","vocaloid","video_game_music","children_childhood","countries"]'), matrix.list)
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            data/raw/full_build
+            .cache/full_build
+          key: beathit-parallel-core-${{ matrix.list }}-${{ runner.os }}-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: |
+            beathit-parallel-core-${{ matrix.list }}-${{ runner.os }}-
+            beathit-core-fill-v2-${{ runner.os }}-
+            beathit-builder-checkpoints-v3-${{ runner.os }}-
+            beathit-sources-v5-${{ runner.os }}-
+
+      - name: Restore expansion cache
+        if: ${{ !contains(fromJSON('["anime","vocaloid","video_game_music","children_childhood","countries"]'), matrix.list) }}
+        uses: actions/cache/restore@v4
+        with:
+          path: .cache/beathit-expansion
+          key: beathit-parallel-expansion-${{ matrix.list }}-${{ runner.os }}-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: |
+            beathit-parallel-expansion-${{ matrix.list }}-${{ runner.os }}-
+            beathit-expansion-v2-${{ runner.os }}-
+
+      - name: Build ${{ matrix.list }}
+        id: build
+        continue-on-error: true
+        env:
+          PYTHONUNBUFFERED: '1'
+          YOUTUBE_API_KEY: ${{ secrets.YOUTUBE_API_KEY }}
+          BEATHIT_WORKER_MAX_SECONDS: ${{ vars.BEATHIT_WORKER_MAX_SECONDS || '19000' }}
+          BEATHIT_RYD_FALLBACK: '1'
+          BEATHIT_RYD_WORKERS: '20'
+          BEATHIT_JIKAN_MAX_QUERIES: ${{ vars.BEATHIT_JIKAN_MAX_QUERIES || '5000' }}
+          BEATHIT_JIKAN_INDEX_PAGES: ${{ vars.BEATHIT_JIKAN_INDEX_PAGES || '400' }}
+          BEATHIT_JIKAN_MAX_SECONDS: ${{ vars.BEATHIT_JIKAN_MAX_SECONDS || '7200' }}
+          BEATHIT_JIKAN_FAILURE_BREAKER: '16'
+          BEATHIT_VOCADB_SCAN_LIMIT: ${{ vars.BEATHIT_VOCADB_SCAN_LIMIT || '500000' }}
+          BEATHIT_VOCALOID_VIEW_CACHE_DAYS: '30'
+          BEATHIT_LB_MAX_SECONDS: ${{ vars.BEATHIT_LB_MAX_SECONDS || '10800' }}
+          BEATHIT_LB_MAX_QUERIES: ${{ vars.BEATHIT_LB_MAX_QUERIES || '2400' }}
+          BEATHIT_CHILDREN_WINDOW_YEARS: ${{ vars.BEATHIT_CHILDREN_WINDOW_YEARS || '10' }}
+          BEATHIT_CHILDREN_YOUTUBE_SEARCHES: ${{ vars.BEATHIT_CHILDREN_YOUTUBE_SEARCHES || '48' }}
+          BEATHIT_COUNTRY_WORKERS: ${{ vars.BEATHIT_COUNTRY_WORKERS || '8' }}
+          BEATHIT_COVER_MB_REQUESTS_PER_LANGUAGE: ${{ vars.BEATHIT_COVER_MB_REQUESTS_PER_LANGUAGE || '12000' }}
+          BEATHIT_VOCALOID_COVER_REQUESTS: ${{ vars.BEATHIT_VOCALOID_COVER_REQUESTS || '50000' }}
+          BEATHIT_PER_GAME_MAX_GAMES: ${{ vars.BEATHIT_PER_GAME_MAX_GAMES || '3162' }}
+        run: python .github/parallel/build_list.py "${{ matrix.list }}"
+
+      - name: Deduplicate and validate ${{ matrix.list }}
+        id: finalize
+        if: steps.build.outcome == 'success'
+        continue-on-error: true
+        run: python .github/parallel/finalize_list.py "${{ matrix.list }}"
+
+      - name: Stage worker result
+        if: always()
+        run: >-
+          python .github/parallel/stage_result.py
+          "${{ matrix.list }}"
+          "${{ steps.build.outcome }}"
+          "${{ steps.finalize.outcome }}"
+
+      - name: Save core cache
+        if: always() && contains(fromJSON('["anime","vocaloid","video_game_music","children_childhood","countries"]'), matrix.list)
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            data/raw/full_build
+            .cache/full_build
+          key: beathit-parallel-core-${{ matrix.list }}-${{ runner.os }}-${{ github.run_id }}-${{ github.run_attempt }}
+
+      - name: Save expansion cache
+        if: always() && !contains(fromJSON('["anime","vocaloid","video_game_music","children_childhood","countries"]'), matrix.list)
+        uses: actions/cache/save@v4
+        with:
+          path: .cache/beathit-expansion
+          key: beathit-parallel-expansion-${{ matrix.list }}-${{ runner.os }}-${{ github.run_id }}-${{ github.run_attempt }}
+
+      - name: Upload ${{ matrix.list }} result
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: result-${{ matrix.list }}
+          path: .parallel/out/${{ matrix.list }}/
+          if-no-files-found: error
+
+      - name: Propagate worker failure after preserving artifacts
+        if: always()
+        run: |
+          test "${{ steps.build.outcome }}" = "success"
+          test "${{ steps.finalize.outcome }}" = "success"
+
+  consolidate:
+    needs: build-list
+    if: ${{ always() }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+
+      - name: Install builder
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e . -r requirements-full.txt
+
+      - name: Download every worker result
+        uses: actions/download-artifact@v4
+        with:
+          pattern: result-*
+          path: incoming
+          merge-multiple: false
+
+      - name: Consolidate successful workers
+        run: python .github/parallel/consolidate.py incoming
+
+      - name: Update manifest after consolidation
+        run: python scripts/update_manifest.py
+
+      - name: Upload consolidation report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: beathit-parallel-consolidation
+          path: |
+            .parallel/consolidation.json
+            STATUS.json
+            data/MANIFEST.json
+
+      - name: Commit successful list outputs together
+        run: |
+          git config user.name "BeatHit Dataset Builder"
+          git config user.email "actions@users.noreply.github.com"
+          git add -A -- STATUS.json data/MANIFEST.json data/anime data/vocaloid data/video_games data/children_childhood data/countries data/language_covers data/vocaloid_covers
+          if ! git diff --cached --quiet; then
+            git commit -m "Consolidate parallel BeatHit lists [skip full-build]"
+            git push origin HEAD:main
+          fi
