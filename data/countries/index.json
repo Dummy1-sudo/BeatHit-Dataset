@@ -1,6 +1,6 @@
 {
   "schema_version": 2,
-  "retrieved_at": "2026-10-01",
+  "retrieved_at": "2026-10-02",
   "source_index_url": "https://kworb.net/spotify/",
   "metric_name": "spotify_country_chart_streams",
   "metric_definition": "Sum of Spotify daily Top 200 streams observed in that country while a song was charting; streams outside the Top 200 are excluded.",
