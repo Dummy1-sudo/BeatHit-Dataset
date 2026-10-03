@@ -169,11 +169,11 @@
     },
     "video_game_music": {
       "target": 10000,
-      "materialized_rows": 2766,
+      "materialized_rows": 811,
       "complete": false,
       "builder_revision": "parallel-workers-v1",
       "metric_coverage": {
-        "listenbrainz_tag_popularity_percent": 2253,
+        "listenbrainz_tag_popularity_percent": 298,
         "spotify_popularity": 513
       },
       "notes": [
@@ -181,7 +181,7 @@
         "Movie/television/anime soundtracks, licensed compilations, tribute releases, piano collections, music-box albums, cover albums, and generic remix albums are rejected.",
         "Each row records whether the game association came from an official soundtrack album, franchise artist, explicit track-title reference, high-confidence Wikidata match, or a ListenBrainz release-group game tag paired with an explicit soundtrack release.",
         "Selection preserves game breadth, then allows up to 25 source-backed recordings per game; final rows are sorted by popularity evidence.",
-        "ranked_games=10000; catalog_soundtrack_candidates=701; listenbrainz_candidates=3092; listenbrainz_added=2253; unique_games=433; fallback_unique=90; fallback_additional=291; rows=2766"
+        "ranked_games=10000; catalog_soundtrack_candidates=701; listenbrainz_candidates=299; listenbrainz_added=298; unique_games=346; fallback_unique=90; fallback_additional=291; rows=811"
       ]
     },
     "internet_native": {
@@ -259,7 +259,7 @@
     },
     "children_childhood": {
       "target": 10000,
-      "materialized_rows": 4908,
+      "materialized_rows": 4998,
       "complete": false,
       "builder_revision": "parallel-workers-v1",
       "metric_coverage": {},
@@ -267,7 +267,7 @@
         "Quebec age-0-12 childhood scope; observation window 2016-2026.",
         "Global generic children's-music rows are not accepted without curated Quebec/franchise exposure evidence.",
         "Primary discovery sources: Canadian Apple storefront and Canada-region YouTube Music child queries; no fabricated quota padding.",
-        "existing_qualified=4129; apple_candidates=2873; youtube_candidates=920"
+        "existing_qualified=4159; apple_candidates=3882; youtube_candidates=925"
       ]
     },
     "unserious": {
