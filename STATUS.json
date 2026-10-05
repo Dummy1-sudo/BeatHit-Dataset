@@ -42,8 +42,8 @@
       "complete": false,
       "builder_revision": "parallel-workers-v1",
       "metric_coverage": {
-        "anime_popularity_proxy": 3693,
-        "myanimelist_members_snapshot": 3317,
+        "anime_popularity_proxy": 3690,
+        "myanimelist_members_snapshot": 3320,
         "spotify_chart_streams_snapshot": 4,
         "spotify_popularity": 599,
         "spotify_streams": 5,
@@ -259,7 +259,7 @@
     },
     "children_childhood": {
       "target": 10000,
-      "materialized_rows": 5012,
+      "materialized_rows": 5023,
       "complete": false,
       "builder_revision": "parallel-workers-v1",
       "metric_coverage": {},
@@ -267,7 +267,7 @@
         "Quebec age-0-12 childhood scope; observation window 2016-2026.",
         "Global generic children's-music rows are not accepted without curated Quebec/franchise exposure evidence.",
         "Primary discovery sources: Canadian Apple storefront and Canada-region YouTube Music child queries; no fabricated quota padding.",
-        "existing_qualified=4193; apple_candidates=3859; youtube_candidates=942"
+        "existing_qualified=4224; apple_candidates=3804; youtube_candidates=921"
       ]
     },
     "unserious": {
@@ -410,12 +410,12 @@
     },
     "video_game_per_game": {
       "target": "all 3162 BeatHit master-list games scanned; one separate track list per game when soundtrack evidence exists",
-      "materialized_rows": 0,
-      "complete": false,
+      "materialized_rows": 651965,
+      "complete": true,
       "builder_revision": "parallel-workers-v1",
       "metric_coverage": {},
       "notes": [
-        "{\"games_scanned\": 0, \"master_games\": 3162, \"materialized_game_lists\": 0, \"unmatched_games\": 0, \"general_vgm_rows_preserved\": 811, \"processed_this_run\": 0}"
+        "{\"games_scanned\": 3162, \"master_games\": 3162, \"materialized_game_lists\": 2487, \"unmatched_games\": 675, \"general_vgm_rows_preserved\": 2766, \"processed_this_run\": 3162}"
       ]
     },
     "vocaloid_covers": {
