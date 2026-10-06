@@ -259,7 +259,7 @@
     },
     "children_childhood": {
       "target": 10000,
-      "materialized_rows": 5023,
+      "materialized_rows": 5056,
       "complete": false,
       "builder_revision": "parallel-workers-v1",
       "metric_coverage": {},
@@ -267,7 +267,7 @@
         "Quebec age-0-12 childhood scope; observation window 2016-2026.",
         "Global generic children's-music rows are not accepted without curated Quebec/franchise exposure evidence.",
         "Primary discovery sources: Canadian Apple storefront and Canada-region YouTube Music child queries; no fabricated quota padding.",
-        "existing_qualified=4224; apple_candidates=3804; youtube_candidates=921"
+        "existing_qualified=4238; apple_candidates=3902; youtube_candidates=923"
       ]
     },
     "unserious": {
@@ -415,7 +415,7 @@
       "builder_revision": "parallel-workers-v1",
       "metric_coverage": {},
       "notes": [
-        "{\"games_scanned\": 3162, \"master_games\": 3162, \"materialized_game_lists\": 2487, \"unmatched_games\": 675, \"general_vgm_rows_preserved\": 2766, \"processed_this_run\": 3162}"
+        "{\"games_scanned\": 3162, \"master_games\": 3162, \"materialized_game_lists\": 2487, \"unmatched_games\": 675, \"general_vgm_rows_preserved\": 2766, \"processed_this_run\": 0}"
       ]
     },
     "vocaloid_covers": {
