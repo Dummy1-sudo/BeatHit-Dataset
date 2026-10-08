@@ -38,11 +38,11 @@
   "datasets": {
     "anime": {
       "target": 10000,
-      "materialized_rows": 7648,
+      "materialized_rows": 7646,
       "complete": false,
       "builder_revision": "parallel-workers-v1",
       "metric_coverage": {
-        "anime_popularity_proxy": 3716,
+        "anime_popularity_proxy": 3714,
         "myanimelist_members_snapshot": 3320,
         "spotify_chart_streams_snapshot": 4,
         "spotify_popularity": 599,
@@ -51,7 +51,7 @@
       },
       "notes": [
         "Local-first two-pass pipeline: bulk AnimeThemes + bundled MAL theme data are scanned without per-anime network calls; Jikan is used only as a bounded post-pass for higher-ranked unresolved anime.",
-        "local_rows_before_jikan=7649; jikan_stop_reason=circuit_breaker_after_16_consecutive_failures"
+        "local_rows_before_jikan=7647; jikan_stop_reason=circuit_breaker_after_16_consecutive_failures"
       ]
     },
     "worldwide": {
@@ -259,7 +259,7 @@
     },
     "children_childhood": {
       "target": 10000,
-      "materialized_rows": 5033,
+      "materialized_rows": 5078,
       "complete": false,
       "builder_revision": "parallel-workers-v1",
       "metric_coverage": {},
@@ -267,7 +267,7 @@
         "Quebec age-0-12 childhood scope; observation window 2016-2026.",
         "Global generic children's-music rows are not accepted without curated Quebec/franchise exposure evidence.",
         "Primary discovery sources: Canadian Apple storefront and Canada-region YouTube Music child queries; no fabricated quota padding.",
-        "existing_qualified=4238; apple_candidates=3811; youtube_candidates=923"
+        "existing_qualified=4259; apple_candidates=3865; youtube_candidates=916"
       ]
     },
     "unserious": {
@@ -318,7 +318,7 @@
         "Producer/composer credit takes precedence over simultaneous human-vocalist roles, preventing instrumentalists from being promoted to main artist.",
         "Official YouTube statistics and the exhaustive VocaDB scan are checkpointed; a quota-limited rerun resumes with unresolved IDs instead of repeating the full lookup.",
         "No Spotify matching, title collision matching, remix, mashup, cover, remaster, MusicPV entry, reprint, or third-party view-count fallback.",
-        "preserved_original_pv_rows=238725; vocadb_exhaustive=True; unresolved_youtube_video_ids=24"
+        "preserved_original_pv_rows=238726; vocadb_exhaustive=True; unresolved_youtube_video_ids=24"
       ]
     },
     "kpop": {

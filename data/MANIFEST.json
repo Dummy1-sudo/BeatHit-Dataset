@@ -18,8 +18,8 @@
     },
     {
       "path": "data/anime/anime_songs.csv",
-      "bytes": 4969492,
-      "sha256": "e37099effc8e690e894a3f7c489be8e149c5f5bbe2df5186e92a0bce79daf71f"
+      "bytes": 4968128,
+      "sha256": "9810272e16654d247439cfcd8619cc49efadd020af3fef6576864b0b840cd760"
     },
     {
       "path": "data/bootstrap/megalist_bootstrap.csv",
@@ -28,8 +28,8 @@
     },
     {
       "path": "data/children_childhood/children_childhood_10000.csv",
-      "bytes": 4824847,
-      "sha256": "31dc10be56137f017aaa68699dc8ea21bfb37c4ba327f376600ef79a52671180"
+      "bytes": 4857229,
+      "sha256": "290f9f7a20bd231a797ddf912cc2a5a0faed7707b693e2ca5630e02e3bb5d3d3"
     },
     {
       "path": "data/classical/classical_10000.csv",
@@ -49,387 +49,387 @@
     {
       "path": "data/countries/ad_andorra_top1000.csv",
       "bytes": 223862,
-      "sha256": "da66f876a2bf9f13f1c8659d7cd1e16b89aa02270228e3abf759ccdc509d138d"
+      "sha256": "bd6bd8016156dab2ed03b6b0d4abb5fea4486b7297d678039eeec180e22ffabd"
     },
     {
       "path": "data/countries/ae_united_arab_emirates_top1000.csv",
-      "bytes": 915125,
-      "sha256": "2fda26d62cc61d5ddd1247ff30b3f8a87923932b94e3d30225f1c7084aa9e740"
+      "bytes": 915107,
+      "sha256": "7b746c20da416356e97dc57479c92ec347a6acd0b081d0acb2954d10051a797a"
     },
     {
       "path": "data/countries/ar_argentina_top1000.csv",
-      "bytes": 895379,
-      "sha256": "996908a0063a3612decdf78e57a6c9aeae198507ec4f29a03b13c6ca8f4d18c7"
+      "bytes": 895377,
+      "sha256": "0916da06032a6a9a3bc5755fd601466bea242b95ee927dd12005cc0e15bc4c30"
     },
     {
       "path": "data/countries/at_austria_top1000.csv",
-      "bytes": 887993,
-      "sha256": "9936f14aca66afd43edcd49b419927341eebe458d3dae057aa7a9e399c331104"
+      "bytes": 887999,
+      "sha256": "ade6dd1f27793dc0acc715f26baa52c724af44fd2ebb3c3a50191495ab86d561"
     },
     {
       "path": "data/countries/au_australia_top1000.csv",
-      "bytes": 900854,
-      "sha256": "42c58885f23b5bede39ba951d0b058c7d953e409a6efe137ca96bec0ae236ce6"
+      "bytes": 900853,
+      "sha256": "0f29ce3b9857fc2ed2871c0db3f75cd4c1f2d95dcadfc1f49dee7b5ff15dffa2"
     },
     {
       "path": "data/countries/be_belgium_top1000.csv",
-      "bytes": 893795,
-      "sha256": "7cdf6f4a4579ea7d00e3112165841459c0ce0cf5716e38f61e3176235f5e51ce"
+      "bytes": 893783,
+      "sha256": "33d24d2d9d531502010700c7fe3f7ee5194b472b9a27a3dfd29e2f76293fde79"
     },
     {
       "path": "data/countries/bg_bulgaria_top1000.csv",
-      "bytes": 892946,
-      "sha256": "00fab698406c53fc022967fd0a4a85f87a5c026aa7aa3499352784b1d20d77aa"
+      "bytes": 892952,
+      "sha256": "4f84dbb159d39f5b4dd3e8e4525bc275a34391c193e1d4501e86bd8b86291140"
     },
     {
       "path": "data/countries/bo_bolivia_top1000.csv",
-      "bytes": 888321,
-      "sha256": "475fb45001cd79fed0c737f90835f6c382cdfacce059ddf1ee453145bdca8cb2"
+      "bytes": 888318,
+      "sha256": "f6add284163602ea7c5071ad0275b5e24606dc2ffa30df3fecea74bed1032114"
     },
     {
       "path": "data/countries/br_brazil_top1000.csv",
-      "bytes": 900730,
-      "sha256": "b1787da5b175be8a3ec2f40f22d60ecd009aba5dc88ba6c13e762915374afce8"
+      "bytes": 900760,
+      "sha256": "05528a6eb753c8c50ab4bf0b683b73edb23f90d24906296132bc4b9d7d41ed7b"
     },
     {
       "path": "data/countries/by_belarus_top1000.csv",
-      "bytes": 883942,
-      "sha256": "e4241d3e8392ebec35a3b999be7cc77ff265fbe2fd6efd17ee2dc7e087d9687d"
+      "bytes": 883940,
+      "sha256": "e859a5e9151b6996ac90b0e7f2a715b97d14a61ff825a808698059ceaf97d830"
     },
     {
       "path": "data/countries/ca_canada_top1000.csv",
-      "bytes": 898257,
-      "sha256": "571c6d2dca42a1dfef443f395c01097c88a795ea8c714a195376c0c59107e6ca"
+      "bytes": 898256,
+      "sha256": "df82a6bce18591621881c6cddaad2b4c42a7a4cf717d865a779fe5d98ad35bda"
     },
     {
       "path": "data/countries/ch_switzerland_top1000.csv",
       "bytes": 898386,
-      "sha256": "56c0dcaba2f18e2046f37c6d45a0b7a0d400f2c07aa039b9c97044cdc402fdc3"
+      "sha256": "005d761f56a3d602b9638caa14a1b6c9daee3ea2e1ade02234cae0e6c2776031"
     },
     {
       "path": "data/countries/cl_chile_top1000.csv",
-      "bytes": 888876,
-      "sha256": "6a49176cac18ead357611473f0f2791facc0b4c3c839b451bac613c640f25176"
+      "bytes": 888875,
+      "sha256": "506a17b0ebad7a1eba91ad62db12670668ecaa301a1c0102e20290eaa13ac98a"
     },
     {
       "path": "data/countries/co_colombia_top1000.csv",
-      "bytes": 895360,
-      "sha256": "6312f31c5f0a2ffc0093614e38585655225d4b2a932cdc591d2c65d108ff94c3"
+      "bytes": 895354,
+      "sha256": "32d0701c5c607ec40603e2a4da495b07342395905a8d2c68e28f81abd2d5a6af"
     },
     {
       "path": "data/countries/cr_costa_rica_top1000.csv",
-      "bytes": 893769,
-      "sha256": "f673d0b4213c169bb3c357a4ec5a386a749e0caa1fa48a80d1e644a830db2b75"
+      "bytes": 893768,
+      "sha256": "647d69953d4f14fd2ae29f4ca7f619eaca1fd734a9773d1478c96f8bce46a29f"
     },
     {
       "path": "data/countries/cy_cyprus_top1000.csv",
       "bytes": 879879,
-      "sha256": "d1cf836992a4403135403194a777e0662881a7d8f0ead394e1b3633420e9d601"
+      "sha256": "6fe0766e044cb86fcbfce96dc02678a146d70a8f02143075be9ccb042a4e8df6"
     },
     {
       "path": "data/countries/cz_czech_republic_top1000.csv",
-      "bytes": 898823,
-      "sha256": "64eafe935b22c133de1aa7ce0077887081ff1871ac14133671bc3c81e66b9d1a"
+      "bytes": 898822,
+      "sha256": "8ebb754b168088fc836ced9ee2be36720247a03ff59fbd4004e0f58c8c87ce77"
     },
     {
       "path": "data/countries/de_germany_top1000.csv",
-      "bytes": 894488,
-      "sha256": "dc2f6a1228b0610aadc276d5e0071cc402aa32993a4e3d788a8652e959df3c8f"
+      "bytes": 894485,
+      "sha256": "75af08af02d1c3009f8a87e26ccfb116e4d2d962bb6fcad773ff1d77fb2737cb"
     },
     {
       "path": "data/countries/dk_denmark_top1000.csv",
-      "bytes": 887563,
-      "sha256": "c6b8baac23448a1719b190a6b44887513825ed9c0ce25f0ab6479c0bc4f3e871"
+      "bytes": 887564,
+      "sha256": "4866d81d3ef324636794a579eb4ecf92e05e133eb109c5e4a09d7e590324bb21"
     },
     {
       "path": "data/countries/do_dominican_republic_top1000.csv",
-      "bytes": 909670,
-      "sha256": "f161e1bf120a691f70fd147e314e7b57e5ba0e34024d4f6cafcdb1df6f112262"
+      "bytes": 909671,
+      "sha256": "6fd29d9cb33936a9624900f3f713a9e44024382b9c5913b189ef5b6a8b345ded"
     },
     {
       "path": "data/countries/ec_ecuador_top1000.csv",
-      "bytes": 887989,
-      "sha256": "35a0ab39f88f02a00705c8b53637213f4b9ae54a7ca0ec54da1b706d598c622a"
+      "bytes": 887976,
+      "sha256": "6e2679540171bd7583630bf57263b838874704f108c05c533761fb43059fceaa"
     },
     {
       "path": "data/countries/ee_estonia_top1000.csv",
-      "bytes": 884959,
-      "sha256": "d31f975e22bd22125d86d3b782bcfa3b6fdc13fd6875aa8a66c2c3f66e225612"
+      "bytes": 884956,
+      "sha256": "acc7501946f83fabd8b39366559c14e19d885c8189ef05564ab87c8d0867c13b"
     },
     {
       "path": "data/countries/eg_egypt_top1000.csv",
-      "bytes": 892346,
-      "sha256": "599f90286788d24f31cfe17dabb555f2fd765f3b68f39471bd2ad89407a0e21a"
+      "bytes": 892329,
+      "sha256": "41dcee5fdb26ebe1f7d93d718247d408237126403bf0f1132222682c86088464"
     },
     {
       "path": "data/countries/es_spain_top1000.csv",
-      "bytes": 886284,
-      "sha256": "99328226e27363acf6bbae6f35a2c89c9be2204808223a4730cc459f5c37599d"
+      "bytes": 886283,
+      "sha256": "d9e027b38833f2f2c06e05e1da39e06227dba1eef09f2ddf434ec033c674334d"
     },
     {
       "path": "data/countries/fi_finland_top1000.csv",
-      "bytes": 884087,
-      "sha256": "cf5daea96b460966d5dff02df71fbdb2a9ee8bd877f6e61eb0acc477f763c578"
+      "bytes": 884083,
+      "sha256": "f1b8feb3cc048cd5a079d648a0a2dd423a45cd340fcfe479554db1f2422b6488"
     },
     {
       "path": "data/countries/fr_france_top1000.csv",
-      "bytes": 882552,
-      "sha256": "e400fac53ac896f57a6ba924d9f1c14941d09bf56233b3bc6a37ef037f6611b2"
+      "bytes": 882546,
+      "sha256": "9ca2380dac28aee35af6e12ccddd8ca581f837f669ef2ae182b0a3d8b7ae24d9"
     },
     {
       "path": "data/countries/gb_united_kingdom_top1000.csv",
-      "bytes": 914016,
-      "sha256": "8b5658f3781a6b3286f5e7dcf6c9c78c51d5c987036a61e56a5015ce3bac0660"
+      "bytes": 914015,
+      "sha256": "2b90b3b6bd63bd521a89a5c9eeba8e7b6ceb555991fa689aae33196483eb6f54"
     },
     {
       "path": "data/countries/gr_greece_top1000.csv",
-      "bytes": 877429,
-      "sha256": "4aee9904b3e304846cdb50b60b5e6fb17efbc476fecaac647c2d6681196f7371"
+      "bytes": 877427,
+      "sha256": "5ffcaa589be65865038e1580395ce98ae4243939bd2e158650df88c48208d894"
     },
     {
       "path": "data/countries/gt_guatemala_top1000.csv",
-      "bytes": 891956,
-      "sha256": "dfa06d88e317a95499dca461d2ec61e9596b2a549c3c789379c0981817acc611"
+      "bytes": 891951,
+      "sha256": "06087ec0c91d2cdbff9ce9fc7e44846fc566f0bb28c8351e6a6ed8c6830debbd"
     },
     {
       "path": "data/countries/hk_hong_kong_top1000.csv",
-      "bytes": 892563,
-      "sha256": "27b71ea5bb5a777ce06915f55e30ca169d823f274e6d2c35d846fba2925aab1c"
+      "bytes": 892557,
+      "sha256": "e921a2d3864a470f03b4e5e04605c70f572c829a13f5288b99aaeaac3e80d70f"
     },
     {
       "path": "data/countries/hn_honduras_top1000.csv",
-      "bytes": 888583,
-      "sha256": "ba899be7e6d7bb58676daae9f74ca1de4e1718c6934f99053014660689b4bda6"
+      "bytes": 888579,
+      "sha256": "0d28843b714fb904af94ba331f04dfdfa903b39a7284a4bc4a19140cbbb4e353"
     },
     {
       "path": "data/countries/hu_hungary_top1000.csv",
-      "bytes": 887713,
-      "sha256": "320e0df48c6e4eebbf2cac937d5400c59e9e8c39d313e37254c3e40eaa585732"
+      "bytes": 887709,
+      "sha256": "46c63e1e871877e06c047a13c42ea9fe63505b83a1db236c792a08d2540dc568"
     },
     {
       "path": "data/countries/id_indonesia_top1000.csv",
-      "bytes": 893357,
-      "sha256": "2ff77952d89d3e0e0e88a0af714c91390c634ad100445c5089f245f62aa4729c"
+      "bytes": 893358,
+      "sha256": "5a4205d09eb80a8c700646b30edf2b96736c44dfb1cba6dcac1a841eb3f905df"
     },
     {
       "path": "data/countries/ie_ireland_top1000.csv",
-      "bytes": 896362,
-      "sha256": "c43aa03bb0961920005ba5bf1e8edecd9a9b4ddf914a1978e412c4265397d25d"
+      "bytes": 896356,
+      "sha256": "bd5efd17a4b57ceeff8c75542aba91b85f4a54bebde8ca359bfcbe05b2e6bb3f"
     },
     {
       "path": "data/countries/il_israel_top1000.csv",
-      "bytes": 887763,
-      "sha256": "ffc2f687379027d3256c7370670d9ff174315948e7007a088f16c31c30db82b5"
+      "bytes": 887771,
+      "sha256": "172ad62b3433e7a32570e499d48e6f659c4d33fcb77861dc43a298282f0a728c"
     },
     {
       "path": "data/countries/in_india_top1000.csv",
       "bytes": 901060,
-      "sha256": "c5fd8fa1a2e227877835fa3d849e48e3d82bad45c318b6f720592933c5f5be1f"
+      "sha256": "6cd1f6f9f1f33ea706ad92ddc46687f81c10d2170ce588b93bfea63a837b9a9d"
     },
     {
       "path": "data/countries/index.json",
       "bytes": 57584,
-      "sha256": "a02273067d2642a339fc82fdb22fb9d6d99dbf690a26b3bd0789410811d2d13a"
+      "sha256": "a10077d0212c708a4cd71aa6500b5018e8d59ed4d070cd0f04138b1eb27b843a"
     },
     {
       "path": "data/countries/is_iceland_top1000.csv",
-      "bytes": 891703,
-      "sha256": "2ded7bb68cd68d79083794c018f0a04da808b3a929fadc48bee3890ed9ab8db5"
+      "bytes": 891704,
+      "sha256": "2d18470569e3c4d772777854ec1daa0501be1459333edb72148d1e11b6406df3"
     },
     {
       "path": "data/countries/it_italy_top1000.csv",
-      "bytes": 888676,
-      "sha256": "ed07538367c1b416d9546909abcae74b0143f0c9ef7c5cd2ad16ed2da1dbfa3a"
+      "bytes": 888667,
+      "sha256": "d99d3c003a058535311c7f204f7d943950f4b07055100f99b895c9932fff4a22"
     },
     {
       "path": "data/countries/jp_japan_top1000.csv",
-      "bytes": 880300,
-      "sha256": "e248dd54b4155aeb6e978a2ebcd93e11a722070746cfd6b8510f017fe61c5565"
+      "bytes": 880297,
+      "sha256": "21b70bace3ec00f671f53578436f2a6cf2b1f9128a586a92a9f95d2cc41deee8"
     },
     {
       "path": "data/countries/kr_south_korea_top1000.csv",
-      "bytes": 894184,
-      "sha256": "f9dae3c26162281bc4843b5988115b8f9f782740eb4431003b46059f76e438df"
+      "bytes": 894133,
+      "sha256": "6c26bb32890ceb643664ca2e8476514f6c43b9f89c2fb6778ff3981853949ee3"
     },
     {
       "path": "data/countries/kz_kazakhstan_top1000.csv",
-      "bytes": 888157,
-      "sha256": "1d66b86e1286365327e16b0754e598cc0dc5426417a8d06498e13005eaa54a04"
+      "bytes": 888167,
+      "sha256": "c2734630b2945d367ba94489d6cf63b9c4ac920eeef35d3ae548c62d985320b8"
     },
     {
       "path": "data/countries/lt_lithuania_top1000.csv",
-      "bytes": 894024,
-      "sha256": "3b4bc0d813edb0c5fc5764ac936931072724ed23e35908b601a3f652d147f71b"
+      "bytes": 894016,
+      "sha256": "b0e6561517e506ea244be8e9a65fcf23bc94f466a3d607a7a722c0eb616bcc98"
     },
     {
       "path": "data/countries/lu_luxembourg_top1000.csv",
       "bytes": 897306,
-      "sha256": "8cda004b2321608b6ae8b306441c3a261817c9e62f4f6763b7fbfa37915f7d5a"
+      "sha256": "644c14f9f55704575f82bed0f7da7d7e1cbe57eb889d4b2733c50ec887649d08"
     },
     {
       "path": "data/countries/lv_latvia_top1000.csv",
-      "bytes": 884624,
-      "sha256": "151aa63e489eef9db4de339fe664c784c4ba74cf677f6c4ef66cab61c3512fd5"
+      "bytes": 884966,
+      "sha256": "c3df27333535eda222d917affb7aa89e5fe9f575eb407ce3604fb2d630f4f61e"
     },
     {
       "path": "data/countries/ma_morocco_top1000.csv",
-      "bytes": 878313,
-      "sha256": "997a11ab214c49135751767a7c5a384931d8c743853c05d1dfa3610342e35ca7"
+      "bytes": 878311,
+      "sha256": "f55a1d50243a97e8491207d881303c892d545cf20bfb55f3e11dd6580a62bb5f"
     },
     {
       "path": "data/countries/mt_malta_top1000.csv",
       "bytes": 881244,
-      "sha256": "709d4ed0426a105aa835da9e9a9e6e4586c166048cb0c112ec31451b452e6c59"
+      "sha256": "9e7d8bdaec73dfa5e6ff0750aea18bc77c221a706ff37a20d58f51614a09adb5"
     },
     {
       "path": "data/countries/mx_mexico_top1000.csv",
-      "bytes": 888588,
-      "sha256": "74cf36023de3c6e1f8e8261eee9f425ff75211622f32a2cfbf699f2777465285"
+      "bytes": 888579,
+      "sha256": "2f512eacb01ee08bb1babf55af9d7744fbed56a584f5f8f73ced470e3fdf0fac"
     },
     {
       "path": "data/countries/my_malaysia_top1000.csv",
-      "bytes": 891982,
-      "sha256": "7e1f523d6a54be9199785b556fa8668ad8c38ed3b4559c358d268d8d385685d2"
+      "bytes": 891980,
+      "sha256": "4ac2cb00c2a3556d366745de5c9fd8035e61f38228c157a7ef900df730988445"
     },
     {
       "path": "data/countries/ng_nigeria_top1000.csv",
-      "bytes": 887160,
-      "sha256": "16f5e5dbff7cf02e07bd795499e834d2e5f5816bf17ea6aed3fcd5f83a508555"
+      "bytes": 887152,
+      "sha256": "6a430988177a940eb3ac1e7d3cd6f29b75b3c6e3b297c9278eedf424c5eb74c5"
     },
     {
       "path": "data/countries/ni_nicaragua_top1000.csv",
-      "bytes": 889678,
-      "sha256": "0066d3244d64fc93a8ec8b8fc54e7c8bf689e81309a54f22890540ed43da591f"
+      "bytes": 889677,
+      "sha256": "ebb9d7bd7d1784361ca4e9391a3b82b3166bb4c33aeec56da828fa7a0bf7009e"
     },
     {
       "path": "data/countries/nl_netherlands_top1000.csv",
-      "bytes": 899746,
-      "sha256": "8689c4857a4f28fce1ddb075187435d05b23eacd4450d2f6f079644d512e550b"
+      "bytes": 899741,
+      "sha256": "4cd46a3ee5f80afeffc1be4977de6f83ee425c0ad9ea69307fe9fae86774647e"
     },
     {
       "path": "data/countries/no_norway_top1000.csv",
-      "bytes": 890617,
-      "sha256": "7273282c8b0f3a1d3aa55c72224cb426b44f5b16dac3f0443518a851eee0c933"
+      "bytes": 890633,
+      "sha256": "b7ed92decf4149b87a26ce9dc48b1bc804a3f9b217e68e4c5e5d639784308cf2"
     },
     {
       "path": "data/countries/nz_new_zealand_top1000.csv",
-      "bytes": 904100,
-      "sha256": "238a290686f7f96a9e482f3ba4b3be47693a9c9c68723237691768e2443f3613"
+      "bytes": 904099,
+      "sha256": "d80a088f2ee69779937073c63fbff3d3cdc3f340ea30a9103f17e145d70ce486"
     },
     {
       "path": "data/countries/pa_panama_top1000.csv",
-      "bytes": 888972,
-      "sha256": "d1ede7af4b0b8730c343e3d05b00b199b9086efe5925b22e027dc3116445a39f"
+      "bytes": 888968,
+      "sha256": "a4c5527b1272e04f2db1cfe45f0e23a38bfb09893ff1afb499d952502eeed54e"
     },
     {
       "path": "data/countries/pe_peru_top1000.csv",
-      "bytes": 885714,
-      "sha256": "6ca3733591124072e6da1028308a96eadb1f3e993479664eb1149a6024432d09"
+      "bytes": 885707,
+      "sha256": "9c0d7c84e0b1bea6dcb93001499fb40624d1a3c7c71d513e3e16df5c905e2097"
     },
     {
       "path": "data/countries/ph_philippines_top1000.csv",
       "bytes": 902068,
-      "sha256": "c6bcd775a6dbf1b11180be378167c4560aa250f0b99c5944a83b5ec314669dbd"
+      "sha256": "0f8431c3eaf2e958d6dfd6c78a2042092e500fde0227687ec22ddd39b478de76"
     },
     {
       "path": "data/countries/pk_pakistan_top1000.csv",
-      "bytes": 891270,
-      "sha256": "03b2bad135affb655935ed1851eb9ed9e200419cd3932f677c296dd072e524d7"
+      "bytes": 891227,
+      "sha256": "e29ec1fe04ffbd83b43e2f51f887bf815dbda46aea1dfb0222e832d19f129383"
     },
     {
       "path": "data/countries/pl_poland_top1000.csv",
       "bytes": 899764,
-      "sha256": "aa2b39d5f23279023d5f10629110a100dd626f87dc9cc2ae53ea690452723c1f"
+      "sha256": "184f0e04ffc973c67e735de1a9ef123f1014bee7f0081b28cd2424b6cc9d849d"
     },
     {
       "path": "data/countries/pt_portugal_top1000.csv",
-      "bytes": 892327,
-      "sha256": "0c089fceb0ae9f6b44a08bb77fbc9102a37f2e0c0aed2d02b54a5302949e80d0"
+      "bytes": 892329,
+      "sha256": "fd68dbfb1a2aa759ea83bad53f7eb8a944ed6fc856a5b7f6798976c4516a0a2b"
     },
     {
       "path": "data/countries/py_paraguay_top1000.csv",
-      "bytes": 891428,
-      "sha256": "1910a7acc5c185e7304f277814305eb4c2f13e0c5e2a7fa4fec2d1e5ee612e58"
+      "bytes": 891429,
+      "sha256": "f21fdf098619742b697f58ffa135f64ffb2ec6d5ae151f57b6e88867c3220edd"
     },
     {
       "path": "data/countries/ro_romania_top1000.csv",
-      "bytes": 886248,
-      "sha256": "19655a494424b5382c2c047941be7faf9b8385b614237f28a8323918c5537c9f"
+      "bytes": 886237,
+      "sha256": "137552b30969375c0f768ebd34b9464ba55310ee7b8937cdc27d3cb815a808f4"
     },
     {
       "path": "data/countries/ru_russia_top1000.csv",
       "bytes": 882793,
-      "sha256": "237dfb881e33df73cba3c752076278a88c077db2038ebd272b8d41d7cf630aa6"
+      "sha256": "072309be9954d8252cc89586b34183208de148b8881d4768a29139980fa50775"
     },
     {
       "path": "data/countries/sa_saudi_arabia_top1000.csv",
-      "bytes": 902549,
-      "sha256": "7bd28ae070009d2387aba93d9bec8a284dc917e93324ade41b381b7289dc8286"
+      "bytes": 902462,
+      "sha256": "39fe59d25039f92a9eb65ffbd5c044e34f440780e3499751a313e5b1ab20e43c"
     },
     {
       "path": "data/countries/se_sweden_top1000.csv",
-      "bytes": 890592,
-      "sha256": "50cb99a0d40fd9fe45508bc0a25a751cf25ce43b3f0a8215e870c81eb11f6857"
+      "bytes": 890591,
+      "sha256": "4e896fd0f58d51049d0c552800d260b98d1ef684523fc94c4307a457ae02444c"
     },
     {
       "path": "data/countries/sg_singapore_top1000.csv",
-      "bytes": 895292,
-      "sha256": "a88e0a77427b2cd4677aedb4dd348bce1b1dcae15979417bcb30e55927065113"
+      "bytes": 895283,
+      "sha256": "daf32948b2f90838508569401724153ef0dc8e7a2ff7e0d12678fcb727e5c70f"
     },
     {
       "path": "data/countries/sk_slovakia_top1000.csv",
       "bytes": 889021,
-      "sha256": "99b5c37b081374691840334a03ecae85c0e19cbb8d7e1d9e7705e91fc1fa6532"
+      "sha256": "7e6b5e0408448758eb9c58727e7491d70ecdaed8beace9121bd0b93f9f72812d"
     },
     {
       "path": "data/countries/sv_el_salvador_top1000.csv",
       "bytes": 895223,
-      "sha256": "434e5de2ac844f947aab7b5c26c5b563078dc6ec6e9282702de162fb2bd29fa1"
+      "sha256": "4a1b4df7686e770a19da8a0efff806da7cf477e562c1d8d1d3a6d8f1e2623124"
     },
     {
       "path": "data/countries/th_thailand_top1000.csv",
       "bytes": 916861,
-      "sha256": "68d478e689e48524b42279a89fb7fda0eb20759bac0aa89d89f781360139bdb8"
+      "sha256": "de8b8a6061fc64e04232b348b378b96432923589541eaba924d705c8c1a046ed"
     },
     {
       "path": "data/countries/tr_turkey_top1000.csv",
-      "bytes": 882262,
-      "sha256": "337af20ea4b84ac5ece254eb14b7135688eff65ab28dbca2c05aaf6f82f9e4bc"
+      "bytes": 882259,
+      "sha256": "09079d41fdf9a9db9df3d9ac994050039c335d25783630be6b9db50a27842633"
     },
     {
       "path": "data/countries/tw_taiwan_top1000.csv",
-      "bytes": 891066,
-      "sha256": "dc89c0c1faf6cf147182b57207651d3155141740924443a900172a67c9e3e721"
+      "bytes": 891061,
+      "sha256": "3fe910c3d32c1fb62a9ec803987b5126c8b0072abab8db775c1338e4471e2112"
     },
     {
       "path": "data/countries/ua_ukraine_top1000.csv",
       "bytes": 886305,
-      "sha256": "23f4c6781a1558a32d1c0fef207894710327e7ab054f951b1ba952b6dbfe54d8"
+      "sha256": "1f64ec5567eabc0e60afe3a1e3685e41ab9d32c50dc25ff1a6282e71d9582aca"
     },
     {
       "path": "data/countries/us_united_states_top1000.csv",
-      "bytes": 912187,
-      "sha256": "2f1db8bd799e9b7ee9edfa552312c281002ffbe7cb01f1847271782efc7aebd2"
+      "bytes": 912185,
+      "sha256": "07251dfacaac05d49aa68a3cee589f91359a0b6f470f5571e2bd9dfe9426e21d"
     },
     {
       "path": "data/countries/uy_uruguay_top1000.csv",
-      "bytes": 888205,
-      "sha256": "7067b170b2c1cc7ffaf133e443ca0dfe70b0f40ff9cd0e6a84989ef3011d7f89"
+      "bytes": 888203,
+      "sha256": "e44c0f649c0941464a3a782ea3b56f6eecee1c17d27ba10ed6e49482930121eb"
     },
     {
       "path": "data/countries/ve_venezuela_top1000.csv",
-      "bytes": 886013,
-      "sha256": "e108647a2f97ed2f7b800bd758f58425183673bede89f6ce573410fb73f5da55"
+      "bytes": 886005,
+      "sha256": "0db8ceb1452dceb8f35925f213c657e88fcdbdb4fda938b5efb7d952eb0e154a"
     },
     {
       "path": "data/countries/vn_vietnam_top1000.csv",
-      "bytes": 906410,
-      "sha256": "7a4f8f0922df3fe008e7b87e9299d842aae396071db285c36dbab21fd85b1642"
+      "bytes": 906404,
+      "sha256": "0167a6f3af07bd99481dabff19de88969c95bc400d17e49f9b6a20ead93379a5"
     },
     {
       "path": "data/countries/za_south_africa_top1000.csv",
-      "bytes": 908400,
-      "sha256": "a2466d3ae35a3106b81efaf27153d2d324f5b3cea9d2f7a98dce313cbd4f1cd8"
+      "bytes": 908389,
+      "sha256": "28ae6ba8bc52dd78e6f769dbd7bf7cc01aeceba1b1a9c563ba25ff9e11412970"
     },
     {
       "path": "data/coverage_report.csv",
@@ -13178,13 +13178,13 @@
     },
     {
       "path": "data/video_games/video_game_music_10000.csv",
-      "bytes": 2352853,
-      "sha256": "6e3b237c3f6058c3c592ea6c7bbfa5099981ee5b19a102c7f5593db9e49d2d29"
+      "bytes": 2354527,
+      "sha256": "866af7ae636a975ed0c8f5a8a3e717f1af594a02befe92ff0734f424265a4b06"
     },
     {
       "path": "data/vocaloid/vocaloid_originals_youtube_views.csv.gz",
-      "bytes": 36520011,
-      "sha256": "fb7f5009db52f7421f06dac8b653b0556ac1ff60ab3a46f8323cd103e7fd3453"
+      "bytes": 36520475,
+      "sha256": "4ed6dc79a0d9a27229c6a84e1db493924a31a6cdefba72807efcc5f14e577ad9"
     },
     {
       "path": "data/vocaloid_covers/vocaloid_covers_part_001.csv",
