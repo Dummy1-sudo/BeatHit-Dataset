@@ -18,8 +18,8 @@
     },
     {
       "path": "data/anime/anime_songs.csv",
-      "bytes": 4968383,
-      "sha256": "c49d6fc21bcc7b74297c36ba9a8485886adc3e7426b98e574b80ee42f714d6fe"
+      "bytes": 4942178,
+      "sha256": "022f4add3bc05412316af060a25603566e7ba1f676ffa18a12d6e14a81706dd2"
     },
     {
       "path": "data/bootstrap/megalist_bootstrap.csv",
@@ -28,8 +28,8 @@
     },
     {
       "path": "data/children_childhood/children_childhood_10000.csv",
-      "bytes": 4503399,
-      "sha256": "00ec9ee3399cc8739f49b282905daca65b9bb10773c2340f2dc22bfd95b5050b"
+      "bytes": 4615148,
+      "sha256": "bf61b1e9f7b1cb1821c839807abc1693a3bfc2d51cbe3c0faec4ae33dc94130f"
     },
     {
       "path": "data/classical/classical_10000.csv",
@@ -472,14 +472,64 @@
       "sha256": "8ebbb4e60a145dd11413a3154fc750ab121a4480f47e1cc20c51f1b43b1c6216"
     },
     {
+      "path": "data/language_covers/afrikaans/afrikaans_cover_candidates.csv",
+      "bytes": 276886,
+      "sha256": "e7686e54c57e0530a4e3c25530483c602411830f74b90813251bc50ecadeeff1"
+    },
+    {
       "path": "data/language_covers/afrikaans/afrikaans_covers_part_001.csv",
       "bytes": 12645,
       "sha256": "2ece3393288a5c05ab8bde706b0fe4ff51d0ad21508eb50fe2167fea5b6d8871"
     },
     {
+      "path": "data/language_covers/chinese/chinese_cover_candidates.csv",
+      "bytes": 6784868,
+      "sha256": "acc322b3e7137b4a173aecd1f72c969151b2c8c24ada6d70f42c389291cad5e0"
+    },
+    {
       "path": "data/language_covers/chinese/chinese_covers_part_001.csv",
       "bytes": 43741,
       "sha256": "0ebc61b8c8f5b853d1ea167ef9917fddee78b0b4dff7314b6c3f55492749802e"
+    },
+    {
+      "path": "data/language_covers/german/german_cover_candidates.csv",
+      "bytes": 22183,
+      "sha256": "f1380622e80e3c6c1d81c211c575ed923002fcbf8458c446452e3dccd8f56d71"
+    },
+    {
+      "path": "data/language_covers/indonesian/indonesian_cover_candidates.csv",
+      "bytes": 8552709,
+      "sha256": "b5a3a4e8d170d825d30955f7dc36ab8cb235886b9786428b0f6dc2946303fb18"
+    },
+    {
+      "path": "data/language_covers/japanese/japanese_cover_candidates.csv",
+      "bytes": 82811,
+      "sha256": "ea85ab50b55e8a90afe30f2b5ffb06bfd9c4c2de323620682202ef6ee721a7e3"
+    },
+    {
+      "path": "data/language_covers/korean/korean_cover_candidates.csv",
+      "bytes": 3997973,
+      "sha256": "cae9a2a39dad025429cec8d36898b25529063fe5c6d4b6c686d31c88372f58d6"
+    },
+    {
+      "path": "data/language_covers/norwegian/norwegian_cover_candidates.csv",
+      "bytes": 3511232,
+      "sha256": "16cd1e0c319ecf8be9cefb3aa971dd20dcd2aff14f12c3876e6d54062f9938b4"
+    },
+    {
+      "path": "data/language_covers/russian/russian_cover_candidates.csv",
+      "bytes": 9019767,
+      "sha256": "72ef0d8984300873a36fda77f771f87a2777bf1e70b059ea3fd638681754c2e7"
+    },
+    {
+      "path": "data/language_covers/swedish/swedish_cover_candidates.csv",
+      "bytes": 2256051,
+      "sha256": "7618994b79cb69fb9242e111891e5f90cd9e8677f62684f2981d95554e19667d"
+    },
+    {
+      "path": "data/language_covers/ukrainian/ukrainian_cover_candidates.csv",
+      "bytes": 2707292,
+      "sha256": "2f19a5d84ccd43e0ef03d7c9fa94041381e30e8b180a6065d8a47febfab6d072"
     },
     {
       "path": "data/language_covers/ukrainian/ukrainian_covers_part_001.csv",
@@ -13178,8 +13228,8 @@
     },
     {
       "path": "data/video_games/video_game_music_10000.csv",
-      "bytes": 2354162,
-      "sha256": "48f5a0c065334b635cc250d49dc4a92dc01b63c11aa22b1fff4a632c78d1d758"
+      "bytes": 2353352,
+      "sha256": "5da0a844a8b672aa2ed70636863f15ad8fb392614a0bf6622ff12cda6d30a2cc"
     },
     {
       "path": "data/vocaloid/vocaloid_originals_youtube_views.csv.gz",

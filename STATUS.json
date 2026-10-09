@@ -17,12 +17,6 @@
       "anime",
       "children_childhood",
       "countries",
-      "per_game_vgm",
-      "video_game_music",
-      "vocaloid",
-      "vocaloid_covers"
-    ],
-    "last_parallel_failures": [
       "cover_afrikaans",
       "cover_chinese",
       "cover_german",
@@ -32,26 +26,31 @@
       "cover_norwegian",
       "cover_russian",
       "cover_swedish",
-      "cover_ukrainian"
-    ]
+      "cover_ukrainian",
+      "per_game_vgm",
+      "video_game_music",
+      "vocaloid",
+      "vocaloid_covers"
+    ],
+    "last_parallel_failures": []
   },
   "datasets": {
     "anime": {
       "target": 10000,
-      "materialized_rows": 7646,
+      "materialized_rows": 7494,
       "complete": false,
       "builder_revision": "parallel-workers-v1",
       "metric_coverage": {
-        "anime_popularity_proxy": 3713,
-        "myanimelist_members_snapshot": 3321,
+        "anime_popularity_proxy": 2954,
+        "myanimelist_members_snapshot": 3929,
         "spotify_chart_streams_snapshot": 4,
-        "spotify_popularity": 599,
+        "spotify_popularity": 598,
         "spotify_streams": 5,
         "spotify_streams_snapshot": 5
       },
       "notes": [
         "Local-first two-pass pipeline: bulk AnimeThemes + bundled MAL theme data are scanned without per-anime network calls; Jikan is used only as a bounded post-pass for higher-ranked unresolved anime.",
-        "local_rows_before_jikan=7647; jikan_stop_reason=circuit_breaker_after_16_consecutive_failures"
+        "local_rows_before_jikan=7495; jikan_stop_reason=circuit_breaker_after_16_consecutive_failures"
       ]
     },
     "worldwide": {
@@ -259,7 +258,7 @@
     },
     "children_childhood": {
       "target": 10000,
-      "materialized_rows": 4523,
+      "materialized_rows": 4629,
       "complete": false,
       "builder_revision": "parallel-workers-v1",
       "metric_coverage": {},
@@ -267,7 +266,7 @@
         "Quebec age-0-12 childhood scope; observation window 2016-2026.",
         "Global generic children's-music rows are not accepted without curated Quebec/franchise exposure evidence.",
         "Primary discovery sources: Canadian Apple storefront and Canada-region YouTube Music child queries; no fabricated quota padding.",
-        "existing_qualified=4295; apple_candidates=2846; youtube_candidates=39"
+        "existing_qualified=4298; apple_candidates=3897; youtube_candidates=8"
       ]
     },
     "unserious": {
@@ -379,33 +378,54 @@
       ]
     },
     "cover_afrikaans": {
-      "target": 100000,
+      "target": 10000,
       "materialized_rows": 17,
       "complete": false,
       "builder_revision": "parallel-workers-v1",
       "metric_coverage": {},
       "notes": [
-        "{\"source_exhausted\": true, \"requests_this_run\": 0, \"source_strategy\": \"MusicBrainz work language + explicit cover performance relationship\"}"
+        "731 candidates (NOT verified) in data/language_covers/afrikaans/afrikaans_cover_candidates.csv",
+        "21 queued unfinished discovery jobs",
+        "SQLite checkpoint: /home/runner/work/BeatHit-Dataset/BeatHit-Dataset/.cache/beathit-expansion/cover_discovery.sqlite3",
+        "YouTube search, cheap channel uploads, and Apple Music/iTunes discovery.",
+        "Original and performed language must be verified before publication.",
+        "YouTube API enabled",
+        "errors={}",
+        "next_retry_utc=None"
       ]
     },
     "cover_chinese": {
-      "target": 100000,
+      "target": 10000,
       "materialized_rows": 60,
       "complete": false,
       "builder_revision": "parallel-workers-v1",
       "metric_coverage": {},
       "notes": [
-        "{\"source_exhausted\": true, \"requests_this_run\": 0, \"source_strategy\": \"MusicBrainz work language + explicit cover performance relationship\"}"
+        "5176 candidates (NOT verified) in data/language_covers/chinese/chinese_cover_candidates.csv",
+        "21 queued unfinished discovery jobs",
+        "SQLite checkpoint: /home/runner/work/BeatHit-Dataset/BeatHit-Dataset/.cache/beathit-expansion/cover_discovery.sqlite3",
+        "YouTube search, cheap channel uploads, and Apple Music/iTunes discovery.",
+        "Original and performed language must be verified before publication.",
+        "YouTube API enabled",
+        "errors={}",
+        "next_retry_utc=None"
       ]
     },
     "cover_ukrainian": {
-      "target": 100000,
+      "target": 10000,
       "materialized_rows": 155,
       "complete": false,
       "builder_revision": "parallel-workers-v1",
       "metric_coverage": {},
       "notes": [
-        "{\"source_exhausted\": true, \"requests_this_run\": 0, \"source_strategy\": \"MusicBrainz work language + explicit cover performance relationship\"}"
+        "1639 candidates (NOT verified) in data/language_covers/ukrainian/ukrainian_cover_candidates.csv",
+        "21 queued unfinished discovery jobs",
+        "SQLite checkpoint: /home/runner/work/BeatHit-Dataset/BeatHit-Dataset/.cache/beathit-expansion/cover_discovery.sqlite3",
+        "YouTube search, cheap channel uploads, and Apple Music/iTunes discovery.",
+        "Original and performed language must be verified before publication.",
+        "YouTube API enabled",
+        "errors={}",
+        "next_retry_utc=None"
       ]
     },
     "video_game_per_game": {
@@ -426,6 +446,125 @@
       "metric_coverage": {},
       "notes": [
         "{\"api_total\": 269040, \"requests_this_run\": 0}"
+      ]
+    },
+    "cover_german": {
+      "target": 10000,
+      "materialized_rows": 0,
+      "complete": false,
+      "builder_revision": "parallel-workers-v1",
+      "metric_coverage": {},
+      "notes": [
+        "79 candidates (NOT verified) in data/language_covers/german/german_cover_candidates.csv",
+        "21 queued unfinished discovery jobs",
+        "SQLite checkpoint: /home/runner/work/BeatHit-Dataset/BeatHit-Dataset/.cache/beathit-expansion/cover_discovery.sqlite3",
+        "YouTube search, cheap channel uploads, and Apple Music/iTunes discovery.",
+        "Original and performed language must be verified before publication.",
+        "YouTube API enabled",
+        "errors={\"rate_limited\": 1}",
+        "next_retry_utc=2026-10-09T23:27:33.650477+00:00"
+      ]
+    },
+    "cover_indonesian": {
+      "target": 10000,
+      "materialized_rows": 0,
+      "complete": false,
+      "builder_revision": "parallel-workers-v1",
+      "metric_coverage": {},
+      "notes": [
+        "6456 candidates (NOT verified) in data/language_covers/indonesian/indonesian_cover_candidates.csv",
+        "52 queued unfinished discovery jobs",
+        "SQLite checkpoint: /home/runner/work/BeatHit-Dataset/BeatHit-Dataset/.cache/beathit-expansion/cover_discovery.sqlite3",
+        "YouTube search, cheap channel uploads, and Apple Music/iTunes discovery.",
+        "Original and performed language must be verified before publication.",
+        "YouTube API enabled",
+        "errors={\"rate_limited\": 2}",
+        "next_retry_utc=None"
+      ]
+    },
+    "cover_japanese": {
+      "target": 10000,
+      "materialized_rows": 0,
+      "complete": false,
+      "builder_revision": "parallel-workers-v1",
+      "metric_coverage": {},
+      "notes": [
+        "257 candidates (NOT verified) in data/language_covers/japanese/japanese_cover_candidates.csv",
+        "21 queued unfinished discovery jobs",
+        "SQLite checkpoint: /home/runner/work/BeatHit-Dataset/BeatHit-Dataset/.cache/beathit-expansion/cover_discovery.sqlite3",
+        "YouTube search, cheap channel uploads, and Apple Music/iTunes discovery.",
+        "Original and performed language must be verified before publication.",
+        "YouTube API enabled",
+        "errors={\"rate_limited\": 1}",
+        "next_retry_utc=2026-10-09T23:27:36.619676+00:00"
+      ]
+    },
+    "cover_korean": {
+      "target": 10000,
+      "materialized_rows": 0,
+      "complete": false,
+      "builder_revision": "parallel-workers-v1",
+      "metric_coverage": {},
+      "notes": [
+        "5257 candidates (NOT verified) in data/language_covers/korean/korean_cover_candidates.csv",
+        "21 queued unfinished discovery jobs",
+        "SQLite checkpoint: /home/runner/work/BeatHit-Dataset/BeatHit-Dataset/.cache/beathit-expansion/cover_discovery.sqlite3",
+        "YouTube search, cheap channel uploads, and Apple Music/iTunes discovery.",
+        "Original and performed language must be verified before publication.",
+        "YouTube API enabled",
+        "errors={}",
+        "next_retry_utc=None"
+      ]
+    },
+    "cover_norwegian": {
+      "target": 10000,
+      "materialized_rows": 0,
+      "complete": false,
+      "builder_revision": "parallel-workers-v1",
+      "metric_coverage": {},
+      "notes": [
+        "3461 candidates (NOT verified) in data/language_covers/norwegian/norwegian_cover_candidates.csv",
+        "21 queued unfinished discovery jobs",
+        "SQLite checkpoint: /home/runner/work/BeatHit-Dataset/BeatHit-Dataset/.cache/beathit-expansion/cover_discovery.sqlite3",
+        "YouTube search, cheap channel uploads, and Apple Music/iTunes discovery.",
+        "Original and performed language must be verified before publication.",
+        "YouTube API enabled",
+        "errors={}",
+        "next_retry_utc=None"
+      ]
+    },
+    "cover_russian": {
+      "target": 10000,
+      "materialized_rows": 0,
+      "complete": false,
+      "builder_revision": "parallel-workers-v1",
+      "metric_coverage": {},
+      "notes": [
+        "5882 candidates (NOT verified) in data/language_covers/russian/russian_cover_candidates.csv",
+        "21 queued unfinished discovery jobs",
+        "SQLite checkpoint: /home/runner/work/BeatHit-Dataset/BeatHit-Dataset/.cache/beathit-expansion/cover_discovery.sqlite3",
+        "YouTube search, cheap channel uploads, and Apple Music/iTunes discovery.",
+        "Original and performed language must be verified before publication.",
+        "YouTube API enabled",
+        "errors={}",
+        "next_retry_utc=None"
+      ]
+    },
+    "cover_swedish": {
+      "target": 10000,
+      "materialized_rows": 0,
+      "complete": false,
+      "builder_revision": "parallel-workers-v1",
+      "metric_coverage": {},
+      "notes": [
+        "3127 candidates (NOT verified) in data/language_covers/swedish/swedish_cover_candidates.csv",
+        "21 queued unfinished discovery jobs",
+        "SQLite checkpoint: /home/runner/work/BeatHit-Dataset/BeatHit-Dataset/.cache/beathit-expansion/cover_discovery.sqlite3",
+        "YouTube search, cheap channel uploads, and Apple Music/iTunes discovery.",
+        "Original and performed language must be verified before publication.",
+        "YouTube API enabled",
+        "errors={}",
+        "next_retry_utc=None"
       ]
     }
   },
