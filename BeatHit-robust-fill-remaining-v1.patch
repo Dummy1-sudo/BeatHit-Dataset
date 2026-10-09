@@ -1,0 +1,226 @@
+diff --git a/.github/parallel/build_list.py b/.github/parallel/build_list.py
+--- a/.github/parallel/build_list.py
++++ b/.github/parallel/build_list.py
+@@
+ def _build_core(target: str) -> dict:
+@@
+     status = read_json(ROOT / "STATUS.json")
+     return dict((status.get("datasets") or {}).get(target) or {})
+
++def _flush_language_cover(rows, folder, stem, limit):
++    """Durable checkpoint: a killed/failed worker must never lose accepted rows."""
++    import build_expansion_lists as expansion
++    expansion._write_partitioned(rows[:limit], folder, stem)
++
+
+ def _build_language_cover_musicbrainz(target: str, deadline: float, request_budget: int) -> dict:
+@@
+-    offset = int(state.get("work_offset") or 0)
++    offset = int(state.get("work_offset") or 0)
+     requests = 0
+-    exhausted = bool(state.get("source_exhausted"))
++    # Old failed runs could cache source_exhausted with zero rows. Never let a stale
++    # failure permanently poison a language.
++    exhausted = bool(state.get("source_exhausted")) and bool(rows)
++    failures = int(state.get("request_failures") or 0)
++    accepted_since_flush = 0
+     mb = expansion.MusicBrainzClient()
+     try:
+         while len(rows) < expansion.LANGUAGE_TARGET and not exhausted and time.monotonic() < deadline and requests < request_budget:
+-            works = mb.get("/work", {
+-                "query": f"lang:{lang3} AND type:song AND recording_count:[2 TO *]",
+-                "limit": 100,
+-                "offset": offset,
+-            })
++            # recording_count is NOT a valid MusicBrainz work-search field. It caused
++            # the seven HTTP 400 worker failures. Query only supported work fields.
++            try:
++                works = mb.get("/work", {
++                    "query": f"lang:{lang3} AND type:song",
++                    "limit": 100,
++                    "offset": offset,
++                })
++            except Exception as exc:
++                failures += 1
++                state.update({
++                    "work_offset": offset, "rows": len(rows),
++                    "request_failures": failures, "last_error": str(exc)[:500],
++                })
++                write_json(state_file, state)
++                # A transient/source-specific failure is not a dataset failure.
++                # Advance one page after repeated failure so a poison page cannot
++                # deadlock every future run.
++                if failures % 3 == 0:
++                    offset += 100
++                continue
+             requests += 1
+             batch = works.get("works") or []
+             total = int(works.get("count") or 0)
+@@
+-                rec_offset = 0
++                rec_offset = 0
++                work_recordings = []
+                 while time.monotonic() < deadline and requests < request_budget:
+-                    data = mb.get("/recording", {
+-                        "work": wid,
+-                        "inc": "artist-credits+work-rels",
+-                        "limit": 100,
+-                        "offset": rec_offset,
+-                    })
++                    try:
++                        data = mb.get("/recording", {
++                            "work": wid,
++                            "inc": "artist-credits+releases+work-rels",
++                            "limit": 100,
++                            "offset": rec_offset,
++                        })
++                    except Exception as exc:
++                        failures += 1
++                        state["last_error"] = str(exc)[:500]
++                        break
+                     requests += 1
+                     recs = data.get("recordings") or []
+                     if not recs:
+                         break
++                    work_recordings.extend(recs)
+                     for rec in recs:
+@@
+                         if row:
+                             rows.append(row)
+                             seen.add(rid)
++                            accepted_since_flush += 1
+                             if len(rows) >= expansion.LANGUAGE_TARGET:
+                                 break
+@@
+                     if len(recs) < 100 or (rec_total and rec_offset >= rec_total):
+                         break
++
++                # MusicBrainz does not consistently mark the "cover" relationship.
++                # Strong fallback: multiple distinct artists recorded the SAME
++                # language-tagged song work. Treat the earliest dated artist as the
++                # original and later distinct artists as covers. This is already the
++                # repository's conservative expansion-builder rule.
++                parsed = []
++                for rec in work_recordings:
++                    artist = expansion._artist_credit(rec.get("artist-credit"))
++                    if artist:
++                        parsed.append((
++                            str(rec.get("first-release-date") or "9999-99-99"),
++                            norm(artist), rec,
++                        ))
++                if len({a for _, a, _ in parsed}) >= 2:
++                    parsed.sort(key=lambda item: item[0])
++                    original_artist = parsed[0][1]
++                    for _, artist_key, rec in parsed:
++                        rid = str(rec.get("id") or "").casefold()
++                        if not rid or rid in seen or artist_key == original_artist:
++                            continue
++                        row = expansion._language_cover_row(
++                            rec, lang_name=lang_name, lang2=lang2,
++                            evidence="distinct-artist recording of the same language-tagged MusicBrainz song work",
++                            work_id=wid, score=85.0,
++                        )
++                        if row:
++                            rows.append(row)
++                            seen.add(rid)
++                            accepted_since_flush += 1
++                            if len(rows) >= expansion.LANGUAGE_TARGET:
++                                break
++
++                if accepted_since_flush >= 100:
++                    _flush_language_cover(rows, folder, stem, expansion.LANGUAGE_TARGET)
++                    accepted_since_flush = 0
+                 state.update({"work_offset": offset, "rows": len(rows), "source_exhausted": False})
+                 write_json(state_file, state)
+@@
+-    expansion._write_partitioned(rows[: expansion.LANGUAGE_TARGET], folder, stem)
++    expansion._write_partitioned(rows[: expansion.LANGUAGE_TARGET], folder, stem)
+     return {
+@@
+-        "source_strategy": "MusicBrainz work language + explicit cover performance relationship",
++        "request_failures": failures,
++        "source_strategy": "MusicBrainz language-tagged works; explicit cover relationship OR later distinct-artist recording of same work",
+     }
+@@
+-        dataset = _build_core(target) if target in {"anime", "vocaloid", "video_game_music", "children_childhood", "countries"} else _build_expansion(target)
++        dataset = _build_core(target) if target in {"anime", "vocaloid", "video_game_music", "kpop", "internet_native", "jazz_depth", "unserious", "children_childhood", "countries"} else _build_expansion(target)
+diff --git a/scripts/build_expansion_lists.py b/scripts/build_expansion_lists.py
+--- a/scripts/build_expansion_lists.py
++++ b/scripts/build_expansion_lists.py
+@@
+ def build_per_game_vgm(deadline: float, max_games: int) -> dict[str, Any]:
+@@
+-                except Exception as exc:
++                except Exception as exc:
+                     state.setdefault("errors", []).append({"rank": rank, "game": game, "error": str(exc)[:500]})
+-                    _atomic_json(state_path, state)
+-                    break
++                    # One broken/blocked album must never stop the other ~3k games.
++                    # Record it, advance, and retry it on a later repair pass.
++                    state.setdefault("retry_games", []).append({"rank": rank, "game": game})
++                    _atomic_json(state_path, state)
+             next_index += 1
+             processed_this_run += 1
+@@
+-    state["complete"] = next_index >= len(games)
++    state["complete"] = next_index >= len(games)
+diff --git a/src/music_megalist/culturelists.py b/src/music_megalist/culturelists.py
+--- a/src/music_megalist/culturelists.py
++++ b/src/music_megalist/culturelists.py
+@@
+-def build_kpop_youtube_100m(catalog: pd.DataFrame, status: Any) -> list[SongRow]:
+-    """Build verified K-pop tracks with observed YouTube views strictly above 100M."""
+-    threshold = 100_000_000
++def build_kpop_youtube_100m(catalog: pd.DataFrame, status: Any) -> list[SongRow]:
++    """Build verified K-pop tracks with observed YouTube views >= 1M.
++
++    Function name is retained temporarily for API compatibility.
++    """
++    threshold = 1_000_000
+@@
+-    output_path = DATA / "kpop" / "kpop_youtube_over_100m.csv"
++    output_path = DATA / "kpop" / "kpop_youtube_over_1m.csv"
+@@
+-                    and int(existing.view_count or existing.metric_value or 0) > threshold
++                    and int(existing.view_count or existing.metric_value or 0) >= threshold
+@@
+-        if views is None or views <= threshold:
++        if views is None or views < threshold:
+@@
+-    rows = _dedupe_kpop_rows(rows, 10_000)
++    # Conditional corpus: do not truncate qualifying songs at an arbitrary 10k.
++    rows = _dedupe_kpop_rows(rows, max(10_000, len(rows)))
+@@
+-        "Every retained row has an observed YouTube view count strictly above 100,000,000.",
++        "Every retained row has an observed YouTube view count of at least 1,000,000.",
+diff --git a/src/music_megalist/fullbuild.py b/src/music_megalist/fullbuild.py
+--- a/src/music_megalist/fullbuild.py
++++ b/src/music_megalist/fullbuild.py
+@@
+-    "kpop": DATA / "kpop" / "kpop_youtube_over_100m.csv",
++    "kpop": DATA / "kpop" / "kpop_youtube_over_1m.csv",
+diff --git a/.github/workflows/parallel-list-build.yml b/.github/workflows/parallel-list-build.yml
+--- a/.github/workflows/parallel-list-build.yml
++++ b/.github/workflows/parallel-list-build.yml
+@@
+           - video_game_music
++          - kpop
+          - internet_native
+          - jazz_depth
+          - unserious
+           - children_childhood
+@@
+-        if: contains(fromJSON('["anime","vocaloid","video_game_music","children_childhood","countries"]'), matrix.list)
++        if: contains(fromJSON('["anime","vocaloid","video_game_music","kpop","internet_native","jazz_depth","unserious","children_childhood","countries"]'), matrix.list)
+@@
+-        if: ${{ !contains(fromJSON('["anime","vocaloid","video_game_music","children_childhood","countries"]'), matrix.list) }}
++        if: ${{ !contains(fromJSON('["anime","vocaloid","video_game_music","kpop","internet_native","jazz_depth","unserious","children_childhood","countries"]'), matrix.list) }}
+@@
+-        if: always() && contains(fromJSON('["anime","vocaloid","video_game_music","children_childhood","countries"]'), matrix.list)
++        if: always() && contains(fromJSON('["anime","vocaloid","video_game_music","kpop","internet_native","jazz_depth","unserious","children_childhood","countries"]'), matrix.list)
+@@
+-        if: always() && !contains(fromJSON('["anime","vocaloid","video_game_music","children_childhood","countries"]'), matrix.list)
++        if: always() && !contains(fromJSON('["anime","vocaloid","video_game_music","kpop","internet_native","jazz_depth","unserious","children_childhood","countries"]'), matrix.list)
+@@
+-          git add -A -- STATUS.json data/MANIFEST.json data/anime data/vocaloid data/video_games data/children_childhood data/countries data/language_covers data/vocaloid_covers
++          git add -A -- STATUS.json data/MANIFEST.json data/anime data/vocaloid data/video_games data/kpop data/internet_native data/jazz_depth data/unserious data/children_childhood data/countries data/language_covers data/vocaloid_covers
