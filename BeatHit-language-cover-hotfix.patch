@@ -1,0 +1,10 @@
+diff --git a/.github/parallel/build_list.py b/.github/parallel/build_list.py
+--- a/.github/parallel/build_list.py
++++ b/.github/parallel/build_list.py
+@@ -1,5 +1,5 @@
+             works = mb.get("/work", {
+-                "query": f"lang:{lang3} AND type:song AND recording_count:[2 TO *]",
++                "query": f"lang:{lang3} AND type:song",
+                 "limit": 100,
+                 "offset": offset,
+             })
