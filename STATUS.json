@@ -17,22 +17,22 @@
       "anime",
       "children_childhood",
       "countries",
-      "cover_afrikaans",
-      "cover_chinese",
-      "cover_ukrainian",
       "per_game_vgm",
       "video_game_music",
       "vocaloid",
       "vocaloid_covers"
     ],
     "last_parallel_failures": [
+      "cover_afrikaans",
+      "cover_chinese",
       "cover_german",
       "cover_indonesian",
       "cover_japanese",
       "cover_korean",
       "cover_norwegian",
       "cover_russian",
-      "cover_swedish"
+      "cover_swedish",
+      "cover_ukrainian"
     ]
   },
   "datasets": {
@@ -259,7 +259,7 @@
     },
     "children_childhood": {
       "target": 10000,
-      "materialized_rows": 5052,
+      "materialized_rows": 4523,
       "complete": false,
       "builder_revision": "parallel-workers-v1",
       "metric_coverage": {},
@@ -267,7 +267,7 @@
         "Quebec age-0-12 childhood scope; observation window 2016-2026.",
         "Global generic children's-music rows are not accepted without curated Quebec/franchise exposure evidence.",
         "Primary discovery sources: Canadian Apple storefront and Canada-region YouTube Music child queries; no fabricated quota padding.",
-        "existing_qualified=4270; apple_candidates=3822; youtube_candidates=908"
+        "existing_qualified=4295; apple_candidates=2846; youtube_candidates=39"
       ]
     },
     "unserious": {
@@ -415,7 +415,7 @@
       "builder_revision": "parallel-workers-v1",
       "metric_coverage": {},
       "notes": [
-        "{\"games_scanned\": 3162, \"master_games\": 3162, \"materialized_game_lists\": 2487, \"unmatched_games\": 675, \"general_vgm_rows_preserved\": 2766, \"processed_this_run\": 0}"
+        "{\"games_scanned\": 3162, \"master_games\": 3162, \"materialized_game_lists\": 2487, \"unmatched_games\": 675, \"general_vgm_rows_preserved\": 2765, \"processed_this_run\": 0}"
       ]
     },
     "vocaloid_covers": {
