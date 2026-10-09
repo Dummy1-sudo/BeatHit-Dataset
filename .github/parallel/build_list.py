@@ -456,107 +456,11 @@ def _build_core(target: str) -> dict:
 
 
 
-def _build_language_cover_musicbrainz(target: str, deadline: float, request_budget: int) -> dict:
-    """Build one language independently using valid MusicBrainz work/recording APIs.
+def _build_language_cover_discovery(target: str, deadline: float, request_budget: int) -> dict:
+    """Discover cover candidates without mislabelling them as verified covers."""
+    from cover_discovery import discover
+    return discover(target.removeprefix("cover_"), deadline, request_budget)
 
-    This deliberately avoids the old recording-search `lang:` query and the invalid
-    recording-browse `inc=releases` combination.  Work search owns the lyric-language
-    field; recordings are then browsed from each work and explicit `cover` performance
-    relationships are preferred.
-    """
-    import build_expansion_lists as expansion
-
-    slug = target.removeprefix("cover_")
-    lang_name, lang3, lang2 = expansion.LANGUAGE_COVERS[slug]
-    folder = DATA / "language_covers" / slug
-    stem = f"{slug}_covers"
-    rows, seen = expansion._load_existing_parts(folder, stem)
-    state_file = expansion.CACHE / f"language_cover_{slug}_parallel.json"
-    state = read_json(state_file)
-    offset = int(state.get("work_offset") or 0)
-    requests = 0
-    exhausted = bool(state.get("source_exhausted"))
-    mb = expansion.MusicBrainzClient()
-    try:
-        while len(rows) < expansion.LANGUAGE_TARGET and not exhausted and time.monotonic() < deadline and requests < request_budget:
-            works = mb.get("/work", {
-                "query": f"lang:{lang3} AND type:song AND recording_count:[2 TO *]",
-                "limit": 100,
-                "offset": offset,
-            })
-            requests += 1
-            batch = works.get("works") or []
-            total = int(works.get("count") or 0)
-            if not batch:
-                exhausted = True
-                break
-            for work in batch:
-                if len(rows) >= expansion.LANGUAGE_TARGET or time.monotonic() >= deadline or requests >= request_budget:
-                    break
-                wid = str(work.get("id") or "").strip()
-                if not wid:
-                    continue
-                rec_offset = 0
-                while time.monotonic() < deadline and requests < request_budget:
-                    data = mb.get("/recording", {
-                        "work": wid,
-                        "inc": "artist-credits+work-rels",
-                        "limit": 100,
-                        "offset": rec_offset,
-                    })
-                    requests += 1
-                    recs = data.get("recordings") or []
-                    if not recs:
-                        break
-                    for rec in recs:
-                        rid = str(rec.get("id") or "").casefold()
-                        if not rid or rid in seen:
-                            continue
-                        explicit_cover = False
-                        for rel in rec.get("relations") or []:
-                            attrs = {str(x).casefold() for x in (rel.get("attributes") or [])}
-                            related_work = (rel.get("work") or {}).get("id")
-                            if str(related_work or "") == wid and "cover" in attrs:
-                                explicit_cover = True
-                                break
-                        if not explicit_cover:
-                            continue
-                        row = expansion._language_cover_row(
-                            rec,
-                            lang_name=lang_name,
-                            lang2=lang2,
-                            evidence="MusicBrainz performance relationship explicitly marked cover; language from the related work",
-                            work_id=wid,
-                            score=100.0,
-                        )
-                        if row:
-                            rows.append(row)
-                            seen.add(rid)
-                            if len(rows) >= expansion.LANGUAGE_TARGET:
-                                break
-                    rec_offset += len(recs)
-                    rec_total = int(data.get("recording-count") or data.get("count") or 0)
-                    if len(recs) < 100 or (rec_total and rec_offset >= rec_total):
-                        break
-                state.update({"work_offset": offset, "rows": len(rows), "source_exhausted": False})
-                write_json(state_file, state)
-            offset += len(batch)
-            if offset >= total:
-                exhausted = True
-            state.update({"work_offset": offset, "rows": len(rows), "source_exhausted": exhausted})
-            write_json(state_file, state)
-    finally:
-        mb.close()
-
-    expansion._write_partitioned(rows[: expansion.LANGUAGE_TARGET], folder, stem)
-    return {
-        "target": expansion.LANGUAGE_TARGET,
-        "rows": min(len(rows), expansion.LANGUAGE_TARGET),
-        "complete": len(rows) >= expansion.LANGUAGE_TARGET,
-        "source_exhausted": exhausted,
-        "requests_this_run": requests,
-        "source_strategy": "MusicBrainz work language + explicit cover performance relationship",
-    }
 
 def _build_expansion(target: str) -> dict:
     import build_expansion_lists as expansion
@@ -573,10 +477,10 @@ def _build_expansion(target: str) -> dict:
         slug = target.removeprefix("cover_")
         if slug not in expansion.LANGUAGE_COVERS:
             raise ValueError(f"Unknown language cover target: {slug}")
-        return _build_language_cover_musicbrainz(
+        return _build_language_cover_discovery(
             target,
             deadline,
-            int(os.getenv("BEATHIT_COVER_MB_REQUESTS_PER_LANGUAGE", "12000")),
+            int(os.getenv("BEATHIT_COVER_YOUTUBE_SEARCHES", "60")),
         )
     raise ValueError(target)
 
