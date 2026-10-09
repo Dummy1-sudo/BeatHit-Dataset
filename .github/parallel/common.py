@@ -73,7 +73,12 @@ def iter_csvs(target: str) -> Iterable[Path]:
         if path.is_file() and (path.name.endswith(".csv") or path.name.endswith(".csv.gz")):
             yield path
         elif path.is_dir():
-            yield from sorted(path.rglob("*.csv"))
+            # Cover candidates use a discovery schema, not the canonical SongRow
+            # schema. They are validated independently in finalize_list.py.
+            for csv_path in sorted(path.rglob("*.csv")):
+                if target.startswith("cover_") and csv_path.name.endswith("_cover_candidates.csv"):
+                    continue
+                yield csv_path
             yield from sorted(path.rglob("*.csv.gz"))
 
 

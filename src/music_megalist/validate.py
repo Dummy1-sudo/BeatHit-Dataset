@@ -5,6 +5,7 @@ import json
 import re
 from .io import open_text, read_rows
 from .dedupe import norm
+from .cover_candidates import candidate_csv_errors
 
 TARGETS={
  "anime/anime_songs.csv":10000,
@@ -157,6 +158,11 @@ def validate(data_dir: str|Path='data', *, require_complete: bool=False) -> list
         if p.name.endswith('.partial.csv'):
             continue
         if '/raw/' in p.as_posix(): continue
+        # Candidate discovery files are *not* canonical song lists. Validate
+        # their own schema without counting them as verified recordings.
+        if p.name.endswith('_cover_candidates.csv'):
+            errors.extend(candidate_csv_errors(p))
+            continue
         # Reports/inputs are not canonical song-list CSVs and use intentionally different schemas.
         if p.name in {'coverage_report.csv'}: continue
         # bootstrap files are provenance examples, not final canonical categories.

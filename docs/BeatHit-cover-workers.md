@@ -78,3 +78,24 @@ persisted automatically by ephemeral GitHub Actions runners; back it up if neede
 The worker uses no credentials besides the optional YouTube API key. There is no
 unlimited-source bypass. Search coverage, availability, and independent cover /
 language verification remain unresolved limits on reaching 10,000 real covers.
+
+## GitHub Actions (parallel workers)
+
+The scheduled `parallel-list-build` workflow runs once per day. Each language
+matrix entry has a **separate runner and SQLite cache**, so the global SQLite
+quota manager does not span GitHub runners. The workflow therefore applies
+conservative **per-runner** defaults of 6 YouTube searches/day and 250 other
+YouTube API requests/day to avoid overspending the same API key ten times.
+Adjust repository variables `BEATHIT_YT_SEARCH_PER_WORKER_DAILY` and
+`BEATHIT_YT_GENERAL_PER_WORKER_DAILY` only after checking project quota.
+This does not prevent other applications using the same API key from consuming
+quota. Quota errors postpone jobs; the daily workflow retries them when the
+cache is restored.
+
+`*_cover_candidates.csv` files are a separate, source-backed *discovery*
+schema. They are validated for schema, duplicate source IDs, review status and
+language code, but **never** sent to the canonical SongRow validator and never
+counted toward the 10,000 verified-song target. Candidate exports are carried
+with successful worker artifacts, and verified cover partitions remain subject
+to canonical validation. GitHub Actions must commit successful candidate
+exports after consolidation for the progress files to be visible in the repo.

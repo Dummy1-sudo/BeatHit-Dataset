@@ -93,6 +93,12 @@ jobs:
         env:
           PYTHONUNBUFFERED: '1'
           YOUTUBE_API_KEY: ${{ secrets.YOUTUBE_API_KEY }}
+          # Each matrix job has its own SQLite cache/runner, but all cover jobs
+          # use the same API key. Allocate an independent *per-job* share of
+          # the project quota instead of letting all ten spend the full budget.
+          BEATHIT_YT_SEARCH_DAILY_LIMIT: ${{ vars.BEATHIT_YT_SEARCH_PER_WORKER_DAILY || '6' }}
+          BEATHIT_YT_SEARCH_PER_LANGUAGE_DAILY: ${{ vars.BEATHIT_YT_SEARCH_PER_WORKER_DAILY || '6' }}
+          BEATHIT_YT_GENERAL_DAILY_LIMIT: ${{ vars.BEATHIT_YT_GENERAL_PER_WORKER_DAILY || '250' }}
           BEATHIT_WORKER_MAX_SECONDS: ${{ vars.BEATHIT_WORKER_MAX_SECONDS || '19000' }}
           BEATHIT_RYD_FALLBACK: '1'
           BEATHIT_RYD_WORKERS: '20'

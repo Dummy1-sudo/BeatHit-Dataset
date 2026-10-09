@@ -10,6 +10,7 @@ sys.path.insert(0, str(ROOT / "src"))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from common import ALL_TARGETS, DATA, iter_csvs, read_json, status_path, target_paths, write_json
+from music_megalist.cover_candidates import candidate_csv_errors
 from music_megalist.dedupe import norm
 from music_megalist.io import read_rows, write_rows
 from music_megalist.validate import _generic_csv_errors
@@ -127,6 +128,11 @@ def main() -> int:
     rows = _finalize(target)
 
     errors = []
+    if target.startswith("cover_"):
+        slug = target.removeprefix("cover_")
+        candidate_file = DATA / "language_covers" / slug / f"{slug}_cover_candidates.csv"
+        if candidate_file.exists():
+            errors.extend(candidate_csv_errors(candidate_file))
     for path in iter_csvs(target):
         errors.extend(_generic_csv_errors(path))
 
@@ -135,7 +141,9 @@ def main() -> int:
     if dataset.get("target") == 10_000 and rows > 9_000:
         dataset["complete"] = True
     if target.startswith("cover_"):
-        dataset["complete"] = rows >= 100_000
+        # Only canonical verified cover partitions count toward the target.
+        # Discovery candidates are explicitly excluded from `rows`.
+        dataset["complete"] = rows >= 10_000
     fragment["deduplicated_rows"] = rows
     fragment["validation_errors"] = errors[:200]
     write_json(fragment_path, fragment)
