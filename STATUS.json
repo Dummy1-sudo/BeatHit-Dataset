@@ -258,7 +258,7 @@
     },
     "children_childhood": {
       "target": 10000,
-      "materialized_rows": 4896,
+      "materialized_rows": 5058,
       "complete": false,
       "builder_revision": "parallel-workers-v1",
       "metric_coverage": {},
@@ -266,7 +266,7 @@
         "Quebec age-0-12 childhood scope; observation window 2016-2026.",
         "Global generic children's-music rows are not accepted without curated Quebec/franchise exposure evidence.",
         "Primary discovery sources: Canadian Apple storefront and Canada-region YouTube Music child queries; no fabricated quota padding.",
-        "existing_qualified=4311; apple_candidates=3897; youtube_candidates=622"
+        "existing_qualified=4313; apple_candidates=3911; youtube_candidates=742"
       ]
     },
     "unserious": {
@@ -384,8 +384,8 @@
       "builder_revision": "parallel-workers-v1",
       "metric_coverage": {},
       "notes": [
-        "2614 candidates (NOT verified) in data/language_covers/afrikaans/afrikaans_cover_candidates.csv",
-        "67 queued unfinished discovery jobs",
+        "6658 candidates (NOT verified) in data/language_covers/afrikaans/afrikaans_cover_candidates.csv",
+        "32 queued unfinished discovery jobs",
         "SQLite checkpoint: /home/runner/work/BeatHit-Dataset/BeatHit-Dataset/.cache/beathit-expansion/cover_discovery.sqlite3",
         "YouTube search, cheap channel uploads, and Apple Music/iTunes discovery.",
         "Original and performed language must be verified before publication.",
@@ -401,8 +401,8 @@
       "builder_revision": "parallel-workers-v1",
       "metric_coverage": {},
       "notes": [
-        "9052 candidates (NOT verified) in data/language_covers/chinese/chinese_cover_candidates.csv",
-        "96 queued unfinished discovery jobs",
+        "14468 candidates (NOT verified) in data/language_covers/chinese/chinese_cover_candidates.csv",
+        "81 queued unfinished discovery jobs",
         "SQLite checkpoint: /home/runner/work/BeatHit-Dataset/BeatHit-Dataset/.cache/beathit-expansion/cover_discovery.sqlite3",
         "YouTube search, cheap channel uploads, and Apple Music/iTunes discovery.",
         "Original and performed language must be verified before publication.",
@@ -418,8 +418,8 @@
       "builder_revision": "parallel-workers-v1",
       "metric_coverage": {},
       "notes": [
-        "4360 candidates (NOT verified) in data/language_covers/ukrainian/ukrainian_cover_candidates.csv",
-        "48 queued unfinished discovery jobs",
+        "6899 candidates (NOT verified) in data/language_covers/ukrainian/ukrainian_cover_candidates.csv",
+        "26 queued unfinished discovery jobs",
         "SQLite checkpoint: /home/runner/work/BeatHit-Dataset/BeatHit-Dataset/.cache/beathit-expansion/cover_discovery.sqlite3",
         "YouTube search, cheap channel uploads, and Apple Music/iTunes discovery.",
         "Original and performed language must be verified before publication.",
@@ -455,8 +455,8 @@
       "builder_revision": "parallel-workers-v1",
       "metric_coverage": {},
       "notes": [
-        "2533 candidates (NOT verified) in data/language_covers/german/german_cover_candidates.csv",
-        "110 queued unfinished discovery jobs",
+        "5985 candidates (NOT verified) in data/language_covers/german/german_cover_candidates.csv",
+        "66 queued unfinished discovery jobs",
         "SQLite checkpoint: /home/runner/work/BeatHit-Dataset/BeatHit-Dataset/.cache/beathit-expansion/cover_discovery.sqlite3",
         "YouTube search, cheap channel uploads, and Apple Music/iTunes discovery.",
         "Original and performed language must be verified before publication.",
@@ -472,8 +472,8 @@
       "builder_revision": "parallel-workers-v1",
       "metric_coverage": {},
       "notes": [
-        "12658 candidates (NOT verified) in data/language_covers/indonesian/indonesian_cover_candidates.csv",
-        "64 queued unfinished discovery jobs",
+        "19207 candidates (NOT verified) in data/language_covers/indonesian/indonesian_cover_candidates.csv",
+        "29 queued unfinished discovery jobs",
         "SQLite checkpoint: /home/runner/work/BeatHit-Dataset/BeatHit-Dataset/.cache/beathit-expansion/cover_discovery.sqlite3",
         "YouTube search, cheap channel uploads, and Apple Music/iTunes discovery.",
         "Original and performed language must be verified before publication.",
@@ -489,8 +489,8 @@
       "builder_revision": "parallel-workers-v1",
       "metric_coverage": {},
       "notes": [
-        "2311 candidates (NOT verified) in data/language_covers/japanese/japanese_cover_candidates.csv",
-        "131 queued unfinished discovery jobs",
+        "6087 candidates (NOT verified) in data/language_covers/japanese/japanese_cover_candidates.csv",
+        "123 queued unfinished discovery jobs",
         "SQLite checkpoint: /home/runner/work/BeatHit-Dataset/BeatHit-Dataset/.cache/beathit-expansion/cover_discovery.sqlite3",
         "YouTube search, cheap channel uploads, and Apple Music/iTunes discovery.",
         "Original and performed language must be verified before publication.",
@@ -506,8 +506,8 @@
       "builder_revision": "parallel-workers-v1",
       "metric_coverage": {},
       "notes": [
-        "7682 candidates (NOT verified) in data/language_covers/korean/korean_cover_candidates.csv",
-        "83 queued unfinished discovery jobs",
+        "11216 candidates (NOT verified) in data/language_covers/korean/korean_cover_candidates.csv",
+        "53 queued unfinished discovery jobs",
         "SQLite checkpoint: /home/runner/work/BeatHit-Dataset/BeatHit-Dataset/.cache/beathit-expansion/cover_discovery.sqlite3",
         "YouTube search, cheap channel uploads, and Apple Music/iTunes discovery.",
         "Original and performed language must be verified before publication.",
@@ -523,8 +523,8 @@
       "builder_revision": "parallel-workers-v1",
       "metric_coverage": {},
       "notes": [
-        "5881 candidates (NOT verified) in data/language_covers/norwegian/norwegian_cover_candidates.csv",
-        "31 queued unfinished discovery jobs",
+        "7126 candidates (NOT verified) in data/language_covers/norwegian/norwegian_cover_candidates.csv",
+        "19 queued unfinished discovery jobs",
         "SQLite checkpoint: /home/runner/work/BeatHit-Dataset/BeatHit-Dataset/.cache/beathit-expansion/cover_discovery.sqlite3",
         "YouTube search, cheap channel uploads, and Apple Music/iTunes discovery.",
         "Original and performed language must be verified before publication.",
@@ -540,8 +540,8 @@
       "builder_revision": "parallel-workers-v1",
       "metric_coverage": {},
       "notes": [
-        "9303 candidates (NOT verified) in data/language_covers/russian/russian_cover_candidates.csv",
-        "62 queued unfinished discovery jobs",
+        "13188 candidates (NOT verified) in data/language_covers/russian/russian_cover_candidates.csv",
+        "29 queued unfinished discovery jobs",
         "SQLite checkpoint: /home/runner/work/BeatHit-Dataset/BeatHit-Dataset/.cache/beathit-expansion/cover_discovery.sqlite3",
         "YouTube search, cheap channel uploads, and Apple Music/iTunes discovery.",
         "Original and performed language must be verified before publication.",
@@ -557,8 +557,8 @@
       "builder_revision": "parallel-workers-v1",
       "metric_coverage": {},
       "notes": [
-        "4642 candidates (NOT verified) in data/language_covers/swedish/swedish_cover_candidates.csv",
-        "28 queued unfinished discovery jobs",
+        "5091 candidates (NOT verified) in data/language_covers/swedish/swedish_cover_candidates.csv",
+        "19 queued unfinished discovery jobs",
         "SQLite checkpoint: /home/runner/work/BeatHit-Dataset/BeatHit-Dataset/.cache/beathit-expansion/cover_discovery.sqlite3",
         "YouTube search, cheap channel uploads, and Apple Music/iTunes discovery.",
         "Original and performed language must be verified before publication.",
