@@ -37,12 +37,12 @@
   "datasets": {
     "anime": {
       "target": 10000,
-      "materialized_rows": 7667,
+      "materialized_rows": 7669,
       "complete": false,
       "builder_revision": "parallel-workers-v1",
       "metric_coverage": {
-        "anime_popularity_proxy": 3726,
-        "myanimelist_members_snapshot": 3328,
+        "anime_popularity_proxy": 3727,
+        "myanimelist_members_snapshot": 3329,
         "spotify_chart_streams_snapshot": 4,
         "spotify_popularity": 600,
         "spotify_streams": 5,
@@ -50,7 +50,7 @@
       },
       "notes": [
         "Local-first two-pass pipeline: bulk AnimeThemes + bundled MAL theme data are scanned without per-anime network calls; Jikan is used only as a bounded post-pass for higher-ranked unresolved anime.",
-        "local_rows_before_jikan=7668; jikan_stop_reason=circuit_breaker_after_16_consecutive_failures"
+        "local_rows_before_jikan=7670; jikan_stop_reason=circuit_breaker_after_16_consecutive_failures"
       ]
     },
     "worldwide": {
@@ -258,7 +258,7 @@
     },
     "children_childhood": {
       "target": 10000,
-      "materialized_rows": 5306,
+      "materialized_rows": 5474,
       "complete": false,
       "builder_revision": "parallel-workers-v1",
       "metric_coverage": {},
@@ -266,7 +266,7 @@
         "Quebec age-0-12 childhood scope; observation window 2016-2026.",
         "Global generic children's-music rows are not accepted without curated Quebec/franchise exposure evidence.",
         "Primary discovery sources: Canadian Apple storefront and Canada-region YouTube Music child queries; no fabricated quota padding.",
-        "existing_qualified=4515; apple_candidates=3831; youtube_candidates=895"
+        "existing_qualified=4525; apple_candidates=3950; youtube_candidates=904"
       ]
     },
     "unserious": {
