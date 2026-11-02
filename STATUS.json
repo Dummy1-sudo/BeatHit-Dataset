@@ -41,8 +41,8 @@
       "complete": false,
       "builder_revision": "parallel-workers-v1",
       "metric_coverage": {
-        "anime_popularity_proxy": 3727,
-        "myanimelist_members_snapshot": 3329,
+        "anime_popularity_proxy": 3726,
+        "myanimelist_members_snapshot": 3330,
         "spotify_chart_streams_snapshot": 4,
         "spotify_popularity": 600,
         "spotify_streams": 5,
@@ -180,7 +180,7 @@
         "Movie/television/anime soundtracks, licensed compilations, tribute releases, piano collections, music-box albums, cover albums, and generic remix albums are rejected.",
         "Each row records whether the game association came from an official soundtrack album, franchise artist, explicit track-title reference, high-confidence Wikidata match, or a ListenBrainz release-group game tag paired with an explicit soundtrack release.",
         "Selection preserves game breadth, then allows up to 25 source-backed recordings per game; final rows are sorted by popularity evidence.",
-        "ranked_games=10000; catalog_soundtrack_candidates=701; listenbrainz_candidates=3023; listenbrainz_added=2222; unique_games=435; fallback_unique=90; fallback_additional=291; rows=2734"
+        "ranked_games=10000; catalog_soundtrack_candidates=701; listenbrainz_candidates=3023; listenbrainz_added=2222; unique_games=435; fallback_unique=89; fallback_additional=291; rows=2734"
       ]
     },
     "internet_native": {
@@ -258,7 +258,7 @@
     },
     "children_childhood": {
       "target": 10000,
-      "materialized_rows": 5485,
+      "materialized_rows": 5488,
       "complete": false,
       "builder_revision": "parallel-workers-v1",
       "metric_coverage": {},
@@ -266,7 +266,7 @@
         "Quebec age-0-12 childhood scope; observation window 2016-2026.",
         "Global generic children's-music rows are not accepted without curated Quebec/franchise exposure evidence.",
         "Primary discovery sources: Canadian Apple storefront and Canada-region YouTube Music child queries; no fabricated quota padding.",
-        "existing_qualified=4634; apple_candidates=3907; youtube_candidates=902"
+        "existing_qualified=4640; apple_candidates=3947; youtube_candidates=906"
       ]
     },
     "unserious": {
