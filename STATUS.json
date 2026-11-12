@@ -168,11 +168,11 @@
     },
     "video_game_music": {
       "target": 10000,
-      "materialized_rows": 2743,
+      "materialized_rows": 2731,
       "complete": false,
       "builder_revision": "parallel-workers-v1",
       "metric_coverage": {
-        "listenbrainz_tag_popularity_percent": 2232,
+        "listenbrainz_tag_popularity_percent": 2220,
         "spotify_popularity": 511
       },
       "notes": [
@@ -180,7 +180,7 @@
         "Movie/television/anime soundtracks, licensed compilations, tribute releases, piano collections, music-box albums, cover albums, and generic remix albums are rejected.",
         "Each row records whether the game association came from an official soundtrack album, franchise artist, explicit track-title reference, high-confidence Wikidata match, or a ListenBrainz release-group game tag paired with an explicit soundtrack release.",
         "Selection preserves game breadth, then allows up to 25 source-backed recordings per game; final rows are sorted by popularity evidence.",
-        "ranked_games=10000; catalog_soundtrack_candidates=701; listenbrainz_candidates=3063; listenbrainz_added=2232; unique_games=424; fallback_unique=91; fallback_additional=290; rows=2743"
+        "ranked_games=10000; catalog_soundtrack_candidates=701; listenbrainz_candidates=3021; listenbrainz_added=2220; unique_games=432; fallback_unique=91; fallback_additional=290; rows=2731"
       ]
     },
     "internet_native": {
@@ -258,7 +258,7 @@
     },
     "children_childhood": {
       "target": 10000,
-      "materialized_rows": 5508,
+      "materialized_rows": 5549,
       "complete": false,
       "builder_revision": "parallel-workers-v1",
       "metric_coverage": {},
@@ -266,7 +266,7 @@
         "Quebec age-0-12 childhood scope; observation window 2016-2026.",
         "Global generic children's-music rows are not accepted without curated Quebec/franchise exposure evidence.",
         "Primary discovery sources: Canadian Apple storefront and Canada-region YouTube Music child queries; no fabricated quota padding.",
-        "existing_qualified=4738; apple_candidates=3416; youtube_candidates=918"
+        "existing_qualified=4738; apple_candidates=3404; youtube_candidates=932"
       ]
     },
     "unserious": {
@@ -304,11 +304,11 @@
     },
     "vocaloid": {
       "target": "every VocaDB Original voice-synth song with a resolved official Original YouTube PV, ordered by views",
-      "materialized_rows": 238763,
+      "materialized_rows": 238766,
       "complete": false,
       "builder_revision": "parallel-workers-v1",
       "metric_coverage": {
-        "youtube_views": 238763
+        "youtube_views": 238766
       },
       "notes": [
         "VocaDB-only classification and metadata; official YouTube Data API view counts only.",
