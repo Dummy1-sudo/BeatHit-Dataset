@@ -180,7 +180,7 @@
         "Movie/television/anime soundtracks, licensed compilations, tribute releases, piano collections, music-box albums, cover albums, and generic remix albums are rejected.",
         "Each row records whether the game association came from an official soundtrack album, franchise artist, explicit track-title reference, high-confidence Wikidata match, or a ListenBrainz release-group game tag paired with an explicit soundtrack release.",
         "Selection preserves game breadth, then allows up to 25 source-backed recordings per game; final rows are sorted by popularity evidence.",
-        "ranked_games=10000; catalog_soundtrack_candidates=701; listenbrainz_candidates=3021; listenbrainz_added=2220; unique_games=432; fallback_unique=91; fallback_additional=290; rows=2731"
+        "ranked_games=10000; catalog_soundtrack_candidates=701; listenbrainz_candidates=3021; listenbrainz_added=2220; unique_games=432; fallback_unique=89; fallback_additional=290; rows=2731"
       ]
     },
     "internet_native": {
@@ -258,7 +258,7 @@
     },
     "children_childhood": {
       "target": 10000,
-      "materialized_rows": 5565,
+      "materialized_rows": 5657,
       "complete": false,
       "builder_revision": "parallel-workers-v1",
       "metric_coverage": {},
@@ -266,7 +266,7 @@
         "Quebec age-0-12 childhood scope; observation window 2016-2026.",
         "Global generic children's-music rows are not accepted without curated Quebec/franchise exposure evidence.",
         "Primary discovery sources: Canadian Apple storefront and Canada-region YouTube Music child queries; no fabricated quota padding.",
-        "existing_qualified=4750; apple_candidates=3846; youtube_candidates=922"
+        "existing_qualified=4805; apple_candidates=3101; youtube_candidates=917"
       ]
     },
     "unserious": {
@@ -342,7 +342,7 @@
     },
     "countries": {
       "target": "1,000 per detected Spotify regional market (76 detected this run)",
-      "materialized_rows": 75245,
+      "materialized_rows": 75244,
       "complete": false,
       "builder_revision": "parallel-workers-v1",
       "metric_coverage": {
