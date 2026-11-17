@@ -258,7 +258,7 @@
     },
     "children_childhood": {
       "target": 10000,
-      "materialized_rows": 5648,
+      "materialized_rows": 5680,
       "complete": false,
       "builder_revision": "parallel-workers-v1",
       "metric_coverage": {},
@@ -266,7 +266,7 @@
         "Quebec age-0-12 childhood scope; observation window 2016-2026.",
         "Global generic children's-music rows are not accepted without curated Quebec/franchise exposure evidence.",
         "Primary discovery sources: Canadian Apple storefront and Canada-region YouTube Music child queries; no fabricated quota padding.",
-        "existing_qualified=4810; apple_candidates=3551; youtube_candidates=921"
+        "existing_qualified=4828; apple_candidates=3897; youtube_candidates=910"
       ]
     },
     "unserious": {
