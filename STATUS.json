@@ -37,11 +37,11 @@
   "datasets": {
     "anime": {
       "target": 10000,
-      "materialized_rows": 7671,
+      "materialized_rows": 7672,
       "complete": false,
       "builder_revision": "parallel-workers-v1",
       "metric_coverage": {
-        "anime_popularity_proxy": 3726,
+        "anime_popularity_proxy": 3727,
         "myanimelist_members_snapshot": 3332,
         "spotify_chart_streams_snapshot": 4,
         "spotify_popularity": 600,
@@ -50,7 +50,7 @@
       },
       "notes": [
         "Local-first two-pass pipeline: bulk AnimeThemes + bundled MAL theme data are scanned without per-anime network calls; Jikan is used only as a bounded post-pass for higher-ranked unresolved anime.",
-        "local_rows_before_jikan=7672; jikan_stop_reason=circuit_breaker_after_16_consecutive_failures"
+        "local_rows_before_jikan=7673; jikan_stop_reason=circuit_breaker_after_16_consecutive_failures"
       ]
     },
     "worldwide": {
@@ -168,11 +168,11 @@
     },
     "video_game_music": {
       "target": 10000,
-      "materialized_rows": 2731,
+      "materialized_rows": 2725,
       "complete": false,
       "builder_revision": "parallel-workers-v1",
       "metric_coverage": {
-        "listenbrainz_tag_popularity_percent": 2220,
+        "listenbrainz_tag_popularity_percent": 2214,
         "spotify_popularity": 511
       },
       "notes": [
@@ -180,7 +180,7 @@
         "Movie/television/anime soundtracks, licensed compilations, tribute releases, piano collections, music-box albums, cover albums, and generic remix albums are rejected.",
         "Each row records whether the game association came from an official soundtrack album, franchise artist, explicit track-title reference, high-confidence Wikidata match, or a ListenBrainz release-group game tag paired with an explicit soundtrack release.",
         "Selection preserves game breadth, then allows up to 25 source-backed recordings per game; final rows are sorted by popularity evidence.",
-        "ranked_games=10000; catalog_soundtrack_candidates=701; listenbrainz_candidates=3021; listenbrainz_added=2220; unique_games=432; fallback_unique=91; fallback_additional=290; rows=2731"
+        "ranked_games=10000; catalog_soundtrack_candidates=701; listenbrainz_candidates=3026; listenbrainz_added=2214; unique_games=424; fallback_unique=91; fallback_additional=290; rows=2725"
       ]
     },
     "internet_native": {
@@ -258,7 +258,7 @@
     },
     "children_childhood": {
       "target": 10000,
-      "materialized_rows": 5676,
+      "materialized_rows": 5666,
       "complete": false,
       "builder_revision": "parallel-workers-v1",
       "metric_coverage": {},
@@ -266,7 +266,7 @@
         "Quebec age-0-12 childhood scope; observation window 2016-2026.",
         "Global generic children's-music rows are not accepted without curated Quebec/franchise exposure evidence.",
         "Primary discovery sources: Canadian Apple storefront and Canada-region YouTube Music child queries; no fabricated quota padding.",
-        "existing_qualified=4832; apple_candidates=3494; youtube_candidates=909"
+        "existing_qualified=4833; apple_candidates=3845; youtube_candidates=901"
       ]
     },
     "unserious": {
@@ -304,11 +304,11 @@
     },
     "vocaloid": {
       "target": "every VocaDB Original voice-synth song with a resolved official Original YouTube PV, ordered by views",
-      "materialized_rows": 238766,
+      "materialized_rows": 238770,
       "complete": false,
       "builder_revision": "parallel-workers-v1",
       "metric_coverage": {
-        "youtube_views": 238766
+        "youtube_views": 238770
       },
       "notes": [
         "VocaDB-only classification and metadata; official YouTube Data API view counts only.",
