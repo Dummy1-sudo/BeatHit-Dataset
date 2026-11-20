@@ -258,7 +258,7 @@
     },
     "children_childhood": {
       "target": 10000,
-      "materialized_rows": 5666,
+      "materialized_rows": 5686,
       "complete": false,
       "builder_revision": "parallel-workers-v1",
       "metric_coverage": {},
@@ -266,7 +266,7 @@
         "Quebec age-0-12 childhood scope; observation window 2016-2026.",
         "Global generic children's-music rows are not accepted without curated Quebec/franchise exposure evidence.",
         "Primary discovery sources: Canadian Apple storefront and Canada-region YouTube Music child queries; no fabricated quota padding.",
-        "existing_qualified=4833; apple_candidates=3845; youtube_candidates=901"
+        "existing_qualified=4837; apple_candidates=3818; youtube_candidates=911"
       ]
     },
     "unserious": {
@@ -317,7 +317,7 @@
         "Producer/composer credit takes precedence over simultaneous human-vocalist roles, preventing instrumentalists from being promoted to main artist.",
         "Official YouTube statistics and the exhaustive VocaDB scan are checkpointed; a quota-limited rerun resumes with unresolved IDs instead of repeating the full lookup.",
         "No Spotify matching, title collision matching, remix, mashup, cover, remaster, MusicPV entry, reprint, or third-party view-count fallback.",
-        "preserved_original_pv_rows=238766; vocadb_exhaustive=True; unresolved_youtube_video_ids=25"
+        "preserved_original_pv_rows=238770; vocadb_exhaustive=True; unresolved_youtube_video_ids=25"
       ]
     },
     "kpop": {
@@ -435,7 +435,7 @@
       "builder_revision": "parallel-workers-v1",
       "metric_coverage": {},
       "notes": [
-        "{\"games_scanned\": 3162, \"master_games\": 3162, \"materialized_game_lists\": 2487, \"unmatched_games\": 675, \"general_vgm_rows_preserved\": 2731, \"processed_this_run\": 0}"
+        "{\"games_scanned\": 3162, \"master_games\": 3162, \"materialized_game_lists\": 2487, \"unmatched_games\": 675, \"general_vgm_rows_preserved\": 2725, \"processed_this_run\": 0}"
       ]
     },
     "vocaloid_covers": {
