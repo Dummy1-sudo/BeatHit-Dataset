@@ -41,8 +41,8 @@
       "complete": false,
       "builder_revision": "parallel-workers-v1",
       "metric_coverage": {
-        "anime_popularity_proxy": 3726,
-        "myanimelist_members_snapshot": 3333,
+        "anime_popularity_proxy": 3725,
+        "myanimelist_members_snapshot": 3334,
         "spotify_chart_streams_snapshot": 4,
         "spotify_popularity": 600,
         "spotify_streams": 5,
@@ -258,7 +258,7 @@
     },
     "children_childhood": {
       "target": 10000,
-      "materialized_rows": 5660,
+      "materialized_rows": 5642,
       "complete": false,
       "builder_revision": "parallel-workers-v1",
       "metric_coverage": {},
@@ -266,7 +266,7 @@
         "Quebec age-0-12 childhood scope; observation window 2016-2026.",
         "Global generic children's-music rows are not accepted without curated Quebec/franchise exposure evidence.",
         "Primary discovery sources: Canadian Apple storefront and Canada-region YouTube Music child queries; no fabricated quota padding.",
-        "existing_qualified=4861; apple_candidates=3556; youtube_candidates=904"
+        "existing_qualified=4864; apple_candidates=3833; youtube_candidates=910"
       ]
     },
     "unserious": {
